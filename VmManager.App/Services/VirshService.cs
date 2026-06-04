@@ -57,7 +57,8 @@ namespace VmManager.Services
                         var pidFile = $"/var/run/libvirt/qemu/{name}.pid";
                         var elapsed = _ssh.RunSudoCommand($"cat {pidFile} 2>/dev/null | xargs -I{{}} ps -o etimes= -p {{}} 2>/dev/null").Trim();
                         if (long.TryParse(elapsed, out var seconds))
-                            vm.Uptime = FormatUptime(seconds);
+                            // Store the absolute start time; the UI ticks uptime locally from this.
+                            vm.StartedAtUtc = DateTime.UtcNow.AddSeconds(-seconds);
                     }
                 }
                 catch
@@ -95,16 +96,6 @@ namespace VmManager.Services
                         break;
                 }
             }
-        }
-
-        private static string FormatUptime(long totalSeconds)
-        {
-            var ts = TimeSpan.FromSeconds(totalSeconds);
-            if (ts.TotalDays >= 1)
-                return $"{(int)ts.TotalDays}d {ts.Hours}h {ts.Minutes}m";
-            if (ts.TotalHours >= 1)
-                return $"{ts.Hours}h {ts.Minutes}m";
-            return $"{ts.Minutes}m {ts.Seconds}s";
         }
 
         private static string FormatKiB(string value)

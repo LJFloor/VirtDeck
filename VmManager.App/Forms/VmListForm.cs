@@ -7,7 +7,8 @@ namespace VmManager.Forms
     {
         private readonly SshConnectionManager _ssh;
         private readonly VirshService _virsh;
-        private readonly System.Windows.Forms.Timer _refreshTimer;
+        private readonly System.Windows.Forms.Timer _refreshTimer;   // periodic SSH refresh (state/resources)
+        private readonly System.Windows.Forms.Timer _tickTimer;      // local 1s uptime tick (no SSH)
         private readonly List<IsoHttpServer> _isoServers = new(); // host ISO streams, alive for the session
 
         public VmListForm(SshConnectionManager ssh)
@@ -21,12 +22,16 @@ namespace VmManager.Forms
 
             _refreshTimer = new System.Windows.Forms.Timer { Interval = 30000 };
             _refreshTimer.Tick += async (_, _) => await RefreshVmList();
+
+            _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _tickTimer.Tick += (_, _) => TickUptimes();
         }
 
         private async void VmListForm_Load(object sender, EventArgs e)
         {
             await RefreshVmList();
             _refreshTimer.Start();
+            _tickTimer.Start();
         }
 
         private async void btnRefresh_Click(object sender, EventArgs e) => await RefreshVmList();
@@ -78,7 +83,7 @@ namespace VmManager.Forms
                 item.SubItems.Add(vm.State);
                 item.SubItems.Add(vm.VCpus.ToString());
                 item.SubItems.Add(vm.Memory);
-                item.SubItems.Add(vm.Uptime);
+                item.SubItems.Add(FormatUptime(vm.StartedAtUtc));
                 item.Tag = vm;
                 ApplyStateColor(item, vm.State);
                 lvVms.Items.Add(item);
@@ -93,9 +98,31 @@ namespace VmManager.Forms
             item.SubItems[1].Text = vm.State;
             item.SubItems[2].Text = vm.VCpus.ToString();
             item.SubItems[3].Text = vm.Memory;
-            item.SubItems[4].Text = vm.Uptime;
+            item.SubItems[4].Text = FormatUptime(vm.StartedAtUtc);
             item.Tag = vm;
             ApplyStateColor(item, vm.State);
+        }
+
+        /// <summary>Re-renders the Uptime cell of each row from its stored start time — no SSH, selection-safe.</summary>
+        private void TickUptimes()
+        {
+            foreach (ListViewItem item in lvVms.Items)
+            {
+                if (item.Tag is not VmInfo vm || vm.StartedAtUtc is null) continue;
+                var text = FormatUptime(vm.StartedAtUtc);
+                if (item.SubItems[4].Text != text)
+                    item.SubItems[4].Text = text;
+            }
+        }
+
+        private static string FormatUptime(DateTime? startedUtc)
+        {
+            if (startedUtc is not { } t) return "";
+            var ts = DateTime.UtcNow - t;
+            if (ts < TimeSpan.Zero) ts = TimeSpan.Zero;
+            if (ts.TotalDays >= 1) return $"{(int)ts.TotalDays}d {ts.Hours}h {ts.Minutes}m";
+            if (ts.TotalHours >= 1) return $"{ts.Hours}h {ts.Minutes}m {ts.Seconds}s";
+            return $"{ts.Minutes}m {ts.Seconds}s";
         }
 
         private static void ApplyStateColor(ListViewItem item, string state)
@@ -242,6 +269,8 @@ namespace VmManager.Forms
             _virsh.VmsChanged -= OnVmsChanged;
             _refreshTimer.Stop();
             _refreshTimer.Dispose();
+            _tickTimer.Stop();
+            _tickTimer.Dispose();
             foreach (var s in _isoServers) s.Dispose();
         }
     }
