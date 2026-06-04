@@ -220,6 +220,8 @@ namespace VmManager.Forms
                 var it = new ListViewItem(op.Target);
                 it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
                 it.SubItems.Add(op.Bus);
+                bool hasSize = op.Kind == "qcow2" || (op.Kind == "zvol" && op.CreateZvol);
+                it.SubItems.Add(hasSize ? $"{op.SizeGiB} GiB" : "");
                 it.SubItems.Add(op.Source);
                 it.SubItems.Add(op.IsCdrom ? "" : DriverDesc(op.Format, op.Cache, op.Io, op.Discard));
                 it.Tag = op;
