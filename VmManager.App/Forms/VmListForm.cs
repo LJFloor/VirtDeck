@@ -125,6 +125,7 @@ namespace VmManager.Forms
             menuForceStop.Enabled = isRunning;
             menuReboot.Enabled = isRunning;
             menuEdit.Enabled = true;        // always openable; read-only while the VM is running
+            menuDelete.Enabled = isStopped; // delete only a shut-off VM
         }
 
         private async void menuStart_Click(object sender, EventArgs e) =>
@@ -176,6 +177,56 @@ namespace VmManager.Forms
             await RefreshVmList();
             if (wiz.CreatedVmName is { } name)
                 new VmConsoleForm(_ssh, _virsh, name).Show(); // create + start + console
+        }
+
+        private async void menuDelete_Click(object sender, EventArgs e)
+        {
+            if (lvVms.SelectedItems.Count == 0) return;
+            var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
+
+            List<DiskInfo> fileDisks;
+            try
+            {
+                var cfg = await Task.Run(() => _virsh.GetVmConfig(vm.Name));
+                fileDisks = cfg.Disks
+                    .Where(d => !d.IsCdrom && d.SourceType == "file" && d.Source.Length > 0)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Couldn't read the VM's disks:\n{ex.Message}", "Delete VM",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using var dlg = new DeleteVmDialog(vm.Name, fileDisks);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            var files = dlg.FilesToDelete;
+
+            string? undefineError = null;
+            var fileErrors = new List<string>();
+            await Task.Run(() =>
+            {
+                try { _virsh.UndefineVm(vm.Name); }
+                catch (Exception ex) { undefineError = ex.Message; return; }
+                foreach (var f in files)
+                {
+                    try { _virsh.DeleteFile(f); }
+                    catch (Exception ex) { fileErrors.Add($"{f}: {ex.Message}"); }
+                }
+            });
+
+            if (undefineError != null)
+            {
+                MessageBox.Show(this, $"Failed to delete VM:\n{undefineError}", "Delete VM",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (fileErrors.Count > 0)
+                MessageBox.Show(this, "VM deleted, but some files could not be removed:\n\n" + string.Join("\n", fileErrors),
+                    "Delete VM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+            await RefreshVmList();
         }
 
         private void OpenConsole()

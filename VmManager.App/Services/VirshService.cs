@@ -313,6 +313,17 @@ namespace VmManager.Services
             _ssh.RunSudoCommand(cmd);
         }
 
+        /// <summary>Removes the VM definition (and its nvram/snapshots/managed-save metadata). Storage is left untouched.</summary>
+        public void UndefineVm(string name) =>
+            _ssh.RunSudoCommand($"virsh undefine {name} --nvram --snapshots-metadata --managed-save");
+
+        /// <summary>Deletes a file on the host (base64'd path to dodge shell quoting). Used to remove disk images.</summary>
+        public void DeleteFile(string path)
+        {
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+            _ssh.RunSudoCommand($"p=$(echo {b64} | base64 -d); rm -f -- \"$p\"");
+        }
+
         // ---- Storage -------------------------------------------------------
 
         public void CreateQcow2(string path, int sizeGiB) =>
