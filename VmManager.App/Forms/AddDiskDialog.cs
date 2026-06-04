@@ -4,10 +4,15 @@ using VmManager.Services;
 
 namespace VmManager.Forms
 {
-    /// <summary>Builds a <see cref="DiskAddOp"/>: new qcow2 file, ZFS volume, or CD-ROM.</summary>
+    /// <summary>Builds a <see cref="DiskAddOp"/>: new qcow2 file, existing/new ZFS volume, or CD-ROM.</summary>
     public partial class AddDiskDialog : Form
     {
+        private const string CreateZvolItem = "➕  Create new ZVOL…";
         private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
+        // A zvol name is pool[/dataset]+/name — at least one slash, ZFS-legal characters only.
+        private static readonly Regex ZvolNameRegex =
+            new(@"^[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)+$");
+
         private readonly VirshService _virsh;
         private readonly string _vmName;
 
@@ -26,23 +31,32 @@ namespace VmManager.Forms
             UpdateMode();
             try
             {
-                var zvols = await Task.Run(() => _virsh.ListZvols());
+                var (zvols, datasets) = await Task.Run(
+                    () => (_virsh.ListZvols(), _virsh.ListZfsDatasets()));
+
+                if (datasets.Count == 0)
+                {
+                    // No ZFS pool/datasets → cannot pick or create a zvol. Keep the modal usable.
+                    rdoZvol.Enabled = false;
+                    toolTip.SetToolTip(rdoZvol, "No ZFS datasets available on this host.");
+                    return;
+                }
+
+                var src = new AutoCompleteStringCollection();
+                src.AddRange(datasets.ToArray());
+                txtNewVol.AutoCompleteCustomSource = src;
+                // Seed the name box with the most-used dataset so the user just appends a name.
+                txtNewVol.Text = datasets[0] + "/";
+
                 cboZvol.Items.Clear();
+                cboZvol.Items.Add(CreateZvolItem);
                 foreach (var z in zvols) cboZvol.Items.Add(z);
-                if (cboZvol.Items.Count > 0)
-                {
-                    cboZvol.SelectedIndex = 0;
-                }
-                else
-                {
-                    rdoZvol.Enabled = false; // no zvols / zfs absent — keep the modal usable
-                    toolTip.SetToolTip(rdoZvol, "No ZFS volumes available on this host.");
-                }
+                cboZvol.SelectedIndex = zvols.Count > 0 ? 1 : 0; // existing if any, else the create entry
             }
             catch
             {
                 rdoZvol.Enabled = false;
-                toolTip.SetToolTip(rdoZvol, "No ZFS volumes available on this host.");
+                toolTip.SetToolTip(rdoZvol, "No ZFS datasets available on this host.");
             }
         }
 
@@ -51,12 +65,16 @@ namespace VmManager.Forms
         private void UpdateMode()
         {
             bool qcow2 = rdoQcow2.Checked, zvol = rdoZvol.Checked, cdrom = rdoCdrom.Checked;
+            bool createZvol = zvol && cboZvol.SelectedItem is string; // the sentinel item
 
             lblPath.Visible = txtPath.Visible = qcow2 || cdrom;
             lblPath.Text = cdrom ? "ISO path:" : "Path:";
             lblZvol.Visible = cboZvol.Visible = zvol;
 
             lblSize.Visible = nudSize.Visible = lblSizeUnit.Visible = qcow2;
+
+            lblNewVol.Visible = txtNewVol.Visible = createZvol;
+            lblNewSize.Visible = nudNewSize.Visible = lblNewSizeUnit.Visible = createZvol;
 
             // CD-ROM rides a fixed optical bus (sata); data disks let you pick.
             lblBus.Visible = cboBus.Visible = !cdrom;
@@ -68,19 +86,27 @@ namespace VmManager.Forms
 
             if (rdoZvol.Checked)
             {
-                if (cboZvol.SelectedItem is not ZvolEntry z)
+                if (cboZvol.SelectedItem is string) // "Create new ZVOL…"
+                {
+                    var name = txtNewVol.Text.Trim();
+                    if (!ZvolNameRegex.IsMatch(name))
+                    {
+                        Warn("Enter a ZFS volume name like pool/dataset/name.");
+                        return;
+                    }
+                    StampZvol(op, name);
+                    op.CreateZvol = true;
+                    op.SizeGiB = (int)nudNewSize.Value;
+                }
+                else if (cboZvol.SelectedItem is ZvolEntry z)
+                {
+                    StampZvol(op, z.Name);
+                }
+                else
                 {
                     Warn("Select a ZFS volume.");
                     return;
                 }
-                // zvols are raw block devices — tuned for direct host I/O.
-                op.Kind = "zvol";
-                op.SourceType = "block";
-                op.Format = "raw";
-                op.Cache = "none";
-                op.Io = "native";
-                op.Discard = "unmap";
-                op.Source = "/dev/zvol/" + z.Name;
             }
             else
             {
@@ -110,6 +136,18 @@ namespace VmManager.Forms
             Result = op;
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        /// <summary>zvols are raw block devices tuned for direct host I/O.</summary>
+        private static void StampZvol(DiskAddOp op, string zvolName)
+        {
+            op.Kind = "zvol";
+            op.SourceType = "block";
+            op.Format = "raw";
+            op.Cache = "none";
+            op.Io = "native";
+            op.Discard = "unmap";
+            op.Source = "/dev/zvol/" + zvolName;
         }
 
         private void Warn(string msg) =>

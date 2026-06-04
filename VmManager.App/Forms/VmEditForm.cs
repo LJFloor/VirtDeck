@@ -12,6 +12,7 @@ namespace VmManager.Forms
     {
         private readonly VirshService _virsh;
         private readonly string _vmName;
+        private readonly bool _readOnly;
         private VmConfig? _original;
 
         // Pending device changes (applied on OK)
@@ -30,12 +31,13 @@ namespace VmManager.Forms
             ("hd", "Hard disk"), ("cdrom", "CD-ROM"), ("network", "Network (PXE)")
         };
 
-        public VmEditForm(VirshService virsh, string vmName)
+        public VmEditForm(VirshService virsh, string vmName, bool readOnly = false)
         {
             _virsh = virsh;
             _vmName = vmName;
+            _readOnly = readOnly;
             InitializeComponent();
-            Text = $"Edit — {vmName}";
+            Text = readOnly ? $"Edit — {vmName} (running — read-only)" : $"Edit — {vmName}";
         }
 
         private sealed class BootItem
@@ -53,7 +55,8 @@ namespace VmManager.Forms
                 var cfg = await Task.Run(() => _virsh.GetVmConfig(_vmName));
                 _original = cfg;
                 Populate(cfg);
-                btnOk.Enabled = true;
+                if (_readOnly) ApplyReadOnly();
+                else btnOk.Enabled = true;
             }
             catch (Exception ex)
             {
@@ -62,6 +65,27 @@ namespace VmManager.Forms
                 DialogResult = DialogResult.Cancel;
                 Close();
             }
+        }
+
+        /// <summary>Running VM: show the config but disable every input and Save. Cancel stays enabled.</summary>
+        private void ApplyReadOnly()
+        {
+            txtName.Enabled = false;
+            nudVcpus.Enabled = false;
+            nudMemMiB.Enabled = false;
+            chkAutostart.Enabled = false;
+            clbBoot.Enabled = false;
+            btnBootUp.Enabled = false;
+            btnBootDown.Enabled = false;
+            btnAddDisk.Enabled = false;
+            btnEditDisk.Enabled = false;
+            btnChangeIso.Enabled = false;
+            btnEject.Enabled = false;
+            btnRemoveDisk.Enabled = false;
+            btnAddNic.Enabled = false;
+            btnRemoveNic.Enabled = false;
+            btnOk.Enabled = false;
+            lblNote.Text = "The VM is running — configuration is read-only. Shut it down to make changes.";
         }
 
         private void Populate(VmConfig cfg)
@@ -403,6 +427,12 @@ namespace VmManager.Forms
                     _virsh.AttachDataDisk(_vmName, op.ToDiskInfo());
                     break;
                 case "zvol":
+                    if (op.CreateZvol)
+                    {
+                        const string prefix = "/dev/zvol/";
+                        var name = op.Source.StartsWith(prefix) ? op.Source[prefix.Length..] : op.Source;
+                        _virsh.CreateZvol(name, op.SizeGiB);
+                    }
                     _virsh.AttachDataDisk(_vmName, op.ToDiskInfo());
                     break;
                 case "cdrom":

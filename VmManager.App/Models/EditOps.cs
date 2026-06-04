@@ -16,6 +16,9 @@ namespace VmManager.Models
         public string Io { get; set; } = string.Empty;
         public string Discard { get; set; } = string.Empty;
 
+        // When set, create a new ZFS volume (zfs create -V {SizeGiB}G {zvol name}) before attaching.
+        public bool CreateZvol { get; set; }
+
         public bool IsCdrom => Kind == "cdrom";
 
         /// <summary>Carrier for VirshService.BuildDiskXml — same fields the editor renders/applies.</summary>

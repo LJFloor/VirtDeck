@@ -366,6 +366,21 @@ namespace VmManager.Services
             catch { return new(); }
         }
 
+        /// <summary>Existing ZFS filesystem datasets — the valid parents for a new zvol; empty if ZFS is absent.</summary>
+        public List<string> ListZfsDatasets()
+        {
+            try
+            {
+                return _ssh.RunSudoCommand("zfs list -H -o name -t filesystem 2>/dev/null")
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            }
+            catch { return new(); }
+        }
+
+        public void CreateZvol(string name, int sizeGiB) =>
+            _ssh.RunSudoCommand($"zfs create -V {sizeGiB}G {name}");
+
         // ---- Network -------------------------------------------------------
 
         public void AttachNic(string vm, string type, string source, string model) =>

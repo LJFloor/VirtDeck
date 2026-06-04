@@ -123,7 +123,7 @@ namespace VmManager.Forms
             menuStop.Enabled = isRunning;
             menuForceStop.Enabled = isRunning;
             menuReboot.Enabled = isRunning;
-            menuEdit.Enabled = isStopped;   // editing is offline-only
+            menuEdit.Enabled = true;        // always openable; read-only while the VM is running
         }
 
         private async void menuStart_Click(object sender, EventArgs e) =>
@@ -161,7 +161,8 @@ namespace VmManager.Forms
         {
             if (lvVms.SelectedItems.Count == 0) return;
             var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
-            using var edit = new VmEditForm(_virsh, vm.Name);
+            bool readOnly = vm.State != "shut off"; // can only change config while shut off
+            using var edit = new VmEditForm(_virsh, vm.Name, readOnly);
             if (edit.ShowDialog(this) == DialogResult.OK)
                 await RefreshVmList();
         }
