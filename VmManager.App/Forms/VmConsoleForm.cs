@@ -418,6 +418,24 @@ namespace VmManager.Forms
             try { text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty; }
             catch { return; }
             if (string.IsNullOrEmpty(text)) return;
+
+            // A newline is typed as Enter — warn it may run a command / submit a form in the guest.
+            if (text.Contains('\n'))
+            {
+                var page = new TaskDialogPage
+                {
+                    Caption = "Type Clipboard",
+                    Heading = "The clipboard contains line breaks",
+                    Text = "Typing them presses Enter, which may run a command or submit a form in the guest.",
+                    Icon = TaskDialogIcon.Warning,
+                };
+                var pasteAnyway = new TaskDialogButton("Paste anyway");
+                page.Buttons.Add(pasteAnyway);
+                page.Buttons.Add(TaskDialogButton.Cancel);
+                page.DefaultButton = TaskDialogButton.Cancel;
+                if (TaskDialog.ShowDialog(this, page) != pasteAnyway) return;
+            }
+
             // Off the UI thread: synthesize keystrokes into the guest (best-effort ASCII; layout-dependent).
             new Thread(() => TypeOutText(inputs, text)) { IsBackground = true, Name = "spice-type-clipboard" }.Start();
         }
