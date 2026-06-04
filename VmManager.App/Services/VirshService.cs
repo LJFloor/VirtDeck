@@ -27,75 +27,50 @@ namespace VmManager.Services
             VmsChanged?.Invoke();
         }
 
+        // One server-side loop over all domains in a single SSH round-trip (base64'd to dodge quoting),
+        // emitting tab-separated rows: name, state, uuid, cpus, maxmem, etimes. Per-VM dominfo over SSH
+        // was the list's main latency source.
+        private const string ListVmsScript =
+            "virsh list --all --name | grep . | while IFS= read -r n; do\n" +
+            "  info=$(virsh dominfo \"$n\" 2>/dev/null)\n" +
+            "  state=$(printf '%s\\n' \"$info\" | sed -n 's/^State: *//p')\n" +
+            "  uuid=$(printf '%s\\n' \"$info\" | sed -n 's/^UUID: *//p')\n" +
+            "  cpus=$(printf '%s\\n' \"$info\" | sed -n 's/^CPU(s): *//p')\n" +
+            "  maxmem=$(printf '%s\\n' \"$info\" | sed -n 's/^Max memory: *//p')\n" +
+            "  et=\"\"\n" +
+            "  if [ \"$state\" = \"running\" ]; then\n" +
+            "    pid=$(cat /var/run/libvirt/qemu/\"$n\".pid 2>/dev/null)\n" +
+            "    if [ -n \"$pid\" ]; then et=$(ps -o etimes= -p \"$pid\" 2>/dev/null | tr -d ' '); fi\n" +
+            "  fi\n" +
+            "  printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$n\" \"$state\" \"$uuid\" \"$cpus\" \"$maxmem\" \"$et\"\n" +
+            "done";
+
         private List<VmInfo> FetchAllVms()
         {
-            var output = _ssh.RunSudoCommand("virsh list --all");
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(ListVmsScript));
+            var output = _ssh.RunSudoCommand($"echo {b64} | base64 -d | bash");
+
             var vms = new List<VmInfo>();
-            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in lines.Skip(2)) // skip header + separator
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                var trimmed = line.Trim();
-                if (string.IsNullOrEmpty(trimmed)) continue;
+                var f = line.Split('\t');
+                if (f.Length < 6 || string.IsNullOrWhiteSpace(f[0])) continue;
 
-                // Format: " Id   Name   State"
-                var parts = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3) continue;
-
-                var name = parts[1];
-                var state = string.Join(" ", parts.Skip(2));
-
-                var vm = new VmInfo { Name = name, State = state };
-
-                try
+                var vm = new VmInfo
                 {
-                    var domInfo = _ssh.RunSudoCommand($"virsh dominfo {name}");
-                    ParseDomInfo(domInfo, vm);
-
-                    if (state == "running")
-                    {
-                        var pidFile = $"/var/run/libvirt/qemu/{name}.pid";
-                        var elapsed = _ssh.RunSudoCommand($"cat {pidFile} 2>/dev/null | xargs -I{{}} ps -o etimes= -p {{}} 2>/dev/null").Trim();
-                        if (long.TryParse(elapsed, out var seconds))
-                            // Store the absolute start time; the UI ticks uptime locally from this.
-                            vm.StartedAtUtc = DateTime.UtcNow.AddSeconds(-seconds);
-                    }
-                }
-                catch
-                {
-                    // If dominfo fails, keep defaults
-                }
+                    Name = f[0],
+                    State = f[1],
+                    Uuid = f[2],
+                    Memory = FormatKiB(f[4]),
+                };
+                if (int.TryParse(f[3], out var cpus)) vm.VCpus = cpus;
+                if (vm.State == "running" && long.TryParse(f[5], out var seconds))
+                    // Store the absolute start time; the UI ticks uptime locally from this.
+                    vm.StartedAtUtc = DateTime.UtcNow.AddSeconds(-seconds);
 
                 vms.Add(vm);
             }
-
             return vms;
-        }
-
-        private void ParseDomInfo(string output, VmInfo vm)
-        {
-            foreach (var line in output.Split('\n'))
-            {
-                var colonIdx = line.IndexOf(':');
-                if (colonIdx < 0) continue;
-
-                var key = line[..colonIdx].Trim();
-                var value = line[(colonIdx + 1)..].Trim();
-
-                switch (key)
-                {
-                    case "UUID":
-                        vm.Uuid = value;
-                        break;
-                    case "CPU(s)":
-                        if (int.TryParse(value, out var cpus))
-                            vm.VCpus = cpus;
-                        break;
-                    case "Max memory":
-                        vm.Memory = FormatKiB(value);
-                        break;
-                }
-            }
         }
 
         private static string FormatKiB(string value)

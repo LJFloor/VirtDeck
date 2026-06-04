@@ -175,6 +175,7 @@ namespace VmManager.Forms
             try
             {
                 await action(vm.Name);
+                await RefreshVmList(); // reflect the new state immediately, don't wait for the 30s tick
             }
             catch (Exception ex)
             {
