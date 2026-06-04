@@ -20,6 +20,8 @@ namespace VmManager.Forms
         private ToolStripMenuItem useRawBitmapsItem;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel toolStripStatus;
+        private ToolStripProgressBar progressXfer;
+        private ToolStripButton btnCancelXfer;
 
         protected override void Dispose(bool disposing)
         {
@@ -48,6 +50,8 @@ namespace VmManager.Forms
             useRawBitmapsItem = new ToolStripMenuItem();
             statusStrip = new StatusStrip();
             toolStripStatus = new ToolStripStatusLabel();
+            progressXfer = new ToolStripProgressBar();
+            btnCancelXfer = new ToolStripButton();
 
             SuspendLayout();
 
@@ -55,13 +59,18 @@ namespace VmManager.Forms
             btnPower.Text = "Power";
             btnPower.ShowDropDownArrow = true;
             btnPower.AutoToolTip = false;
+            btnPower.Image = AppIcons.Get("control_power");
             menuStart.Text = "Start";
+            menuStart.Image = AppIcons.Get("control_play");
             menuStart.Click += menuStart_Click;
             menuShutdown.Text = "Shutdown (Graceful)";
+            menuShutdown.Image = AppIcons.Get("control_stop");
             menuShutdown.Click += menuShutdown_Click;
             menuForceStop.Text = "Force Stop";
+            menuForceStop.Image = AppIcons.Get("cancel");
             menuForceStop.Click += menuForceStop_Click;
             menuReboot.Text = "Reboot";
+            menuReboot.Image = AppIcons.Get("arrow_rotate_clockwise");
             menuReboot.Click += menuReboot_Click;
             btnPower.DropDownItems.AddRange(new ToolStripItem[] { menuStart, menuShutdown, menuForceStop, menuReboot });
 
@@ -69,7 +78,8 @@ namespace VmManager.Forms
             btnKeyboard.Text = "Keyboard";
             btnKeyboard.ShowDropDownArrow = true;
             btnKeyboard.AutoToolTip = false;
-            var ctrlAltDelItem = new ToolStripMenuItem("Send Ctrl + Alt + Delete");
+            btnKeyboard.Image = AppIcons.Get("keyboard");
+            var ctrlAltDelItem = new ToolStripMenuItem("Send Ctrl + Alt + Delete") { Image = AppIcons.Get("key") };
             ctrlAltDelItem.Click += btnCtrlAltDel_Click;
             btnKeyboard.DropDownItems.Add(ctrlAltDelItem);
 
@@ -77,7 +87,9 @@ namespace VmManager.Forms
             btnMouse.Text = "Mouse";
             btnMouse.ShowDropDownArrow = true;
             btnMouse.AutoToolTip = false;
+            btnMouse.Image = AppIcons.Get("mouse");
             showHostCursorItem.Text = "Show host cursor";
+            showHostCursorItem.Image = AppIcons.Get("cursor");
             showHostCursorItem.CheckOnClick = true;
             showHostCursorItem.ToolTipText =
                 "Show the Windows arrow instead of the VM's own cursor.\n" +
@@ -89,6 +101,9 @@ namespace VmManager.Forms
             btnDisplay.Text = "Display";
             btnDisplay.ShowDropDownArrow = true;
             btnDisplay.AutoToolTip = false;
+            btnDisplay.Image = AppIcons.Get("monitor");
+            useLzCompressionItem.Image = AppIcons.Get("image");
+            useRawBitmapsItem.Image = AppIcons.Get("images");
             useLzCompressionItem.Text = "Use LZ compression (low bandwidth)";
             useLzCompressionItem.ToolTipText =
                 "Set this VM's SPICE image compression to 'lz' — low bandwidth and decodable\n" +
@@ -104,12 +119,14 @@ namespace VmManager.Forms
             // Fit window
             btnFitWindow.Text = "Fit Window";
             btnFitWindow.AutoToolTip = false;
+            btnFitWindow.Image = AppIcons.Get("arrow_out");
             btnFitWindow.Click += FitWindow_Click;
 
             // Log
             btnLog = new ToolStripButton();
             btnLog.Text = "Log";
             btnLog.AutoToolTip = false;
+            btnLog.Image = AppIcons.Get("report");
             btnLog.Alignment = ToolStripItemAlignment.Right;
             btnLog.Click += (_, _) => LogForm.ShowLog();
 
@@ -124,7 +141,19 @@ namespace VmManager.Forms
             toolStripStatus.Text = "Initializing...";
             toolStripStatus.Spring = true;
             toolStripStatus.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            statusStrip.Items.Add(toolStripStatus);
+
+            progressXfer.Visible = false;
+            progressXfer.Maximum = 100;
+            progressXfer.Size = new Size(160, 16);
+
+            btnCancelXfer.Visible = false;
+            btnCancelXfer.Text = "Cancel";
+            btnCancelXfer.Image = AppIcons.Get("stop");
+            btnCancelXfer.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            btnCancelXfer.ToolTipText = "Cancel the file transfer";
+            btnCancelXfer.Click += CancelXfer_Click;
+
+            statusStrip.Items.AddRange(new ToolStripItem[] { toolStripStatus, progressXfer, btnCancelXfer });
 
             // VmConsoleForm
             AutoScaleMode = AutoScaleMode.Font;

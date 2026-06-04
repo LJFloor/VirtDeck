@@ -41,6 +41,7 @@ namespace VmManager.Controls
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
             BackColor = Color.Black;
             TabStop = true;
+            AllowDrop = true;
 
             _repaintTimer = new System.Windows.Forms.Timer { Interval = 16 };
             _repaintTimer.Tick += RepaintTick;
@@ -172,6 +173,36 @@ namespace VmManager.Controls
             byte button = e.Delta > 0 ? SpiceConstants.MOUSE_BUTTON_UP : SpiceConstants.MOUSE_BUTTON_DOWN;
             _session?.Inputs?.SendMousePress(button, _buttonsState);
             _session?.Inputs?.SendMouseRelease(button, _buttonsState);
+        }
+
+        // ---- File drag & drop (client -> guest) ---------------------------
+
+        protected override void OnDragEnter(DragEventArgs e)
+        {
+            base.OnDragEnter(e);
+            bool ok = e.Data?.GetDataPresent(DataFormats.FileDrop) == true
+                      && _session?.AgentConnected == true;
+            e.Effect = ok ? DragDropEffects.Copy : DragDropEffects.None;
+        }
+
+        protected override void OnDragOver(DragEventArgs e)
+        {
+            base.OnDragOver(e);
+            bool ok = e.Data?.GetDataPresent(DataFormats.FileDrop) == true
+                      && _session?.AgentConnected == true;
+            e.Effect = ok ? DragDropEffects.Copy : DragDropEffects.None;
+        }
+
+        protected override void OnDragDrop(DragEventArgs e)
+        {
+            base.OnDragDrop(e);
+            if (_session == null) return;
+            if (e.Data?.GetData(DataFormats.FileDrop) is not string[] paths) return;
+            foreach (var p in paths)
+            {
+                try { if (System.IO.Directory.Exists(p)) continue; } catch { continue; }
+                _session.SendFile(p);
+            }
         }
 
         protected override void OnMouseLeave(EventArgs e)

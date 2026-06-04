@@ -12,11 +12,23 @@ namespace SpiceClient.Channels;
 public sealed class DisplayChannel : SpiceChannel
 {
     private readonly Dictionary<ulong, DecodedImage> _cache = new();
+    private readonly Dictionary<uint, StreamState> _streams = new();
 
     public DisplayChannel(SpiceSession session, string host, int port, uint connectionId, string password)
         : base(session, host, port, SpiceConstants.CHANNEL_DISPLAY, 0, connectionId, password)
     {
     }
+
+    // Advertise MJPEG video-stream support so the server streams high-motion regions
+    // (animations, video, window drags) as compact JPEG frames it can drop at the
+    // source, instead of flooding us with heavy incremental draws.
+    protected override uint[] ChannelCaps() => new[]
+    {
+        (1u << SpiceConstants.DISPLAY_CAP_SIZED_STREAM) |
+        (1u << SpiceConstants.DISPLAY_CAP_STREAM_REPORT) |
+        (1u << SpiceConstants.DISPLAY_CAP_MULTI_CODEC) |
+        (1u << SpiceConstants.DISPLAY_CAP_CODEC_MJPEG)
+    };
 
     protected override void OnLinked()
     {
@@ -69,8 +81,170 @@ public sealed class DisplayChannel : SpiceChannel
             case SpiceConstants.MSG_DISPLAY_INVAL_ALL_PIXMAPS:
                 _cache.Clear();
                 break;
-            // MODE / MARK / RESET / MONITORS_CONFIG / palette invals / streams /
-            // other draw ops: ignored for v1.
+            case SpiceConstants.MSG_DISPLAY_STREAM_CREATE:
+                HandleStreamCreate(payload);
+                break;
+            case SpiceConstants.MSG_DISPLAY_STREAM_DATA:
+                HandleStreamData(payload, sized: false);
+                break;
+            case SpiceConstants.MSG_DISPLAY_STREAM_DATA_SIZED:
+                HandleStreamData(payload, sized: true);
+                break;
+            case SpiceConstants.MSG_DISPLAY_STREAM_ACTIVATE_REPORT:
+                HandleStreamActivateReport(payload);
+                break;
+            case SpiceConstants.MSG_DISPLAY_STREAM_DESTROY:
+            {
+                var r = new SpiceReader(payload);
+                _streams.Remove(r.U32());
+                break;
+            }
+            case SpiceConstants.MSG_DISPLAY_STREAM_DESTROY_ALL:
+                _streams.Clear();
+                break;
+            // STREAM_CLIP: we don't clip the framebuffer; ignored.
+            // MODE / MARK / RESET / MONITORS_CONFIG / palette invals: ignored for v1.
+        }
+    }
+
+    // ---- Video streams (MJPEG) -----------------------------------------
+
+    private sealed class StreamState
+    {
+        public uint Id;
+        public byte Codec;
+        public uint SurfaceId;
+        public int DestLeft;
+        public int DestTop;
+
+        // Adaptive-rate report (enabled by STREAM_ACTIVATE_REPORT)
+        public bool ReportEnabled;
+        public uint UniqueId;
+        public uint MaxWindowSize;
+        public uint TimeoutMs;
+        public int NumFrames;
+        public int NumDrops;
+        public uint StartFrameMmTime;
+    }
+
+    private void HandleStreamCreate(byte[] payload)
+    {
+        var r = new SpiceReader(payload);
+        uint surfaceId = r.U32();
+        uint id = r.U32();
+        r.U8();                 // flags
+        byte codec = r.U8();
+        r.U64();                // stamp
+        r.U32();                // stream_width
+        r.U32();                // stream_height
+        r.U32();                // src_width
+        r.U32();                // src_height
+        var dest = ParseRect(r); // (clip follows; not needed)
+
+        _streams[id] = new StreamState
+        {
+            Id = id,
+            Codec = codec,
+            SurfaceId = surfaceId,
+            DestLeft = dest.Left,
+            DestTop = dest.Top,
+        };
+        if (codec != SpiceConstants.VIDEO_CODEC_TYPE_MJPEG)
+            Session.Log($"[display] unhandled stream codec {codec} (only MJPEG is supported)");
+    }
+
+    private void HandleStreamData(byte[] payload, bool sized)
+    {
+        var r = new SpiceReader(payload);
+        uint id = r.U32();
+        uint mmTime = r.U32();
+
+        int destLeft, destTop;
+        if (sized)
+        {
+            r.U32();                // width
+            r.U32();                // height
+            var dest = ParseRect(r);
+            destLeft = dest.Left;
+            destTop = dest.Top;
+        }
+        else if (_streams.TryGetValue(id, out var s0))
+        {
+            destLeft = s0.DestLeft;
+            destTop = s0.DestTop;
+        }
+        else
+        {
+            return; // no stream
+        }
+
+        int dataSize = (int)r.U32();
+        if (!_streams.TryGetValue(id, out var stream)) return;
+        if (stream.Codec != SpiceConstants.VIDEO_CODEC_TYPE_MJPEG) return;
+
+        long timeUntilDue = mmTime - Session.RelativeNow();
+
+        if (stream.SurfaceId == 0)
+        {
+            var jpeg = r.ReadBytes(Math.Min(dataSize, r.Remaining));
+            DecodedImage? img = null;
+            try { img = ImageDecoders.DecodeJpeg(jpeg); }
+            catch { /* corrupt frame; skip */ }
+
+            var fb = Session.Framebuffer;
+            if (img != null && fb != null)
+            {
+                lock (fb.SyncRoot)
+                    fb.BlitImage(img, 0, 0, destLeft, destTop, img.Width, img.Height);
+                Session.RaiseFrameDirty();
+            }
+        }
+
+        if (stream.ReportEnabled)
+            UpdateStreamReport(stream, mmTime, timeUntilDue);
+    }
+
+    private void HandleStreamActivateReport(byte[] payload)
+    {
+        var r = new SpiceReader(payload);
+        uint streamId = r.U32();
+        uint uniqueId = r.U32();
+        uint maxWindow = r.U32();
+        uint timeoutMs = r.U32();
+        if (!_streams.TryGetValue(streamId, out var stream)) return;
+        stream.ReportEnabled = true;
+        stream.UniqueId = uniqueId;
+        stream.MaxWindowSize = maxWindow;
+        stream.TimeoutMs = timeoutMs;
+        stream.NumFrames = 0;
+        stream.NumDrops = 0;
+        stream.StartFrameMmTime = 0;
+    }
+
+    // Mirrors display.js process_stream_data_report: report once the window or
+    // timeout elapses so the server can adapt the stream rate to our throughput.
+    private void UpdateStreamReport(StreamState stream, uint mmTime, long timeUntilDue)
+    {
+        stream.NumFrames++;
+        if (stream.StartFrameMmTime == 0) stream.StartFrameMmTime = mmTime;
+
+        if (stream.NumFrames > stream.MaxWindowSize ||
+            (mmTime - stream.StartFrameMmTime) > stream.TimeoutMs)
+        {
+            var w = new SpiceWriter(32);
+            w.U32(stream.Id);
+            w.U32(stream.UniqueId);
+            w.U32(stream.StartFrameMmTime);
+            w.U32(mmTime);                                   // end_frame_mm_time
+            w.U32((uint)stream.NumFrames);
+            w.U32((uint)stream.NumDrops);
+            w.U32(unchecked((uint)(int)timeUntilDue));       // last_frame_delay
+            w.U32(unchecked((uint)-1));                      // audio_delay (n/a)
+            SendMessage(SpiceConstants.MSGC_DISPLAY_STREAM_REPORT, w.ToArray());
+
+            stream.StartFrameMmTime = 0;
+            stream.NumFrames = 0;
+            stream.NumDrops = 0;
         }
     }
 

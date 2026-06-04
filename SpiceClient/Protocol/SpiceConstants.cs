@@ -74,9 +74,18 @@ public static class SpiceConstants
     public const int VD_AGENT_MAX_DATA_SIZE = 2048;
     public const uint VD_AGENT_MONITORS_CONFIG = 2;
     public const uint VD_AGENT_ANNOUNCE_CAPABILITIES = 6;
+    public const uint VD_AGENT_FILE_XFER_START = 10;
+    public const uint VD_AGENT_FILE_XFER_STATUS = 11;
+    public const uint VD_AGENT_FILE_XFER_DATA = 12;
     public const int VD_AGENT_CAP_MOUSE_STATE = 0;
     public const int VD_AGENT_CAP_MONITORS_CONFIG = 1;
     public const int VD_AGENT_CAP_REPLY = 2;
+
+    // File-transfer status results
+    public const uint VD_AGENT_FILE_XFER_STATUS_CAN_SEND_DATA = 0;
+    public const uint VD_AGENT_FILE_XFER_STATUS_CANCELLED = 1;
+    public const uint VD_AGENT_FILE_XFER_STATUS_ERROR = 2;
+    public const uint VD_AGENT_FILE_XFER_STATUS_SUCCESS = 3;
 
     // Display channel (server -> client)
     public const ushort MSG_DISPLAY_MODE = 101;
@@ -101,9 +110,21 @@ public static class SpiceConstants
     public const ushort MSG_DISPLAY_SURFACE_DESTROY = 315;
     public const ushort MSG_DISPLAY_STREAM_DATA_SIZED = 316;
     public const ushort MSG_DISPLAY_MONITORS_CONFIG = 317;
+    public const ushort MSG_DISPLAY_STREAM_ACTIVATE_REPORT = 319;
 
     // Display channel (client -> server)
     public const ushort MSGC_DISPLAY_INIT = 101;
+    public const ushort MSGC_DISPLAY_STREAM_REPORT = 102;
+
+    // Display channel capabilities
+    public const int DISPLAY_CAP_SIZED_STREAM = 0;
+    public const int DISPLAY_CAP_STREAM_REPORT = 4;
+    public const int DISPLAY_CAP_MULTI_CODEC = 8;
+    public const int DISPLAY_CAP_CODEC_MJPEG = 9;
+
+    // Video stream codecs
+    public const byte VIDEO_CODEC_TYPE_MJPEG = 1;
+    public const byte VIDEO_CODEC_TYPE_VP8 = 2;
 
     // Inputs channel (server -> client)
     public const ushort MSG_INPUTS_INIT = 101;

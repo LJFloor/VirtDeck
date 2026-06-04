@@ -68,6 +68,9 @@ namespace VmManager.Forms
             btnConnect.Text = "Connect";
             btnConnect.Location = new Point(120, 140);
             btnConnect.Size = new Size(220, 30);
+            btnConnect.Image = AppIcons.Get("connect");
+            btnConnect.ImageAlign = ContentAlignment.MiddleLeft;
+            btnConnect.TextImageRelation = TextImageRelation.ImageBeforeText;
             btnConnect.Click += btnConnect_Click;
 
             // statusStrip

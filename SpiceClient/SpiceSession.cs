@@ -28,6 +28,9 @@ public sealed class SpiceSession : IDisposable
     /// <summary>When true, channels log every received message (very chatty). Default off.</summary>
     public volatile bool VerboseLogging;
 
+    /// <summary>True once the guest agent (vdagent) is connected — required for resize and file transfer.</summary>
+    public bool AgentConnected { get; internal set; }
+
     // Events (raised from channel threads)
     public event Action<int, int>? ResolutionChanged;
     public event Action? FrameDirty;
@@ -38,6 +41,12 @@ public sealed class SpiceSession : IDisposable
     public event Action<string>? Disconnected;
     public event Action<string>? LogMessage;
     public event Action<string>? StatusMessage;
+
+    // File transfer (client -> guest)
+    public event Action<string>? FileStarted;
+    public event Action<string, long, long>? FileProgress;
+    public event Action<string>? FileCompleted;
+    public event Action<string, string>? FileFailed;
 
     private readonly List<SpiceChannel> _channels = new();
     private MainChannel? _main;
@@ -85,6 +94,32 @@ public sealed class SpiceSession : IDisposable
 
     /// <summary>Ask the guest agent to change resolution (no-op if the agent isn't connected).</summary>
     public void RequestResize(int width, int height) => _main?.SendMonitorsConfig(width, height);
+
+    /// <summary>Send a local file to the guest (drops it in the guest, via vdagent file transfer).</summary>
+    public void SendFile(string path) => _main?.SendFile(path);
+
+    /// <summary>Cancel all in-progress file transfers.</summary>
+    public void CancelFileTransfers() => _main?.CancelFileTransfers();
+
+    internal void FileTransferStarted(string name) => FileStarted?.Invoke(name);
+    internal void FileTransferProgress(string name, long sent, long total) => FileProgress?.Invoke(name, sent, total);
+    internal void FileTransferCompleted(string name) => FileCompleted?.Invoke(name);
+    internal void FileTransferFailed(string name, string error) => FileFailed?.Invoke(name, error);
+
+    // ---- Multimedia clock (for video stream timing/reports) ------------
+
+    private long _mmTimeBase;
+    private readonly System.Diagnostics.Stopwatch _mmClock = new();
+
+    internal void SyncMultimediaTime(uint mmTime)
+    {
+        _mmTimeBase = mmTime;
+        _mmClock.Restart();
+    }
+
+    /// <summary>Server multimedia time (ms) shifted to match local elapsed time.</summary>
+    public long RelativeNow() =>
+        _mmTimeBase + (_mmClock.IsRunning ? _mmClock.ElapsedMilliseconds : 0);
 
     // ---- Called by DisplayChannel --------------------------------------
 

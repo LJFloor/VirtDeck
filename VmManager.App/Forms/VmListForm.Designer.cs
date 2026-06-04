@@ -56,8 +56,10 @@ namespace VmManager.Forms
 
             // toolStrip
             btnRefresh.Text = "Refresh";
+            btnRefresh.Image = AppIcons.Get("arrow_refresh");
             btnRefresh.Click += btnRefresh_Click;
             btnLog.Text = "Log";
+            btnLog.Image = AppIcons.Get("report");
             btnLog.Alignment = ToolStripItemAlignment.Right;
             btnLog.Click += (_, _) => LogForm.ShowLog();
             toolStrip.Items.Add(btnRefresh);
@@ -65,14 +67,19 @@ namespace VmManager.Forms
 
             // contextMenu
             menuStart.Text = "Start";
+            menuStart.Image = AppIcons.Get("control_play");
             menuStart.Click += menuStart_Click;
             menuStop.Text = "Shutdown (Graceful)";
+            menuStop.Image = AppIcons.Get("control_stop");
             menuStop.Click += menuStop_Click;
             menuForceStop.Text = "Force Stop";
+            menuForceStop.Image = AppIcons.Get("cancel");
             menuForceStop.Click += menuForceStop_Click;
             menuReboot.Text = "Reboot";
+            menuReboot.Image = AppIcons.Get("arrow_rotate_clockwise");
             menuReboot.Click += menuReboot_Click;
             menuConsole.Text = "Open Console";
+            menuConsole.Image = AppIcons.Get("monitor");
             menuConsole.Click += menuConsole_Click;
             contextMenu.Items.AddRange(new ToolStripItem[] { menuStart, menuStop, menuForceStop, menuReboot, menuSep, menuConsole });
             contextMenu.Opening += contextMenu_Opening;

@@ -167,6 +167,10 @@ namespace VmManager.Forms
                 _session.LogMessage += SpiceLog.Log;
                 _session.Disconnected += OnSessionDisconnected;
                 _session.StatusMessage += OnSessionStatus;
+                _session.FileStarted += OnFileStarted;
+                _session.FileProgress += OnFileProgress;
+                _session.FileCompleted += OnFileCompleted;
+                _session.FileFailed += OnFileFailed;
 
                 displayControl.Attach(_session);
                 displayControl.Policy = showHostCursorItem.Checked
@@ -210,7 +214,71 @@ namespace VmManager.Forms
         {
             if (_closing) return;
             SpiceLog.Log($"[status] {message}");
-            try { BeginInvoke(() => { if (!_closing) toolStripStatus.Text = message; }); }
+            SetStatusAsync(message);
+        }
+
+        private void SetStatusAsync(string text)
+        {
+            if (_closing) return;
+            try { BeginInvoke(() => { if (!_closing) toolStripStatus.Text = text; }); }
+            catch { }
+        }
+
+        // ---- File transfer progress ---------------------------------------
+
+        private int _activeXfers;
+        private int _lastXferPct = -1;
+
+        private void OnFileStarted(string name) => RunUi(() =>
+        {
+            _activeXfers++;
+            _lastXferPct = -1;
+            progressXfer.Value = 0;
+            progressXfer.Visible = true;
+            btnCancelXfer.Visible = true;
+            toolStripStatus.Text = $"Sending {name}…";
+        });
+
+        private void OnFileProgress(string name, long sent, long total)
+        {
+            int pct = total > 0 ? (int)(sent * 100 / total) : 0;
+            if (pct == _lastXferPct) return;   // throttle: only on percentage change
+            _lastXferPct = pct;
+            RunUi(() =>
+            {
+                progressXfer.Value = Math.Clamp(pct, 0, 100);
+                toolStripStatus.Text = $"Sending {name}… {pct}%";
+            });
+        }
+
+        private void OnFileCompleted(string name) => RunUi(() =>
+        {
+            toolStripStatus.Text = $"{name} sent";
+            XferEnded();
+        });
+
+        private void OnFileFailed(string name, string error) => RunUi(() =>
+        {
+            toolStripStatus.Text = $"{name}: {error}";
+            XferEnded();
+        });
+
+        private void XferEnded()
+        {
+            if (_activeXfers > 0) _activeXfers--;
+            if (_activeXfers == 0)
+            {
+                progressXfer.Visible = false;
+                btnCancelXfer.Visible = false;
+            }
+        }
+
+        private void CancelXfer_Click(object? sender, EventArgs e) => _session?.CancelFileTransfers();
+
+        private void RunUi(Action action)
+        {
+            if (_closing) return;
+            try { if (InvokeRequired) BeginInvoke(action); else action(); }
             catch { }
         }
 

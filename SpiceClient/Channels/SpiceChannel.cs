@@ -184,8 +184,18 @@ public abstract class SpiceChannel : IDisposable
             if (Session.VerboseLogging && (ChannelType != SpiceConstants.CHANNEL_DISPLAY || type < 300))
                 Session.Log($"[{ChannelTypeName()}] msg type={type} size={size}");
 
-            if (!ProcessCommon(type, payload))
-                ProcessChannelMessage(type, payload);
+            // A single malformed/short message must not tear down the whole session:
+            // log and continue. Genuine transport failures throw in ReadExact (outside
+            // this try) and still disconnect via Run()'s catch.
+            try
+            {
+                if (!ProcessCommon(type, payload))
+                    ProcessChannelMessage(type, payload);
+            }
+            catch (Exception ex)
+            {
+                Session.Log($"[{ChannelTypeName()}] dropped malformed msg type={type}: {ex.Message}");
+            }
 
             // ACK flow control (per spiceconn.js process_message tail)
             if (_ackWindow > 0)
@@ -275,7 +285,7 @@ public abstract class SpiceChannel : IDisposable
         _ => $"chan{ChannelType}"
     };
 
-    public void Dispose()
+    public virtual void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
