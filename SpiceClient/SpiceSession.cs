@@ -48,6 +48,10 @@ public sealed class SpiceSession : IDisposable
     public event Action<string>? FileCompleted;
     public event Action<string, string>? FileFailed;
 
+    // Clipboard (via guest agent)
+    public event Action<string>? ClipboardTextFromGuest;   // guest copied text → set host clipboard
+    public event Action? ClipboardRequestedByGuest;        // guest is pasting → send host clipboard
+
     private readonly List<SpiceChannel> _channels = new();
     private MainChannel? _main;
     private int _down;
@@ -105,6 +109,17 @@ public sealed class SpiceSession : IDisposable
     internal void FileTransferProgress(string name, long sent, long total) => FileProgress?.Invoke(name, sent, total);
     internal void FileTransferCompleted(string name) => FileCompleted?.Invoke(name);
     internal void FileTransferFailed(string name, string error) => FileFailed?.Invoke(name, error);
+
+    // ---- Clipboard (text) ----------------------------------------------
+
+    /// <summary>Tell the guest the host clipboard changed (host has UTF-8 text). No-op without the agent.</summary>
+    public void GrabClipboardText() => _main?.GrabClipboardText();
+
+    /// <summary>Send the host clipboard text to the guest (in reply to its paste request).</summary>
+    public void SendClipboardText(string text) => _main?.SendClipboardText(text);
+
+    internal void ClipboardTextFromGuestRaise(string text) => ClipboardTextFromGuest?.Invoke(text);
+    internal void ClipboardRequestedByGuestRaise() => ClipboardRequestedByGuest?.Invoke();
 
     // ---- Multimedia clock (for video stream timing/reports) ------------
 

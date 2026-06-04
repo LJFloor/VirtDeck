@@ -23,6 +23,20 @@ public sealed class MainChannel : SpiceChannel
     private bool _senderStarted;
     private int _agentTokens;                       // client->server tokens; guarded by _agentLock
     private volatile bool _running = true;
+    private volatile uint _guestCaps;               // capabilities the guest agent announced
+
+    // Capabilities we advertise to the guest agent.
+    private const uint OurAgentCaps =
+        (1u << SpiceConstants.VD_AGENT_CAP_MOUSE_STATE) |
+        (1u << SpiceConstants.VD_AGENT_CAP_MONITORS_CONFIG) |
+        (1u << SpiceConstants.VD_AGENT_CAP_REPLY) |
+        (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD) |
+        (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) |
+        (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_SELECTION);
+
+    // When the guest supports SELECTION, every clipboard message carries a 4-byte selection header.
+    private bool UseSelection =>
+        (_guestCaps & (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_SELECTION)) != 0;
 
     private readonly BlockingCollection<byte[]> _agentSendQueue =
         new(new ConcurrentQueue<byte[]>(), boundedCapacity: 8);
@@ -158,9 +172,7 @@ public sealed class MainChannel : SpiceChannel
 
         var caps = new SpiceWriter(8);
         caps.U32(1); // request
-        caps.U32((1u << SpiceConstants.VD_AGENT_CAP_MOUSE_STATE) |
-                 (1u << SpiceConstants.VD_AGENT_CAP_MONITORS_CONFIG) |
-                 (1u << SpiceConstants.VD_AGENT_CAP_REPLY));
+        caps.U32(OurAgentCaps);
         EnqueueAgentMessage(SpiceConstants.VD_AGENT_ANNOUNCE_CAPABILITIES, caps.ToArray(), blocking: false);
         Session.Log("[main] agent connected");
     }
@@ -183,6 +195,36 @@ public sealed class MainChannel : SpiceChannel
         w.U32(0);              // y
         EnqueueAgentMessage(SpiceConstants.VD_AGENT_MONITORS_CONFIG, w.ToArray());
         Session.Log($"[main] monitors config {width}x{height}");
+    }
+
+    // ---- Clipboard (text) ----------------------------------------------
+
+    private static void WriteSelectionHeader(SpiceWriter w)
+    {
+        w.U8(SpiceConstants.VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD);
+        w.U8(0); w.U8(0); w.U8(0); // reserved
+    }
+
+    /// <summary>Announces to the guest that the host clipboard has UTF-8 text (host copied).</summary>
+    public void GrabClipboardText()
+    {
+        lock (_agentLock) { if (!_agentConnected) return; }
+        var w = new SpiceWriter(UseSelection ? 8 : 4);
+        if (UseSelection) WriteSelectionHeader(w);
+        w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+        EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD_GRAB, w.ToArray());
+    }
+
+    /// <summary>Sends host clipboard text to the guest (reply to its REQUEST). Converts CRLF → LF.</summary>
+    public void SendClipboardText(string text)
+    {
+        lock (_agentLock) { if (!_agentConnected) return; }
+        var bytes = Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n"));
+        var w = new SpiceWriter((UseSelection ? 8 : 4) + bytes.Length);
+        if (UseSelection) WriteSelectionHeader(w);
+        w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+        w.Bytes(bytes);
+        EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD, w.ToArray());
     }
 
     // ---- Agent send pipeline -------------------------------------------
@@ -279,18 +321,49 @@ public sealed class MainChannel : SpiceChannel
         {
             var r = new SpiceReader(data);
             uint request = r.U32();
+            if (data.Length >= 8) _guestCaps = r.U32(); // remember what the guest supports
             if (request != 0)
             {
                 var caps = new SpiceWriter(8);
                 caps.U32(0); // request=0 (this is our reply)
-                caps.U32((1u << SpiceConstants.VD_AGENT_CAP_MOUSE_STATE) |
-                         (1u << SpiceConstants.VD_AGENT_CAP_MONITORS_CONFIG) |
-                         (1u << SpiceConstants.VD_AGENT_CAP_REPLY));
+                caps.U32(OurAgentCaps);
                 // On the read thread → must not block (see EnqueueAgentMessage).
                 EnqueueAgentMessage(SpiceConstants.VD_AGENT_ANNOUNCE_CAPABILITIES, caps.ToArray(), blocking: false);
             }
         }
-        // clipboard etc. not handled.
+        else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_GRAB)
+        {
+            // Guest copied something. If it offers UTF-8 text, pull it eagerly to mirror onto the host.
+            var r = new SpiceReader(data);
+            if (UseSelection) r.U32(); // skip selection header
+            bool hasText = false;
+            while (r.Remaining >= 4)
+                if (r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT) { hasText = true; break; }
+            if (hasText)
+            {
+                var w = new SpiceWriter(UseSelection ? 8 : 4);
+                if (UseSelection) WriteSelectionHeader(w);
+                w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+                EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST, w.ToArray(), blocking: false);
+            }
+        }
+        else if (type == SpiceConstants.VD_AGENT_CLIPBOARD)
+        {
+            // Guest sent clipboard data (our REQUEST's reply). Decode UTF-8 text → host.
+            var r = new SpiceReader(data);
+            if (UseSelection) r.U32();
+            if (r.Remaining >= 4 && r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT)
+            {
+                var text = Encoding.UTF8.GetString(r.Rest());
+                Session.ClipboardTextFromGuestRaise(text.Replace("\r\n", "\n").Replace("\n", "\r\n"));
+            }
+        }
+        else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST)
+        {
+            // Guest is pasting and wants the host clipboard — the form supplies it via SendClipboardText.
+            Session.ClipboardRequestedByGuestRaise();
+        }
+        // VD_AGENT_CLIPBOARD_RELEASE: nothing to do.
     }
 
     private static uint ReadU32(List<byte> b, int at) =>

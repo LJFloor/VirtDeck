@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SpiceClient;
+using SpiceClient.Channels;
 using VmManager.Controls;
 using VmManager.Diagnostics;
 using VmManager.Input;
@@ -45,6 +46,20 @@ namespace VmManager.Forms
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+        // Clipboard sharing
+        private const int WM_CLIPBOARDUPDATE = 0x031D;
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AddClipboardFormatListener(IntPtr hwnd);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern short VkKeyScan(char ch);
+
+        private bool _clipboardListening;
+        private volatile bool _suppressClipboardGrab; // ignore the WM_CLIPBOARDUPDATE from our own SetText
 
         private const string RegistryKey = @"SOFTWARE\VmManager";
 
@@ -142,6 +157,7 @@ namespace VmManager.Forms
         private async void VmConsoleForm_Load(object sender, EventArgs e)
         {
             InstallKeyboardHook();
+            _clipboardListening = AddClipboardFormatListener(Handle); // watch host clipboard for host→guest sync
             ActiveControl = displayControl;
             await TryConnectOrShowStatus();
         }
@@ -180,6 +196,8 @@ namespace VmManager.Forms
                 _session.FileProgress += OnFileProgress;
                 _session.FileCompleted += OnFileCompleted;
                 _session.FileFailed += OnFileFailed;
+                _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
+                _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
 
                 displayControl.Attach(_session);
                 displayControl.Policy = showHostCursorItem.Checked
@@ -351,6 +369,90 @@ namespace VmManager.Forms
 
         private void btnCtrlAltDel_Click(object? sender, EventArgs e) => _session?.Inputs?.SendCtrlAltDel();
 
+        // ---- Clipboard sharing ---------------------------------------------
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_CLIPBOARDUPDATE) OnHostClipboardChanged();
+            base.WndProc(ref m);
+        }
+
+        private void OnHostClipboardChanged()
+        {
+            if (_closing) return;
+            if (_suppressClipboardGrab) { _suppressClipboardGrab = false; return; } // our own SetText
+            try
+            {
+                if ((_session?.AgentConnected ?? false) && Clipboard.ContainsText())
+                    _session.GrabClipboardText();
+            }
+            catch { /* clipboard busy */ }
+        }
+
+        // Guest copied → mirror onto the host clipboard (suppress the resulting update so it doesn't loop).
+        private void OnClipboardTextFromGuest(string text) => RunUi(() =>
+        {
+            if (_closing) return;
+            try
+            {
+                _suppressClipboardGrab = true;
+                if (string.IsNullOrEmpty(text)) Clipboard.Clear();
+                else Clipboard.SetText(text);
+            }
+            catch { _suppressClipboardGrab = false; }
+        });
+
+        // Guest is pasting → hand it the current host clipboard text.
+        private void OnClipboardRequestedByGuest() => RunUi(() =>
+        {
+            if (_closing || _session == null) return;
+            try { _session.SendClipboardText(Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty); }
+            catch { /* clipboard busy */ }
+        });
+
+        private void typeClipboard_Click(object? sender, EventArgs e)
+        {
+            var inputs = _session?.Inputs;
+            if (inputs == null) return;
+            string text;
+            try { text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty; }
+            catch { return; }
+            if (string.IsNullOrEmpty(text)) return;
+            // Off the UI thread: synthesize keystrokes into the guest (best-effort ASCII; layout-dependent).
+            new Thread(() => TypeOutText(inputs, text)) { IsBackground = true, Name = "spice-type-clipboard" }.Start();
+        }
+
+        private static void TypeOutText(InputsChannel inputs, string text)
+        {
+            const uint lshift = 0x2A;
+            foreach (char ch in text)
+            {
+                if (ch == '\r') continue; // CRLF handled on the '\n'
+                uint sc;
+                bool shift = false;
+                if (ch == '\n') sc = 0x1C;      // Enter
+                else if (ch == '\t') sc = 0x0F; // Tab
+                else
+                {
+                    short vks = VkKeyScan(ch);
+                    if (vks == -1) continue;                 // not typable on the host layout
+                    int state = (vks >> 8) & 0xFF;
+                    if ((state & 0x06) != 0) continue;       // needs Ctrl/Alt (AltGr) → skip
+                    shift = (state & 0x01) != 0;
+                    if (!WinFormsKeyMap.TryMap(vks & 0xFF, out sc)) continue;
+                }
+                try
+                {
+                    if (shift) inputs.SendKey(lshift, true);
+                    inputs.SendKey(sc, true);
+                    inputs.SendKey(sc, false);
+                    if (shift) inputs.SendKey(lshift, false);
+                }
+                catch { return; } // channel gone
+                Thread.Sleep(3);  // pace so the guest doesn't drop keys
+            }
+        }
+
         private void ShowHostCursor_Click(object? sender, EventArgs e)
         {
             displayControl.Policy = showHostCursorItem.Checked
@@ -478,6 +580,7 @@ namespace VmManager.Forms
             _resizeDebounce.Dispose();
             SpiceLog.VerboseChanged -= OnVerboseChanged;
             _virsh.VmsChanged -= OnVmsChanged;
+            if (_clipboardListening) { RemoveClipboardFormatListener(Handle); _clipboardListening = false; }
             UninstallKeyboardHook();
             CleanupConnection();
         }

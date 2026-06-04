@@ -73,13 +73,25 @@ public static class SpiceConstants
     public const uint VD_AGENT_PROTOCOL = 1;
     public const int VD_AGENT_MAX_DATA_SIZE = 2048;
     public const uint VD_AGENT_MONITORS_CONFIG = 2;
+    public const uint VD_AGENT_CLIPBOARD = 4;
     public const uint VD_AGENT_ANNOUNCE_CAPABILITIES = 6;
+    public const uint VD_AGENT_CLIPBOARD_GRAB = 7;
+    public const uint VD_AGENT_CLIPBOARD_REQUEST = 8;
+    public const uint VD_AGENT_CLIPBOARD_RELEASE = 9;
     public const uint VD_AGENT_FILE_XFER_START = 10;
     public const uint VD_AGENT_FILE_XFER_STATUS = 11;
     public const uint VD_AGENT_FILE_XFER_DATA = 12;
     public const int VD_AGENT_CAP_MOUSE_STATE = 0;
     public const int VD_AGENT_CAP_MONITORS_CONFIG = 1;
     public const int VD_AGENT_CAP_REPLY = 2;
+    public const int VD_AGENT_CAP_CLIPBOARD = 3;
+    public const int VD_AGENT_CAP_CLIPBOARD_BY_DEMAND = 5;
+    public const int VD_AGENT_CAP_CLIPBOARD_SELECTION = 6;
+
+    // Clipboard data types + selection
+    public const uint VD_AGENT_CLIPBOARD_NONE = 0;
+    public const uint VD_AGENT_CLIPBOARD_UTF8_TEXT = 1;
+    public const byte VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD = 0;
 
     // File-transfer status results
     public const uint VD_AGENT_FILE_XFER_STATUS_CAN_SEND_DATA = 0;

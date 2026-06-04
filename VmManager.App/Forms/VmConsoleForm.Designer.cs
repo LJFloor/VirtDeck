@@ -82,6 +82,10 @@ namespace VmManager.Forms
             var ctrlAltDelItem = new ToolStripMenuItem("Send Ctrl + Alt + Delete") { Image = AppIcons.Get("key") };
             ctrlAltDelItem.Click += btnCtrlAltDel_Click;
             btnKeyboard.DropDownItems.Add(ctrlAltDelItem);
+            var typeClipboardItem = new ToolStripMenuItem("Type Clipboard") { Image = AppIcons.Get("keyboard") };
+            typeClipboardItem.ToolTipText = "Type the host clipboard into the guest as keystrokes (works without the agent)";
+            typeClipboardItem.Click += typeClipboard_Click;
+            btnKeyboard.DropDownItems.Add(typeClipboardItem);
 
             // Mouse
             btnMouse.Text = "Mouse";
