@@ -8,6 +8,7 @@ namespace VmManager.Forms
         private readonly SshConnectionManager _ssh;
         private readonly VirshService _virsh;
         private readonly System.Windows.Forms.Timer _refreshTimer;
+        private readonly List<IsoHttpServer> _isoServers = new(); // host ISO streams, alive for the session
 
         public VmListForm(SshConnectionManager ssh)
         {
@@ -169,8 +170,9 @@ namespace VmManager.Forms
 
         private async void btnNewVm_Click(object sender, EventArgs e)
         {
-            using var wiz = new CreateVmWizard(_virsh);
+            using var wiz = new CreateVmWizard(_virsh, _ssh);
             if (wiz.ShowDialog(this) != DialogResult.OK) return;
+            _isoServers.AddRange(wiz.StreamingServers); // keep host ISO streams alive for the session
             await RefreshVmList();
             if (wiz.CreatedVmName is { } name)
                 new VmConsoleForm(_ssh, _virsh, name).Show(); // create + start + console
@@ -189,6 +191,7 @@ namespace VmManager.Forms
             _virsh.VmsChanged -= OnVmsChanged;
             _refreshTimer.Stop();
             _refreshTimer.Dispose();
+            foreach (var s in _isoServers) s.Dispose();
         }
     }
 }

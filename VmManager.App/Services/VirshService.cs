@@ -350,11 +350,36 @@ namespace VmManager.Services
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
             var tmp = $"/tmp/vmedit-{Guid.NewGuid():N}.xml";
-            _ssh.RunSudoCommand($"echo {b64} | base64 -d > {tmp} && virsh {verb} {vm} {tmp} --config; rm -f {tmp}");
+            // Capture the virsh exit code before rm so a rejected attach/update actually throws.
+            _ssh.RunSudoCommand($"echo {b64} | base64 -d > {tmp} && virsh {verb} {vm} {tmp} --config; rc=$?; rm -f {tmp}; exit $rc");
         }
 
         public void AttachCdrom(string vm, string iso, string target, string bus) =>
             _ssh.RunSudoCommand($"virsh attach-disk {vm} {iso} {target} --type cdrom --targetbus {bus} --mode readonly --config");
+
+        /// <summary>
+        /// Attaches a network CD-ROM (http/https/ftp URL) so QEMU streams the ISO via its curl block driver.
+        /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
+        /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
+        /// </summary>
+        public void AttachNetworkCdrom(string vm, string url, string target)
+        {
+            var uri = new Uri(url);
+            string name = (uri.AbsolutePath + uri.Query).TrimStart('/');
+
+            var src = new StringBuilder($"<source protocol='{uri.Scheme}' name='{XmlAttr(name)}'>");
+            src.Append($"<host name='{XmlAttr(uri.Host)}'");
+            if (uri.Port > 0) src.Append($" port='{uri.Port}'");
+            src.Append("/></source>");
+
+            var xml = "<disk type='network' device='cdrom'><driver name='qemu' type='raw'/>" +
+                      $"{src}<target dev='{target}' bus='sata'/><readonly/></disk>";
+            RunDeviceXml("attach-device", vm, xml);
+        }
+
+        private static string XmlAttr(string s) => s
+            .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+            .Replace("'", "&apos;").Replace("\"", "&quot;");
 
         public void DetachDisk(string vm, string target) =>
             _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config");

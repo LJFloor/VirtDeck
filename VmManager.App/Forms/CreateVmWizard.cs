@@ -15,9 +15,11 @@ namespace VmManager.Forms
         private const string ZvolPrefix = "/dev/zvol/";
 
         private readonly VirshService _virsh;
+        private readonly SshConnectionManager _ssh;
         private readonly List<NicAddOp> _nics = new();
         private readonly List<DiskAddOp> _disks = new();
         private readonly HashSet<string> _usedTargets = new();
+        private readonly List<IsoHttpServer> _servers = new();
         private int _page;
         private bool _storageSeeded;
 
@@ -29,9 +31,13 @@ namespace VmManager.Forms
         /// <summary>Name of the VM created on success, else null.</summary>
         public string? CreatedVmName { get; private set; }
 
-        public CreateVmWizard(VirshService virsh)
+        /// <summary>Host ISO stream servers started during create; the caller keeps them alive.</summary>
+        public IReadOnlyList<IsoHttpServer> StreamingServers => _servers;
+
+        public CreateVmWizard(VirshService virsh, SshConnectionManager ssh)
         {
             _virsh = virsh;
+            _ssh = ssh;
             InitializeComponent();
             isoPicker.Virsh = virsh;
             isoPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
@@ -42,7 +48,46 @@ namespace VmManager.Forms
         {
             _nics.Add(new NicAddOp { Type = "network", Source = "default", Model = "virtio" });
             RebuildNicList();
+            IsoMode_Changed(this, EventArgs.Empty);
             ShowPage(0);
+        }
+
+        // ---- Install media (General page) ----------------------------------
+
+        private void IsoMode_Changed(object? sender, EventArgs e)
+        {
+            isoPicker.Visible = rdoIsoServer.Checked;
+            txtIsoUrl.Visible = rdoIsoUrl.Checked;
+            txtLocalIso.Visible = btnBrowseLocal.Visible = rdoIsoStream.Checked;
+        }
+
+        private void btnBrowseLocal_Click(object? sender, EventArgs e)
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*",
+                Title = "Select an ISO on this PC",
+                CheckFileExists = true,
+            };
+            if (ofd.ShowDialog(this) == DialogResult.OK)
+                txtLocalIso.Text = ofd.FileName;
+        }
+
+        /// <summary>The install CD-ROM op for the selected media mode, or null when no media is chosen.</summary>
+        private DiskAddOp? BuildCdromOp()
+        {
+            if (rdoIsoServer.Checked)
+            {
+                var p = isoPicker.Path.Trim();
+                return p.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "file", Source = p };
+            }
+            if (rdoIsoUrl.Checked)
+            {
+                var u = txtIsoUrl.Text.Trim();
+                return u.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "url", Source = u };
+            }
+            var local = txtLocalIso.Text.Trim();
+            return local.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "stream", Source = local };
         }
 
         // ---- Navigation ----------------------------------------------------
@@ -85,6 +130,15 @@ namespace VmManager.Forms
             {
                 Warn($"A VM named '{name}' already exists.");
                 return false;
+            }
+            if (rdoIsoUrl.Checked)
+            {
+                var u = txtIsoUrl.Text.Trim();
+                if (u.Length > 0 && !Uri.TryCreate(u, UriKind.Absolute, out _))
+                {
+                    Warn("Enter a valid absolute URL (e.g. http://host/path.iso).");
+                    return false;
+                }
             }
             return true;
         }
@@ -139,10 +193,8 @@ namespace VmManager.Forms
             disk.Target = AllocTarget(disk.Bus);
             _disks.Add(disk);
 
-            var iso = isoPicker.Path.Trim();
-            if (iso.Length > 0)
+            if (BuildCdromOp() is { } cd)
             {
-                var cd = new DiskAddOp { Kind = "cdrom", Source = iso, Bus = "sata" };
                 cd.Target = AllocTarget(cd.Bus);
                 _disks.Add(cd);
             }
@@ -238,6 +290,8 @@ namespace VmManager.Forms
             }
             catch (Exception ex)
             {
+                foreach (var s in _servers) s.Dispose(); // unwind any streams started this run
+                _servers.Clear();
                 MessageBox.Show($"Failed to create VM:\n{ex.Message}", "New VM",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 SetBusy(false);
@@ -291,7 +345,21 @@ namespace VmManager.Forms
                     _virsh.AttachDataDisk(_name, op.ToDiskInfo());
                     break;
                 case "cdrom":
-                    _virsh.AttachCdrom(_name, op.Source, op.Target, op.Bus);
+                    switch (op.IsoMode)
+                    {
+                        case "url":
+                            _virsh.AttachNetworkCdrom(_name, op.Source, op.Target);
+                            break;
+                        case "stream":
+                            var server = new IsoHttpServer();
+                            server.Start(op.Source, _ssh.Client);
+                            _servers.Add(server);
+                            _virsh.AttachNetworkCdrom(_name, server.RemoteUrl, op.Target);
+                            break;
+                        default: // file on server
+                            _virsh.AttachCdrom(_name, op.Source, op.Target, op.Bus);
+                            break;
+                    }
                     break;
             }
         }

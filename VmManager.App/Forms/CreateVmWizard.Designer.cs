@@ -14,7 +14,13 @@ namespace VmManager.Forms
         private NumericUpDown nudMem;
         private Label lblMemUnit;
         private Label lblIso;
+        private RadioButton rdoIsoServer;
+        private RadioButton rdoIsoUrl;
+        private RadioButton rdoIsoStream;
         private VmManager.Controls.RemotePathTextBox isoPicker;
+        private TextBox txtIsoUrl;
+        private TextBox txtLocalIso;
+        private Button btnBrowseLocal;
         private Label lblHint;
 
         private Panel pnlNetwork;
@@ -52,7 +58,13 @@ namespace VmManager.Forms
             nudMem = new NumericUpDown();
             lblMemUnit = new Label();
             lblIso = new Label();
+            rdoIsoServer = new RadioButton();
+            rdoIsoUrl = new RadioButton();
+            rdoIsoStream = new RadioButton();
             isoPicker = new VmManager.Controls.RemotePathTextBox();
+            txtIsoUrl = new TextBox();
+            txtLocalIso = new TextBox();
+            btnBrowseLocal = new Button();
             lblHint = new Label();
             pnlNetwork = new Panel();
             btnAddNic = new Button();
@@ -103,18 +115,46 @@ namespace VmManager.Forms
             lblMemUnit.Text = "MiB";
             lblMemUnit.Location = new Point(246, 80);
             lblMemUnit.AutoSize = true;
-            lblIso.Text = "Install ISO (optional):";
-            lblIso.Location = new Point(4, 124);
+            lblIso.Text = "Install media (optional):";
+            lblIso.Location = new Point(4, 122);
             lblIso.AutoSize = true;
-            isoPicker.Location = new Point(4, 146);
-            isoPicker.Size = new Size(430, 23);
-            lblHint.Text = "Leave the ISO empty to set up install media later. The ISO appears as a CD-ROM on the Storage page.";
-            lblHint.Location = new Point(4, 182);
-            lblHint.Size = new Size(470, 40);
+            rdoIsoServer.Text = "File on server";
+            rdoIsoServer.Location = new Point(8, 146);
+            rdoIsoServer.AutoSize = true;
+            rdoIsoServer.Checked = true;
+            rdoIsoServer.CheckedChanged += IsoMode_Changed;
+            rdoIsoUrl.Text = "Network URL";
+            rdoIsoUrl.Location = new Point(140, 146);
+            rdoIsoUrl.AutoSize = true;
+            rdoIsoUrl.CheckedChanged += IsoMode_Changed;
+            rdoIsoStream.Text = "Stream from this PC";
+            rdoIsoStream.Location = new Point(268, 146);
+            rdoIsoStream.AutoSize = true;
+            rdoIsoStream.CheckedChanged += IsoMode_Changed;
+            // The three inputs share the same row; only one is visible at a time.
+            isoPicker.Location = new Point(8, 174);
+            isoPicker.Size = new Size(478, 23);
+            txtIsoUrl.Location = new Point(8, 174);
+            txtIsoUrl.Size = new Size(478, 23);
+            txtIsoUrl.Visible = false;
+            txtLocalIso.Location = new Point(8, 174);
+            txtLocalIso.Size = new Size(390, 23);
+            txtLocalIso.ReadOnly = true;
+            txtLocalIso.Visible = false;
+            btnBrowseLocal.Text = "Browse…";
+            btnBrowseLocal.Location = new Point(404, 173);
+            btnBrowseLocal.Size = new Size(82, 25);
+            btnBrowseLocal.Visible = false;
+            btnBrowseLocal.Click += btnBrowseLocal_Click;
+            lblHint.Text = "Leave the media empty to set it up later. The ISO appears as a CD-ROM on the Storage page.";
+            lblHint.Location = new Point(4, 210);
+            lblHint.Size = new Size(480, 40);
             lblHint.ForeColor = SystemColors.GrayText;
             pnlGeneral.Controls.AddRange(new Control[]
             {
-                lblName, txtName, lblVcpus, nudVcpus, lblMem, nudMem, lblMemUnit, lblIso, isoPicker, lblHint
+                lblName, txtName, lblVcpus, nudVcpus, lblMem, nudMem, lblMemUnit,
+                lblIso, rdoIsoServer, rdoIsoUrl, rdoIsoStream,
+                isoPicker, txtIsoUrl, txtLocalIso, btnBrowseLocal, lblHint
             });
 
             // ---- Page 2: Network ----
