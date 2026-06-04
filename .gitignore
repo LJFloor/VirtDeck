@@ -1,0 +1,21 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# Rider
+*.sln.iml
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs / temp
+*.log
