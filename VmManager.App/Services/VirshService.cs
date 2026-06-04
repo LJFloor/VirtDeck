@@ -297,6 +297,22 @@ namespace VmManager.Services
         public void RenameVm(string oldName, string newName) =>
             _ssh.RunSudoCommand($"virsh domrename {oldName} {newName}");
 
+        /// <summary>
+        /// Defines a bare VM shell (no disks/NICs) via virt-install --print-xml + virsh define, so
+        /// virt-install picks firmware/machine/SPICE/video defaults but creates nothing. The caller then
+        /// attaches devices with the normal Attach* helpers. The trailing rc capture makes a define
+        /// failure propagate (RunSudoCommand throws). The VM is left shut off. `name` must be validated.
+        /// </summary>
+        public void DefineVmShell(string name, int vcpus, long memoryMiB)
+        {
+            var tmp = $"/tmp/newvm-{Guid.NewGuid():N}.xml";
+            var cmd =
+                $"virt-install --name {name} --vcpus {vcpus} --memory {memoryMiB} --os-variant generic " +
+                "--graphics spice,listen=127.0.0.1 --video qxl --disk none --network none --boot hd,cdrom " +
+                $"--print-xml > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc";
+            _ssh.RunSudoCommand(cmd);
+        }
+
         // ---- Storage -------------------------------------------------------
 
         public void CreateQcow2(string path, int sizeGiB) =>

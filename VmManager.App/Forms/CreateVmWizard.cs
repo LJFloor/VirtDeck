@@ -1,0 +1,311 @@
+using System.Text.RegularExpressions;
+using VmManager.Models;
+using VmManager.Services;
+
+namespace VmManager.Forms
+{
+    /// <summary>
+    /// 3-page wizard to create a VM: General + install ISO, Network, Storage. On Finish it defines a bare
+    /// shell (virt-install), attaches the disks/NICs with the same helpers the editor uses, sets boot order,
+    /// and starts the VM. The caller opens the console for <see cref="CreatedVmName"/>.
+    /// </summary>
+    public partial class CreateVmWizard : Form
+    {
+        private static readonly Regex NameRegex = new("^[a-zA-Z0-9_.-]+$");
+        private const string ZvolPrefix = "/dev/zvol/";
+
+        private readonly VirshService _virsh;
+        private readonly List<NicAddOp> _nics = new();
+        private readonly List<DiskAddOp> _disks = new();
+        private readonly HashSet<string> _usedTargets = new();
+        private int _page;
+        private bool _storageSeeded;
+
+        // Captured on Finish (UI thread) before the background create.
+        private string _name = "";
+        private int _vcpus;
+        private long _memMiB;
+
+        /// <summary>Name of the VM created on success, else null.</summary>
+        public string? CreatedVmName { get; private set; }
+
+        public CreateVmWizard(VirshService virsh)
+        {
+            _virsh = virsh;
+            InitializeComponent();
+            isoPicker.Virsh = virsh;
+            isoPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
+            isoPicker.DialogTitle = "Select install ISO";
+        }
+
+        private void CreateVmWizard_Load(object? sender, EventArgs e)
+        {
+            _nics.Add(new NicAddOp { Type = "network", Source = "default", Model = "virtio" });
+            RebuildNicList();
+            ShowPage(0);
+        }
+
+        // ---- Navigation ----------------------------------------------------
+
+        private void ShowPage(int page)
+        {
+            _page = page;
+            pnlGeneral.Visible = page == 0;
+            pnlNetwork.Visible = page == 1;
+            pnlStorage.Visible = page == 2;
+            lblTitle.Text = page switch { 0 => "General", 1 => "Network", 2 => "Storage", _ => "" };
+            btnBack.Enabled = page > 0;
+            btnNext.Visible = page < 2;
+            btnFinish.Visible = page == 2;
+            AcceptButton = page < 2 ? btnNext : btnFinish;
+        }
+
+        private void btnBack_Click(object? sender, EventArgs e)
+        {
+            if (_page > 0) ShowPage(_page - 1);
+        }
+
+        private void btnNext_Click(object? sender, EventArgs e)
+        {
+            if (_page == 0 && !ValidateGeneral()) return;
+            int next = _page + 1;
+            if (next == 2) SeedStorage();
+            ShowPage(next);
+        }
+
+        private bool ValidateGeneral()
+        {
+            var name = txtName.Text.Trim();
+            if (!NameRegex.IsMatch(name))
+            {
+                Warn("Name may contain only letters, numbers, dot, hyphen and underscore.");
+                return false;
+            }
+            if (_virsh.Vms.ContainsKey(name))
+            {
+                Warn($"A VM named '{name}' already exists.");
+                return false;
+            }
+            return true;
+        }
+
+        // ---- Network page --------------------------------------------------
+
+        private void RebuildNicList()
+        {
+            lvNics.Items.Clear();
+            foreach (var n in _nics)
+            {
+                var it = new ListViewItem(n.Model);
+                it.SubItems.Add(n.Type);
+                it.SubItems.Add(n.Source);
+                it.Tag = n;
+                lvNics.Items.Add(it);
+            }
+        }
+
+        private void btnAddNic_Click(object? sender, EventArgs e)
+        {
+            using var dlg = new AddNicDialog(_virsh);
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } nic)
+            {
+                _nics.Add(nic);
+                RebuildNicList();
+            }
+        }
+
+        private void btnRemoveNic_Click(object? sender, EventArgs e)
+        {
+            if (lvNics.SelectedItems.Count > 0 && lvNics.SelectedItems[0].Tag is NicAddOp nic)
+            {
+                _nics.Remove(nic);
+                RebuildNicList();
+            }
+        }
+
+        // ---- Storage page --------------------------------------------------
+
+        private void SeedStorage()
+        {
+            if (_storageSeeded) return;
+            _storageSeeded = true;
+
+            var name = txtName.Text.Trim();
+            var disk = new DiskAddOp
+            {
+                Kind = "qcow2", Format = "qcow2", SourceType = "file",
+                Source = $"/var/lib/libvirt/images/{name}.qcow2", SizeGiB = 127, Bus = "virtio",
+            };
+            disk.Target = AllocTarget(disk.Bus);
+            _disks.Add(disk);
+
+            var iso = isoPicker.Path.Trim();
+            if (iso.Length > 0)
+            {
+                var cd = new DiskAddOp { Kind = "cdrom", Source = iso, Bus = "sata" };
+                cd.Target = AllocTarget(cd.Bus);
+                _disks.Add(cd);
+            }
+            RebuildDiskList();
+        }
+
+        private string AllocTarget(string bus)
+        {
+            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", _ => "sd" };
+            for (char c = 'a'; c <= 'z'; c++)
+            {
+                var t = prefix + c;
+                if (_usedTargets.Add(t)) return t;
+            }
+            return prefix + "z";
+        }
+
+        private void RebuildDiskList()
+        {
+            lvDisks.Items.Clear();
+            foreach (var op in _disks)
+            {
+                var it = new ListViewItem(op.Target);
+                it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(op.Bus);
+                it.SubItems.Add(op.Source);
+                it.SubItems.Add(op.IsCdrom ? "" : DriverDesc(op.Format, op.Cache, op.Io, op.Discard));
+                it.Tag = op;
+                lvDisks.Items.Add(it);
+            }
+        }
+
+        private static string DriverDesc(string type, string cache, string io, string discard)
+        {
+            string t = string.IsNullOrEmpty(type) ? "auto" : type;
+            if (string.IsNullOrEmpty(cache) && string.IsNullOrEmpty(io) && string.IsNullOrEmpty(discard))
+                return t;
+            string Dash(string s) => string.IsNullOrEmpty(s) ? "-" : s;
+            return $"{t}  {Dash(cache)}/{Dash(io)}/{Dash(discard)}";
+        }
+
+        private void btnAddDisk_Click(object? sender, EventArgs e)
+        {
+            using var dlg = new AddDiskDialog(_virsh, txtName.Text.Trim());
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } op)
+            {
+                op.Target = AllocTarget(op.Bus);
+                _disks.Add(op);
+                RebuildDiskList();
+            }
+        }
+
+        private void btnEditDisk_Click(object? sender, EventArgs e)
+        {
+            if (lvDisks.SelectedItems.Count == 0 || lvDisks.SelectedItems[0].Tag is not DiskAddOp op || op.IsCdrom)
+            {
+                Warn("Select a data disk to edit its driver settings.");
+                return;
+            }
+            using var dlg = new EditDiskDialog(op.ToDiskInfo());
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } d)
+            {
+                op.Cache = d.Cache;
+                op.Io = d.Io;
+                op.Discard = d.Discard;
+                RebuildDiskList();
+            }
+        }
+
+        private void btnRemoveDisk_Click(object? sender, EventArgs e)
+        {
+            if (lvDisks.SelectedItems.Count > 0 && lvDisks.SelectedItems[0].Tag is DiskAddOp op)
+            {
+                _usedTargets.Remove(op.Target);
+                _disks.Remove(op);
+                RebuildDiskList();
+            }
+        }
+
+        // ---- Finish --------------------------------------------------------
+
+        private async void btnFinish_Click(object? sender, EventArgs e)
+        {
+            _name = txtName.Text.Trim();
+            _vcpus = (int)nudVcpus.Value;
+            _memMiB = (long)nudMem.Value;
+
+            SetBusy(true);
+            var errors = new List<string>();
+            try
+            {
+                await Task.Run(() => CreateVm(errors)); // define is fatal; device/boot steps are best-effort
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to create VM:\n{ex.Message}", "New VM",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                SetBusy(false);
+                return;
+            }
+
+            try { await _virsh.StartVmAsync(_name); }
+            catch (Exception ex) { errors.Add($"Start: {ex.Message}"); }
+
+            if (errors.Count > 0)
+                MessageBox.Show("VM created, but some steps reported errors:\n\n" + string.Join("\n", errors),
+                    "New VM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+            CreatedVmName = _name;
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private void CreateVm(List<string> errors)
+        {
+            _virsh.DefineVmShell(_name, _vcpus, _memMiB); // throws -> abort, no VM created
+
+            void Try(string what, Action a)
+            {
+                try { a(); } catch (Exception ex) { errors.Add($"{what}: {ex.Message}"); }
+            }
+
+            foreach (var op in _disks)
+                Try($"Attach disk {op.Target}", () => ApplyDiskAdd(op));
+            foreach (var nic in _nics)
+                Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic.Type, nic.Source, nic.Model));
+
+            var boot = _disks.Any(d => d.IsCdrom) ? new[] { "cdrom", "hd" } : new[] { "hd" };
+            Try("Boot order", () => _virsh.SetBootOrder(_name, boot));
+        }
+
+        private void ApplyDiskAdd(DiskAddOp op)
+        {
+            switch (op.Kind)
+            {
+                case "qcow2":
+                    _virsh.CreateQcow2(op.Source, op.SizeGiB);
+                    _virsh.AttachDataDisk(_name, op.ToDiskInfo());
+                    break;
+                case "zvol":
+                    if (op.CreateZvol)
+                    {
+                        var name = op.Source.StartsWith(ZvolPrefix) ? op.Source[ZvolPrefix.Length..] : op.Source;
+                        _virsh.CreateZvol(name, op.SizeGiB);
+                    }
+                    _virsh.AttachDataDisk(_name, op.ToDiskInfo());
+                    break;
+                case "cdrom":
+                    _virsh.AttachCdrom(_name, op.Source, op.Target, op.Bus);
+                    break;
+            }
+        }
+
+        private void SetBusy(bool busy)
+        {
+            btnBack.Enabled = !busy && _page > 0;
+            btnNext.Enabled = !busy;
+            btnFinish.Enabled = !busy;
+            btnCancel.Enabled = !busy;
+            UseWaitCursor = busy;
+        }
+
+        private void Warn(string msg) =>
+            MessageBox.Show(msg, "New VM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+}

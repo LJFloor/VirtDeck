@@ -11,6 +11,7 @@ namespace VmManager.Forms
         private ColumnHeader colUptime;
         private ToolStrip toolStrip;
         private ToolStripButton btnRefresh;
+        private ToolStripButton btnNewVm;
         private ToolStripButton btnLog;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel toolStripStatus;
@@ -43,6 +44,7 @@ namespace VmManager.Forms
             colUptime = new ColumnHeader();
             toolStrip = new ToolStrip();
             btnRefresh = new ToolStripButton();
+            btnNewVm = new ToolStripButton();
             btnLog = new ToolStripButton();
             statusStrip = new StatusStrip();
             toolStripStatus = new ToolStripStatusLabel();
@@ -62,11 +64,15 @@ namespace VmManager.Forms
             btnRefresh.Text = "Refresh";
             btnRefresh.Image = AppIcons.Get("arrow_refresh");
             btnRefresh.Click += btnRefresh_Click;
+            btnNewVm.Text = "New VM…";
+            btnNewVm.Image = AppIcons.Get("add");
+            btnNewVm.Click += btnNewVm_Click;
             btnLog.Text = "Log";
             btnLog.Image = AppIcons.Get("report");
             btnLog.Alignment = ToolStripItemAlignment.Right;
             btnLog.Click += (_, _) => LogForm.ShowLog();
             toolStrip.Items.Add(btnRefresh);
+            toolStrip.Items.Add(btnNewVm);
             toolStrip.Items.Add(btnLog);
 
             // contextMenu

@@ -167,6 +167,15 @@ namespace VmManager.Forms
                 await RefreshVmList();
         }
 
+        private async void btnNewVm_Click(object sender, EventArgs e)
+        {
+            using var wiz = new CreateVmWizard(_virsh);
+            if (wiz.ShowDialog(this) != DialogResult.OK) return;
+            await RefreshVmList();
+            if (wiz.CreatedVmName is { } name)
+                new VmConsoleForm(_ssh, _virsh, name).Show(); // create + start + console
+        }
+
         private void OpenConsole()
         {
             if (lvVms.SelectedItems.Count == 0) return;
