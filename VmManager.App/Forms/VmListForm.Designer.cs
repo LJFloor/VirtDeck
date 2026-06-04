@@ -21,6 +21,8 @@ namespace VmManager.Forms
         private ToolStripMenuItem menuReboot;
         private ToolStripSeparator menuSep;
         private ToolStripMenuItem menuConsole;
+        private ToolStripSeparator menuSep2;
+        private ToolStripMenuItem menuEdit;
 
         protected override void Dispose(bool disposing)
         {
@@ -51,6 +53,8 @@ namespace VmManager.Forms
             menuReboot = new ToolStripMenuItem();
             menuSep = new ToolStripSeparator();
             menuConsole = new ToolStripMenuItem();
+            menuSep2 = new ToolStripSeparator();
+            menuEdit = new ToolStripMenuItem();
 
             SuspendLayout();
 
@@ -81,7 +85,11 @@ namespace VmManager.Forms
             menuConsole.Text = "Open Console";
             menuConsole.Image = AppIcons.Get("monitor");
             menuConsole.Click += menuConsole_Click;
-            contextMenu.Items.AddRange(new ToolStripItem[] { menuStart, menuStop, menuForceStop, menuReboot, menuSep, menuConsole });
+            menuEdit.Text = "Edit…";
+            menuEdit.Image = AppIcons.Get("application_form_edit");
+            menuEdit.ToolTipText = "Edit the VM configuration (the VM must be shut off)";
+            menuEdit.Click += menuEdit_Click;
+            contextMenu.Items.AddRange(new ToolStripItem[] { menuStart, menuStop, menuForceStop, menuReboot, menuSep, menuConsole, menuSep2, menuEdit });
             contextMenu.Opening += contextMenu_Opening;
 
             // lvVms

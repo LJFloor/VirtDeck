@@ -22,6 +22,7 @@ namespace VmManager.Forms
         private bool _settingsLoaded;
         private Size? _lastResolution;
         private bool _autoFitted;
+        private FormWindowState _lastWindowState = FormWindowState.Normal; // last non-minimized state
         private readonly System.Windows.Forms.Timer _resizeDebounce;
 
         private IntPtr _keyboardHook;
@@ -60,6 +61,8 @@ namespace VmManager.Forms
             _resizeDebounce.Tick += ResizeDebounce_Tick;
             Resize += (_, _) =>
             {
+                if (WindowState != FormWindowState.Minimized)
+                    _lastWindowState = WindowState;   // remember windowed vs maximized
                 if (_connected && WindowState != FormWindowState.Minimized)
                 {
                     _resizeDebounce.Stop();
@@ -118,6 +121,11 @@ namespace VmManager.Forms
                 showHostCursorItem.Checked = true;
                 displayControl.Policy = SpiceDisplayControl.CursorPolicy.HostCursor;
             }
+            if (key.GetValue("Maximized") is int m && m == 1)
+            {
+                _lastWindowState = FormWindowState.Maximized;
+                WindowState = FormWindowState.Maximized;   // restore maximized for this VM
+            }
         }
 
         private void SaveVmSettings()
@@ -126,6 +134,7 @@ namespace VmManager.Forms
             if (uuid == null) return;
             using var key = Registry.CurrentUser.CreateSubKey($@"{RegistryKey}\VMs\{uuid}");
             key.SetValue("ShowHostCursor", showHostCursorItem.Checked ? 1 : 0, RegistryValueKind.DWord);
+            key.SetValue("Maximized", _lastWindowState == FormWindowState.Maximized ? 1 : 0, RegistryValueKind.DWord);
         }
 
         // ---- Lifecycle -----------------------------------------------------
@@ -289,7 +298,15 @@ namespace VmManager.Forms
             if (!_autoFitted)
             {
                 _autoFitted = true;
-                FitToResolution();
+                if (WindowState == FormWindowState.Normal)
+                    FitToResolution(center: true);   // initial window: size to the guest and center
+                // if restored maximized for this VM, leave it maximized
+            }
+            else if (WindowState == FormWindowState.Normal)
+            {
+                // Windowed: track the guest resolution exactly (grow or shrink), in place —
+                // like VirtualBox/Hyper-V. Maximized/minimized: ignore (guest centers on black).
+                FitToResolution(center: false);
             }
         }
 
@@ -360,14 +377,42 @@ namespace VmManager.Forms
             }
         }
 
-        private void FitWindow_Click(object? sender, EventArgs e) => FitToResolution();
+        private void FitWindow_Click(object? sender, EventArgs e) => FitToResolution(center: false);
 
-        private void FitToResolution()
+        // Sizes the window so the display area exactly matches the guest resolution.
+        private void FitToResolution(bool center)
         {
             if (_lastResolution is not { } size) return;
+            // Bug fix: setting ClientSize is ignored while maximized — restore first.
+            if (WindowState != FormWindowState.Normal)
+                WindowState = FormWindowState.Normal;
             var extra = toolStrip.Height + statusStrip.Height;
-            ClientSize = new Size(size.Width, size.Height + extra);
-            CenterToScreen();
+            ClientSize = ClampClient(new Size(size.Width, size.Height + extra));
+            if (center) CenterToScreen();
+            else KeepOnScreen();
+        }
+
+        // Clamp a desired client size so the whole window fits the screen working area.
+        private Size ClampClient(Size desired)
+        {
+            var wa = Screen.FromControl(this).WorkingArea;
+            int ncW = Width - ClientSize.Width;   // non-client (border) width
+            int ncH = Height - ClientSize.Height; // non-client (title + border) height
+            int maxW = Math.Max(320, wa.Width - ncW);
+            int maxH = Math.Max(240, wa.Height - ncH);
+            return new Size(Math.Min(desired.Width, maxW), Math.Min(desired.Height, maxH));
+        }
+
+        // Nudge the window back fully on-screen after growing in place.
+        private void KeepOnScreen()
+        {
+            var wa = Screen.FromControl(this).WorkingArea;
+            int x = Left, y = Top;
+            if (x + Width > wa.Right) x = wa.Right - Width;
+            if (y + Height > wa.Bottom) y = wa.Bottom - Height;
+            if (x < wa.Left) x = wa.Left;
+            if (y < wa.Top) y = wa.Top;
+            if (x != Left || y != Top) Location = new Point(x, y);
         }
 
         // ---- Power ---------------------------------------------------------
@@ -428,6 +473,7 @@ namespace VmManager.Forms
         {
             if (_closing) return;
             _closing = true;
+            SaveVmSettings();   // persist windowed/maximized state for this VM
             _resizeDebounce.Stop();
             _resizeDebounce.Dispose();
             SpiceLog.VerboseChanged -= OnVerboseChanged;

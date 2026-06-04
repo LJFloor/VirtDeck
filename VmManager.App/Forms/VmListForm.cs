@@ -123,6 +123,7 @@ namespace VmManager.Forms
             menuStop.Enabled = isRunning;
             menuForceStop.Enabled = isRunning;
             menuReboot.Enabled = isRunning;
+            menuEdit.Enabled = isStopped;   // editing is offline-only
         }
 
         private async void menuStart_Click(object sender, EventArgs e) =>
@@ -155,6 +156,15 @@ namespace VmManager.Forms
 
         private void menuConsole_Click(object sender, EventArgs e) => OpenConsole();
         private void lvVms_DoubleClick(object sender, EventArgs e) => OpenConsole();
+
+        private async void menuEdit_Click(object sender, EventArgs e)
+        {
+            if (lvVms.SelectedItems.Count == 0) return;
+            var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
+            using var edit = new VmEditForm(_virsh, vm.Name);
+            if (edit.ShowDialog(this) == DialogResult.OK)
+                await RefreshVmList();
+        }
 
         private void OpenConsole()
         {

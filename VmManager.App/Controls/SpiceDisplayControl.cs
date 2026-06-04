@@ -38,7 +38,8 @@ namespace VmManager.Controls
         public SpiceDisplayControl()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable |
+                     ControlStyles.ResizeRedraw, true);
             BackColor = Color.Black;
             TabStop = true;
             AllowDrop = true;
@@ -78,8 +79,21 @@ namespace VmManager.Controls
                 if (!_fb.TakeDirty(out dirty)) return;
             }
             if (dirty.Width > 0 && dirty.Height > 0)
+            {
+                var fb = _fb;
+                if (fb != null)
+                {
+                    var o = ImageOrigin(fb);
+                    dirty.Offset(o.X, o.Y);   // framebuffer coords -> control coords
+                }
                 Invalidate(dirty);
+            }
         }
+
+        // Where the framebuffer image is drawn within the control (centered, clamped to 0).
+        private Point ImageOrigin(SpiceFramebuffer fb) => new(
+            Math.Max(0, (Width - fb.Width) / 2),
+            Math.Max(0, (Height - fb.Height) / 2));
 
         private void OnResolutionChanged(int w, int h)
         {
@@ -103,32 +117,26 @@ namespace VmManager.Controls
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            // Black background fills any margin around a smaller framebuffer.
+            e.Graphics.Clear(Color.Black);
+
             var fb = _fb;
-            if (fb == null)
-            {
-                e.Graphics.Clear(Color.Black);
-                return;
-            }
+            if (fb == null) return;
             try
             {
-                var rect = new Rectangle(0, 0, fb.Width, fb.Height);
+                var origin = ImageOrigin(fb);
+                var dst = new Rectangle(origin.X, origin.Y, fb.Width, fb.Height);
+                var src = new Rectangle(0, 0, fb.Width, fb.Height);
                 lock (fb.SyncRoot)
                 {
                     // Explicit pixel rect → 1:1 blit independent of the bitmap's DPI metadata.
-                    e.Graphics.DrawImage(fb.Bitmap, rect, rect, GraphicsUnit.Pixel);
+                    e.Graphics.DrawImage(fb.Bitmap, dst, src, GraphicsUnit.Pixel);
                 }
             }
             catch (Exception)
             {
-                // Framebuffer was disposed mid-teardown; fall back to black.
-                e.Graphics.Clear(Color.Black);
-                return;
+                // Framebuffer was disposed mid-teardown; background is already black.
             }
-            // Black-fill any control area beyond the framebuffer.
-            if (Width > fb.Width)
-                e.Graphics.FillRectangle(Brushes.Black, fb.Width, 0, Width - fb.Width, Height);
-            if (Height > fb.Height)
-                e.Graphics.FillRectangle(Brushes.Black, 0, fb.Height, Width, Height - fb.Height);
         }
 
         protected override void OnPaintBackground(PaintEventArgs pevent)
@@ -162,8 +170,9 @@ namespace VmManager.Controls
             base.OnMouseMove(e);
             var fb = _fb;
             if (fb == null) return;
-            int x = Math.Clamp(e.X, 0, fb.Width - 1);
-            int y = Math.Clamp(e.Y, 0, fb.Height - 1);
+            var o = ImageOrigin(fb);
+            int x = Math.Clamp(e.X - o.X, 0, fb.Width - 1);
+            int y = Math.Clamp(e.Y - o.Y, 0, fb.Height - 1);
             _session?.Inputs?.SendMouseMove(x, y, _buttonsState);
         }
 
