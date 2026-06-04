@@ -218,8 +218,9 @@ namespace VmManager.Forms
         {
             if (SelectedCdrom() is not { } d) { Warn("Select a CD-ROM drive."); return; }
             var initial = _mediaChanges.TryGetValue(d.Target, out var cur) ? (cur ?? "") : d.Source;
-            var iso = PromptText(this, "Change ISO", "ISO path on the host:", initial);
-            if (iso == null) return;
+            using var dlg = new RemoteFileBrowserDialog(_virsh, initial,
+                "ISO images (*.iso)|*.iso|All files (*.*)|*.*", false, "Select ISO image");
+            if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedPath is not { } iso) return;
             iso = iso.Trim();
             if (!PathRegex.IsMatch(iso)) { Warn("Path contains invalid characters."); return; }
             _mediaChanges[d.Target] = iso;
@@ -285,27 +286,6 @@ namespace VmManager.Forms
 
         private void Warn(string msg) =>
             MessageBox.Show(msg, "Edit VM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-        private static string? PromptText(IWin32Window owner, string title, string label, string initial)
-        {
-            using var f = new Form
-            {
-                Text = title,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(420, 112),
-                MaximizeBox = false,
-                MinimizeBox = false,
-            };
-            var lbl = new Label { Text = label, Location = new Point(12, 12), AutoSize = true };
-            var txt = new TextBox { Location = new Point(12, 36), Size = new Size(396, 23), Text = initial };
-            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(242, 74), Size = new Size(75, 28) };
-            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(333, 74), Size = new Size(75, 28) };
-            f.Controls.AddRange(new Control[] { lbl, txt, ok, cancel });
-            f.AcceptButton = ok;
-            f.CancelButton = cancel;
-            return f.ShowDialog(owner) == DialogResult.OK ? txt.Text : null;
-        }
 
         private static string LabelFor(string dev)
         {

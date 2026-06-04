@@ -7,6 +7,8 @@ namespace VmManager.Services
         private const string SudoMarker = "___SUDO_MARKER___";
         private SshClient? _client;
         private string _password = string.Empty;
+        // One command at a time on the shared SshClient (RefreshAsync, edits, file browsing all race otherwise).
+        private readonly object _ioLock = new();
 
         public bool IsConnected => _client?.IsConnected ?? false;
         public string Host { get; private set; } = string.Empty;
@@ -25,36 +27,42 @@ namespace VmManager.Services
 
         public string RunCommand(string command)
         {
-            if (_client == null || !_client.IsConnected)
-                throw new InvalidOperationException("SSH is not connected.");
+            lock (_ioLock)
+            {
+                if (_client == null || !_client.IsConnected)
+                    throw new InvalidOperationException("SSH is not connected.");
 
-            using var cmd = _client.RunCommand(command);
-            if (cmd.ExitStatus != 0)
-                throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}");
-            return cmd.Result;
+                using var cmd = _client.RunCommand(command);
+                if (cmd.ExitStatus != 0)
+                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}");
+                return cmd.Result;
+            }
         }
 
         public string RunSudoCommand(string command)
         {
-            if (_client == null || !_client.IsConnected)
-                throw new InvalidOperationException("SSH is not connected.");
+            lock (_ioLock)
+            {
+                if (_client == null || !_client.IsConnected)
+                    throw new InvalidOperationException("SSH is not connected.");
 
-            var escapedPassword = _password.Replace("'", "'\\''");
-            var escapedCommand = command.Replace("'", "'\\''");
-            var sudoCommand = $"echo '{escapedPassword}' | sudo -S bash -c 'export LANG=C; echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
+                var escapedPassword = _password.Replace("'", "'\\''");
+                var escapedCommand = command.Replace("'", "'\\''");
+                var sudoCommand = $"echo '{escapedPassword}' | sudo -S bash -c 'export LANG=C; echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
 
-            using var cmd = _client.RunCommand(sudoCommand);
-            var output = cmd.Result;
+                using var cmd = _client.RunCommand(sudoCommand);
+                var output = cmd.Result;
 
-            // Everything before the marker is sudo noise (password prompt, lecture, etc.)
-            var markerIndex = output.IndexOf(SudoMarker, StringComparison.Ordinal);
-            if (markerIndex >= 0)
-                output = output[(markerIndex + SudoMarker.Length)..].TrimStart('\n', '\r');
+                // Everything before the marker is sudo noise (password prompt, lecture, etc.)
+                var markerIndex = output.IndexOf(SudoMarker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
+                    output = output[(markerIndex + SudoMarker.Length)..].TrimStart('\n', '\r');
 
-            if (cmd.ExitStatus != 0)
-                throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}");
+                if (cmd.ExitStatus != 0)
+                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}");
 
-            return output;
+                return output;
+            }
         }
 
         public void Disconnect() => _client?.Disconnect();

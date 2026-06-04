@@ -381,6 +381,52 @@ namespace VmManager.Services
         public void CreateZvol(string name, int sizeGiB) =>
             _ssh.RunSudoCommand($"zfs create -V {sizeGiB}G {name}");
 
+        // ---- Remote file browsing (over the sudo channel, so root-owned dirs are listable) ----
+
+        /// <summary>
+        /// Lists a directory on the host. Runs as root via sudo so root-owned paths (e.g.
+        /// /var/lib/libvirt/images) are visible. Output is NUL-delimited records of
+        /// type \t size \t mtime \t name, so names with spaces/newlines survive.
+        /// Throws if the path is missing/unreadable.
+        /// </summary>
+        public List<RemoteEntry> ListDirectory(string path)
+        {
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+            var cmd = $"p=$(echo {b64} | base64 -d); " +
+                      "find \"$p\" -maxdepth 1 -mindepth 1 -printf '%Y\\t%s\\t%TY-%Tm-%Td %TH:%TM\\t%f\\0'";
+            var raw = _ssh.RunSudoCommand(cmd);
+
+            var list = new List<RemoteEntry>();
+            foreach (var record in raw.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = record.Split('\t', 4);
+                if (f.Length < 4) continue;
+                if (!long.TryParse(f[1], out var size)) size = 0;
+                list.Add(new RemoteEntry
+                {
+                    IsDir = f[0] == "d",
+                    Size = size,
+                    Modified = f[2],
+                    Name = f[3],
+                });
+            }
+            return list;
+        }
+
+        /// <summary>Parent directory of an absolute POSIX path, or null at the root.</summary>
+        public static string? ParentPath(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path == "/") return null;
+            var trimmed = path.TrimEnd('/');
+            int slash = trimmed.LastIndexOf('/');
+            if (slash <= 0) return "/";
+            return trimmed[..slash];
+        }
+
+        /// <summary>Joins a directory and child name with a single POSIX separator.</summary>
+        public static string CombinePath(string dir, string name) =>
+            dir == "/" ? "/" + name : dir.TrimEnd('/') + "/" + name;
+
         // ---- Network -------------------------------------------------------
 
         public void AttachNic(string vm, string type, string source, string model) =>

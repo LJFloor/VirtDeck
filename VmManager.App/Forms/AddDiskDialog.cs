@@ -23,7 +23,8 @@ namespace VmManager.Forms
             _virsh = virsh;
             _vmName = vmName;
             InitializeComponent();
-            txtPath.Text = $"/var/lib/libvirt/images/{vmName}-disk.qcow2";
+            pathPicker.Virsh = virsh;
+            pathPicker.Path = $"/var/lib/libvirt/images/{vmName}-disk.qcow2";
         }
 
         private async void AddDiskDialog_Load(object? sender, EventArgs e)
@@ -67,8 +68,18 @@ namespace VmManager.Forms
             bool qcow2 = rdoQcow2.Checked, zvol = rdoZvol.Checked, cdrom = rdoCdrom.Checked;
             bool createZvol = zvol && cboZvol.SelectedItem is string; // the sentinel item
 
-            lblPath.Visible = txtPath.Visible = qcow2 || cdrom;
+            lblPath.Visible = pathPicker.Visible = qcow2 || cdrom;
             lblPath.Text = cdrom ? "ISO path:" : "Path:";
+            if (cdrom)
+            {
+                pathPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
+                pathPicker.DialogTitle = "Select ISO image";
+            }
+            else
+            {
+                pathPicker.Filter = "Disk images (*.qcow2;*.img;*.raw;*.qed;*.vmdk)|*.qcow2;*.img;*.raw;*.qed;*.vmdk|All files (*.*)|*.*";
+                pathPicker.DialogTitle = "Select disk image location";
+            }
             lblZvol.Visible = cboZvol.Visible = zvol;
 
             lblSize.Visible = nudSize.Visible = lblSizeUnit.Visible = qcow2;
@@ -110,7 +121,7 @@ namespace VmManager.Forms
             }
             else
             {
-                var path = txtPath.Text.Trim();
+                var path = pathPicker.Path.Trim();
                 if (!PathRegex.IsMatch(path))
                 {
                     Warn("Path contains invalid characters.");

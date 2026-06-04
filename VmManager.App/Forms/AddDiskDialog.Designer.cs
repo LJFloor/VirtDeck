@@ -7,7 +7,7 @@ namespace VmManager.Forms
         private RadioButton rdoZvol;
         private RadioButton rdoCdrom;
         private Label lblPath;
-        private TextBox txtPath;
+        private VmManager.Controls.RemotePathTextBox pathPicker;
         private Label lblSize;
         private NumericUpDown nudSize;
         private Label lblSizeUnit;
@@ -37,7 +37,7 @@ namespace VmManager.Forms
             rdoZvol = new RadioButton();
             rdoCdrom = new RadioButton();
             lblPath = new Label();
-            txtPath = new TextBox();
+            pathPicker = new VmManager.Controls.RemotePathTextBox();
             lblSize = new Label();
             nudSize = new NumericUpDown();
             lblSizeUnit = new Label();
@@ -74,8 +74,8 @@ namespace VmManager.Forms
             lblPath.Text = "Path:";
             lblPath.Location = new Point(180, 14);
             lblPath.AutoSize = true;
-            txtPath.Location = new Point(180, 32);
-            txtPath.Size = new Size(258, 23);
+            pathPicker.Location = new Point(180, 32);
+            pathPicker.Size = new Size(258, 23);
 
             lblZvol.Text = "Volume:";
             lblZvol.Location = new Point(180, 14);
@@ -151,7 +151,7 @@ namespace VmManager.Forms
             Controls.AddRange(new Control[]
             {
                 rdoQcow2, rdoZvol, rdoCdrom,
-                lblPath, txtPath, lblZvol, cboZvol,
+                lblPath, pathPicker, lblZvol, cboZvol,
                 lblSize, nudSize, lblSizeUnit,
                 lblNewVol, txtNewVol, lblNewSize, nudNewSize, lblNewSizeUnit,
                 lblBus, cboBus, btnOk, btnCancel
