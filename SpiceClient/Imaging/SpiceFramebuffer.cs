@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -24,8 +25,10 @@ public sealed class SpiceFramebuffer : IDisposable
     private GCHandle _handle;
     private bool _disposed;
 
-    private bool _hasDirty;
-    private int _dx0, _dy0, _dx1, _dy1;
+    // Dirty regions accumulated since the last paint (guarded by SyncRoot). Bounded so a flood of
+    // scattered draws collapses to one bounding box instead of growing without limit.
+    private const int MaxDirtyRects = 32;
+    private readonly List<Rectangle> _dirty = new();
 
     public SpiceFramebuffer(int width, int height)
     {
@@ -121,28 +124,27 @@ public sealed class SpiceFramebuffer : IDisposable
 
     private void AddDirty(int x, int y, int w, int h)
     {
-        int x1 = x + w, y1 = y + h;
-        if (!_hasDirty)
+        if (w <= 0 || h <= 0) return;
+        var rect = new Rectangle(x, y, w, h);
+        if (_dirty.Count >= MaxDirtyRects)
         {
-            _dx0 = x; _dy0 = y; _dx1 = x1; _dy1 = y1;
-            _hasDirty = true;
+            // Too many regions — collapse all (incl. this one) into one bounding box.
+            var u = rect;
+            foreach (var d in _dirty) u = Rectangle.Union(u, d);
+            _dirty.Clear();
+            _dirty.Add(u);
+            return;
         }
-        else
-        {
-            if (x < _dx0) _dx0 = x;
-            if (y < _dy0) _dy0 = y;
-            if (x1 > _dx1) _dx1 = x1;
-            if (y1 > _dy1) _dy1 = y1;
-        }
+        _dirty.Add(rect);
     }
 
-    /// <summary>Returns the accumulated dirty rectangle and resets it. Call under SyncRoot.</summary>
-    public bool TakeDirty(out Rectangle rect)
+    /// <summary>Returns and clears the dirty regions accumulated since the last call (empty if none). Call under SyncRoot.</summary>
+    public Rectangle[] TakeDirtyRegions()
     {
-        if (!_hasDirty) { rect = Rectangle.Empty; return false; }
-        rect = Rectangle.FromLTRB(_dx0, _dy0, _dx1, _dy1);
-        _hasDirty = false;
-        return true;
+        if (_dirty.Count == 0) return Array.Empty<Rectangle>();
+        var rects = _dirty.ToArray();
+        _dirty.Clear();
+        return rects;
     }
 
     public void Dispose()

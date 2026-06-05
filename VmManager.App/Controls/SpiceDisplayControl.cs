@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using SpiceClient;
 using SpiceClient.Imaging;
@@ -71,22 +72,21 @@ namespace VmManager.Controls
 
         private void RepaintTick(object? sender, EventArgs e)
         {
-            if (_fb == null || !_frameDirty) return;
+            var fb = _fb;
+            if (fb == null || !_frameDirty) return;
             _frameDirty = false;
-            Rectangle dirty;
-            lock (_fb.SyncRoot)
+            Rectangle[] rects;
+            lock (fb.SyncRoot)
             {
-                if (!_fb.TakeDirty(out dirty)) return;
+                rects = fb.TakeDirtyRegions();
             }
-            if (dirty.Width > 0 && dirty.Height > 0)
+            if (rects.Length == 0) return;
+            var o = ImageOrigin(fb);
+            foreach (var r in rects)
             {
-                var fb = _fb;
-                if (fb != null)
-                {
-                    var o = ImageOrigin(fb);
-                    dirty.Offset(o.X, o.Y);   // framebuffer coords -> control coords
-                }
-                Invalidate(dirty);
+                var rr = r;
+                rr.Offset(o.X, o.Y);   // framebuffer coords -> control coords
+                Invalidate(rr);        // builds a precise multi-rect update region; OnPaint clips to it
             }
         }
 
@@ -127,6 +127,10 @@ namespace VmManager.Controls
                 var origin = ImageOrigin(fb);
                 var dst = new Rectangle(origin.X, origin.Y, fb.Width, fb.Height);
                 var src = new Rectangle(0, 0, fb.Width, fb.Height);
+                // It's a strict 1:1 opaque copy — skip blending/interpolation for a faster blit.
+                e.Graphics.CompositingMode = CompositingMode.SourceCopy;
+                e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
                 lock (fb.SyncRoot)
                 {
                     // Explicit pixel rect → 1:1 blit independent of the bitmap's DPI metadata.
