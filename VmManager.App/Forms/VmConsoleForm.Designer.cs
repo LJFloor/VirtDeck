@@ -108,16 +108,17 @@ namespace VmManager.Forms
             btnDisplay.Image = AppIcons.Get("monitor");
             useLzCompressionItem.Image = AppIcons.Get("image");
             useRawBitmapsItem.Image = AppIcons.Get("images");
-            useLzCompressionItem.Text = "Use LZ compression (low bandwidth)";
+            useLzCompressionItem.Text = "Low bandwidth (LZ)";
+            useLzCompressionItem.Checked = true; // matches the client's default request
             useLzCompressionItem.ToolTipText =
-                "Set this VM's SPICE image compression to 'lz' — low bandwidth and decodable\n" +
-                "by this client (avoids the QUIC default). Requires a VM restart to take effect.";
-            useLzCompressionItem.Click += (_, _) => ApplyCompression("lz", "LZ compression");
-            useRawBitmapsItem.Text = "Use raw bitmaps (no compression)";
+                "Ask the server for LZ-compressed images (decodable here; no QUIC/GLZ).\n" +
+                "Applies instantly to this session — no VM change or restart.";
+            useLzCompressionItem.Click += useLz_Click;
+            useRawBitmapsItem.Text = "Raw (no compression)";
             useRawBitmapsItem.ToolTipText =
-                "Set this VM's SPICE image compression to 'off'. Highest bandwidth; rarely needed.\n" +
-                "Requires a VM restart to take effect.";
-            useRawBitmapsItem.Click += (_, _) => ApplyCompression("off", "raw bitmaps");
+                "Ask the server for uncompressed bitmaps. Highest bandwidth.\n" +
+                "Applies instantly to this session — no VM change or restart.";
+            useRawBitmapsItem.Click += useRaw_Click;
             var fitWindowItem = new ToolStripMenuItem("Fit Window") { Image = AppIcons.Get("arrow_out") };
             fitWindowItem.ToolTipText = "Resize the window to the VM's resolution.";
             fitWindowItem.Click += FitWindow_Click;

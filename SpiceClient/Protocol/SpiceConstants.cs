@@ -127,12 +127,20 @@ public static class SpiceConstants
     // Display channel (client -> server)
     public const ushort MSGC_DISPLAY_INIT = 101;
     public const ushort MSGC_DISPLAY_STREAM_REPORT = 102;
+    public const ushort MSGC_DISPLAY_PREFERRED_COMPRESSION = 103;
 
     // Display channel capabilities
     public const int DISPLAY_CAP_SIZED_STREAM = 0;
     public const int DISPLAY_CAP_STREAM_REPORT = 4;
+    public const int DISPLAY_CAP_PREF_COMPRESSION = 6;
     public const int DISPLAY_CAP_MULTI_CODEC = 8;
     public const int DISPLAY_CAP_CODEC_MJPEG = 9;
+
+    // Image-compression modes (payload of MSGC_DISPLAY_PREFERRED_COMPRESSION).
+    // Full set: INVALID=0, OFF=1, AUTO_GLZ=2, AUTO_LZ=3, QUIC=4, GLZ=5, LZ=6, LZ4=7.
+    public const byte IMAGE_COMPRESSION_OFF = 1;     // raw bitmaps
+    public const byte IMAGE_COMPRESSION_AUTO_GLZ = 2; // server default (GLZ + QUIC) — not decodable here
+    public const byte IMAGE_COMPRESSION_LZ = 6;      // LZ only (no QUIC/GLZ) — the safe default for this client
 
     // Video stream codecs
     public const byte VIDEO_CODEC_TYPE_MJPEG = 1;

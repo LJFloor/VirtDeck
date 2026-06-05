@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SpiceClient;
 using SpiceClient.Channels;
+using SpiceClient.Protocol;
 using VmManager.Controls;
 using VmManager.Diagnostics;
 using VmManager.Input;
@@ -222,6 +223,8 @@ namespace VmManager.Forms
                 _connected = true;
                 toolStripStatus.Text = "Connected";
                 UpdateToolbarState();
+                useLzCompressionItem.Checked = true;   // DisplayChannel requests LZ by default on link
+                useRawBitmapsItem.Checked = false;
                 _ = DetectCdromAsync(); // enable the CD/DVD menu if this VM has an optical drive
             }
             catch (Exception ex)
@@ -236,6 +239,8 @@ namespace VmManager.Forms
             _connected = false;
             _cdromTarget = null;
             UpdateToolbarState();
+            useLzCompressionItem.Checked = true;   // neutral default; the channel re-requests LZ on reconnect
+            useRawBitmapsItem.Checked = false;
             try { displayControl.ClearFramebuffer(); } catch { }
             try { _session?.Dispose(); } catch { }
             _session = null;
@@ -653,22 +658,20 @@ namespace VmManager.Forms
             SaveVmSettings();
         }
 
-        private async void ApplyCompression(string mode, string label)
+        private void useLz_Click(object? sender, EventArgs e) =>
+            SetPreferredCompression(SpiceConstants.IMAGE_COMPRESSION_LZ, lz: true);
+
+        private void useRaw_Click(object? sender, EventArgs e) =>
+            SetPreferredCompression(SpiceConstants.IMAGE_COMPRESSION_OFF, lz: false);
+
+        // Runtime SPICE image-compression preference — no VM config change, takes effect immediately.
+        private void SetPreferredCompression(byte mode, bool lz)
         {
-            var result = MessageBox.Show(
-                $"Set this VM's SPICE image compression to '{mode}' ({label})?\n\n" +
-                "The VM must be restarted for it to take effect.",
-                "Image compression", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
-            if (result != DialogResult.OK) return;
-            try
-            {
-                await _virsh.SetImageCompressionAsync(_vmName, mode);
-                toolStripStatus.Text = $"Image compression set to '{mode}' — restart the VM to apply.";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            if (_session == null) return;
+            _session.SetPreferredCompression(mode);
+            useLzCompressionItem.Checked = lz;
+            useRawBitmapsItem.Checked = !lz;
+            toolStripStatus.Text = lz ? "Image compression: LZ" : "Image compression: raw";
         }
 
         private void FitWindow_Click(object? sender, EventArgs e) => FitToResolution(center: false);

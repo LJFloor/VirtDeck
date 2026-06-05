@@ -22,10 +22,15 @@ public sealed class DisplayChannel : SpiceChannel
     // Advertise MJPEG video-stream support so the server streams high-motion regions
     // (animations, video, window drags) as compact JPEG frames it can drop at the
     // source, instead of flooding us with heavy incremental draws.
+    // Default image compression we ask the server to use. LZ is decodable here (unlike the
+    // server default auto_glz, which mixes GLZ+QUIC), so unmodified VMs render with no config change.
+    private byte _preferred = SpiceConstants.IMAGE_COMPRESSION_LZ;
+
     protected override uint[] ChannelCaps() => new[]
     {
         (1u << SpiceConstants.DISPLAY_CAP_SIZED_STREAM) |
         (1u << SpiceConstants.DISPLAY_CAP_STREAM_REPORT) |
+        (1u << SpiceConstants.DISPLAY_CAP_PREF_COMPRESSION) |
         (1u << SpiceConstants.DISPLAY_CAP_MULTI_CODEC) |
         (1u << SpiceConstants.DISPLAY_CAP_CODEC_MJPEG)
     };
@@ -39,6 +44,21 @@ public sealed class DisplayChannel : SpiceChannel
         w.U8(0);                       // glz_dictionary_id
         w.U32(0);                      // glz_dictionary_window_size
         SendMessage(SpiceConstants.MSGC_DISPLAY_INIT, w.ToArray());
+        SendPreferred();               // ask the server for a codec we can decode (default LZ)
+    }
+
+    /// <summary>Runtime image-compression preference (e.g. LZ or OFF) — overrides the VM's configured mode for this session.</summary>
+    public void SetPreferredCompression(byte mode)
+    {
+        _preferred = mode;
+        SendPreferred();
+    }
+
+    private void SendPreferred()
+    {
+        var w = new SpiceWriter(1);
+        w.U8(_preferred);
+        SendMessage(SpiceConstants.MSGC_DISPLAY_PREFERRED_COMPRESSION, w.ToArray());
     }
 
     protected override void ProcessChannelMessage(ushort type, byte[] payload)

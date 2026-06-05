@@ -148,14 +148,6 @@ namespace VmManager.Services
             await RefreshAsync();
         }
 
-        /// <summary>
-        /// Sets the SPICE graphics image compression mode (e.g. "lz" for low-bandwidth
-        /// LZ_RGB that this client decodes, or "off" for raw bitmaps). Requires virt-xml
-        /// on the host and a VM restart to take effect.
-        /// </summary>
-        public Task SetImageCompressionAsync(string name, string mode) =>
-            Task.Run(() => _ssh.RunSudoCommand($"virt-xml {name} --edit --graphics image_compression={mode}"));
-
         // ---- VM editing (offline, persistent config) -----------------------
 
         /// <summary>Reads the full editable config from `virsh dumpxml` + `dominfo`.</summary>

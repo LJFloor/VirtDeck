@@ -34,7 +34,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `CursorShape` — decoded ALPHA cursor (BGRA + hotspot).
 
 ### VmManager.App (WinForms)
-- `Services/` — `SshConnectionManager`, `SshPortForwarder`, `VirshService` (ported verbatim from the old app; sudo via stdin + marker). `VirshService.DisableImageCompressionAsync` is the QUIC fallback (`virt-xml … --graphics image_compression=off`).
+- `Services/` — `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker). Image compression is steered at the protocol level (see below), not via `virt-xml`.
 - `Controls/SpiceDisplayControl` — custom `Control`: paints the framebuffer (1:1 `DrawImage`, double-buffered, ~60 Hz dirty-rect repaint timer), forwards mouse, and **owns all cursor assignment** (the exactly-one-cursor state machine).
 - `Input/WinFormsKeyMap` — VK → AT set-1 scancode. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js — NOT `0xE0XX`. Key-up high bit applied in `InputsChannel.SendKey`.
 - `Interop/CursorInterop` — builds a native `Cursor` (alpha + hotspot) via `CreateIconIndirect`; caller must `DestroyIcon` the HICON on replace/dispose.
@@ -52,7 +52,13 @@ The "Show host cursor" toggle (per-VM, in `HKCU\SOFTWARE\VmManager`) is the user
 
 ## Image compression / QUIC
 
-QUIC and GLZ are not yet decoded. GLZ is disabled via DISPLAY_INIT (`glz_dictionary_window_size=0`). BITMAP + LZ_RGB + JPEG cover most VMs; if a VM's server still sends QUIC the screen won't render — use the console's **Display ▸ Force raw bitmaps** (sets `image compression='off'`, needs a VM restart) or port QUIC from `quic.js`.
+QUIC and GLZ are not decoded. The client decodes BITMAP + LZ_RGB + JPEG, and steers the server **away** from
+QUIC/GLZ at runtime: `DisplayChannel` advertises `DISPLAY_CAP_PREF_COMPRESSION` and sends
+`MSGC_DISPLAY_PREFERRED_COMPRESSION` = **LZ** right after `DISPLAY_INIT` (GLZ is also disabled via
+`glz_dictionary_window_size=0`). So unmodified VMs (even on the `auto_glz` default) render with **no per-VM
+`<image compression>` change or restart**. The console's **Display ▸ Low bandwidth (LZ) / Raw** items send this
+message live (`SpiceSession.SetPreferredCompression`). Porting QUIC/GLZ is only needed to ride the server's
+native `auto_glz` for better bandwidth — not required for correctness.
 
 ## Conventions
 

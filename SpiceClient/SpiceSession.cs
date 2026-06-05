@@ -24,6 +24,7 @@ public sealed class SpiceSession : IDisposable
 
     public SpiceFramebuffer? Framebuffer { get; private set; }
     public InputsChannel? Inputs { get; private set; }
+    public DisplayChannel? Display { get; private set; }
 
     /// <summary>When true, channels log every received message (very chatty). Default off.</summary>
     public volatile bool VerboseLogging;
@@ -86,6 +87,7 @@ public sealed class SpiceSession : IDisposable
         };
         if (ch == null) return;
         if (ch is InputsChannel inp) Inputs = inp;
+        if (ch is DisplayChannel disp) Display = disp;
         lock (_channels) _channels.Add(ch);
         ch.Start();
     }
@@ -98,6 +100,9 @@ public sealed class SpiceSession : IDisposable
 
     /// <summary>Ask the guest agent to change resolution (no-op if the agent isn't connected).</summary>
     public void RequestResize(int width, int height) => _main?.SendMonitorsConfig(width, height);
+
+    /// <summary>Request a runtime image-compression mode from the server (e.g. LZ or OFF) — no VM config change.</summary>
+    public void SetPreferredCompression(byte mode) => Display?.SetPreferredCompression(mode);
 
     /// <summary>Send a local file to the guest (drops it in the guest, via vdagent file transfer).</summary>
     public void SendFile(string path) => _main?.SendFile(path);
