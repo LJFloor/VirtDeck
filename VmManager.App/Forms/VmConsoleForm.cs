@@ -20,6 +20,14 @@ namespace VmManager.Forms
         private SpiceSession? _session;
         private bool _connected;
         private bool _closing;
+
+        // CD/DVD media (set after connect when the VM has an optical drive)
+        private string? _cdromTarget;
+        private string? _cdromBus;
+        private readonly List<IsoHttpServer> _isoServers = new(); // streamed "Local machine" media; alive while open
+        private const string GuestVirtioServerPath = "/usr/share/virtio-win/virtio-win.iso";
+        private const string GuestVirtioUrl =
+            "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
         private bool _settingsLoaded;
         private Size? _lastResolution;
         private bool _autoFitted;
@@ -208,6 +216,7 @@ namespace VmManager.Forms
                 _session.Start();
                 _connected = true;
                 toolStripStatus.Text = "Connected";
+                _ = DetectCdromAsync(); // show the CD/DVD menu if this VM has an optical drive
             }
             catch (Exception ex)
             {
@@ -219,6 +228,8 @@ namespace VmManager.Forms
         private void CleanupConnection()
         {
             _connected = false;
+            _cdromTarget = null;
+            btnCdDvd.Visible = false;
             try { displayControl.ClearFramebuffer(); } catch { }
             try { _session?.Dispose(); } catch { }
             _session = null;
@@ -471,6 +482,99 @@ namespace VmManager.Forms
             }
         }
 
+        // ---- CD/DVD media --------------------------------------------------
+
+        private async Task DetectCdromAsync()
+        {
+            try
+            {
+                var cfg = await Task.Run(() => _virsh.GetVmConfig(_vmName));
+                var cd = cfg.Disks.FirstOrDefault(d => d.IsCdrom);
+                RunUi(() =>
+                {
+                    if (_closing) return;
+                    if (cd != null)
+                    {
+                        _cdromTarget = cd.Target;
+                        _cdromBus = string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus;
+                        btnCdDvd.Visible = true;
+                    }
+                    else
+                    {
+                        _cdromTarget = null;
+                        btnCdDvd.Visible = false;
+                    }
+                });
+            }
+            catch { /* leave the menu hidden */ }
+        }
+
+        private void cdEject_Click(object? sender, EventArgs e)
+        {
+            if (_cdromTarget is not { } t) return;
+            RunMediaAction("Eject", () => _virsh.EjectMedia(_vmName, t, live: true));
+        }
+
+        private void cdSelectServer_Click(object? sender, EventArgs e)
+        {
+            if (_cdromTarget is not { } t) return;
+            using var dlg = new RemoteFileBrowserDialog(_virsh, "/var/lib/libvirt/images",
+                "ISO images (*.iso)|*.iso|All files (*.*)|*.*", false, "Select ISO on the server");
+            if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedPath is not { } iso) return;
+            RunMediaAction("Insert media", () => _virsh.ChangeMedia(_vmName, t, iso, live: true));
+        }
+
+        private void cdSelectLocal_Click(object? sender, EventArgs e)
+        {
+            if (_cdromTarget is not { } t) return;
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*",
+                Title = "Select an ISO on this PC",
+                CheckFileExists = true,
+            };
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+            var local = ofd.FileName;
+            string bus = _cdromBus ?? "sata";
+            RunMediaAction("Insert (streamed)", () =>
+            {
+                var server = new IsoHttpServer();
+                server.Start(local, _ssh.Client);
+                lock (_isoServers) _isoServers.Add(server);
+                _virsh.UpdateCdromNetwork(_vmName, t, bus, server.RemoteUrl, live: true);
+            });
+        }
+
+        private void cdGuestIso_Click(object? sender, EventArgs e)
+        {
+            if (_cdromTarget is not { } t) return;
+            string bus = _cdromBus ?? "sata";
+            RunMediaAction("Insert guest agent ISO", () =>
+            {
+                // Prefer the host's local virtio-win ISO; otherwise let QEMU stream it over HTTPS.
+                if (_virsh.FileExistsOnHost(GuestVirtioServerPath))
+                    _virsh.ChangeMedia(_vmName, t, GuestVirtioServerPath, live: true);
+                else
+                    _virsh.UpdateCdromNetwork(_vmName, t, bus, GuestVirtioUrl, live: true);
+            });
+        }
+
+        private async void RunMediaAction(string label, Action op)
+        {
+            toolStripStatus.Text = $"CD/DVD: {label}…";
+            try
+            {
+                await Task.Run(op);
+                if (!_closing) toolStripStatus.Text = $"CD/DVD: {label} — done";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"{label} failed:\n{ex.Message}", "CD/DVD",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!_closing) toolStripStatus.Text = "Ready";
+            }
+        }
+
         private void ShowHostCursor_Click(object? sender, EventArgs e)
         {
             displayControl.Policy = showHostCursorItem.Checked
@@ -599,6 +703,7 @@ namespace VmManager.Forms
             SpiceLog.VerboseChanged -= OnVerboseChanged;
             _virsh.VmsChanged -= OnVmsChanged;
             if (_clipboardListening) { RemoveClipboardFormatListener(Handle); _clipboardListening = false; }
+            lock (_isoServers) { foreach (var s in _isoServers) s.Dispose(); _isoServers.Clear(); }
             UninstallKeyboardHook();
             CleanupConnection();
         }

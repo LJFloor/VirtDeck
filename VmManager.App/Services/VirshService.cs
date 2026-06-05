@@ -323,12 +323,12 @@ namespace VmManager.Services
         /// `virsh attach-device|update-device … --config`. RunSudoCommand wraps the whole pipeline in
         /// `sudo bash -c`, so the redirect/&amp;&amp;/rm all run as root.
         /// </summary>
-        private void RunDeviceXml(string verb, string vm, string xml)
+        private void RunDeviceXml(string verb, string vm, string xml, string scope = "--config")
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
             var tmp = $"/tmp/vmedit-{Guid.NewGuid():N}.xml";
             // Capture the virsh exit code before rm so a rejected attach/update actually throws.
-            _ssh.RunSudoCommand($"echo {b64} | base64 -d > {tmp} && virsh {verb} {vm} {tmp} --config; rc=$?; rm -f {tmp}; exit $rc");
+            _ssh.RunSudoCommand($"echo {b64} | base64 -d > {tmp} && virsh {verb} {vm} {tmp} {scope}; rc=$?; rm -f {tmp}; exit $rc");
         }
 
         public void AttachCdrom(string vm, string iso, string target, string bus) =>
@@ -339,19 +339,23 @@ namespace VmManager.Services
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
         /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
         /// </summary>
-        public void AttachNetworkCdrom(string vm, string url, string target)
+        public void AttachNetworkCdrom(string vm, string url, string target) =>
+            RunDeviceXml("attach-device", vm, BuildNetworkCdromXml(url, target, "sata"));
+
+        /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO — live by default.</summary>
+        public void UpdateCdromNetwork(string vm, string target, string bus, string url, bool live = true) =>
+            RunDeviceXml("update-device", vm, BuildNetworkCdromXml(url, target, bus), live ? "--live" : "--config");
+
+        private static string BuildNetworkCdromXml(string url, string target, string bus)
         {
             var uri = new Uri(url);
             string name = (uri.AbsolutePath + uri.Query).TrimStart('/');
-
             var src = new StringBuilder($"<source protocol='{uri.Scheme}' name='{XmlAttr(name)}'>");
             src.Append($"<host name='{XmlAttr(uri.Host)}'");
             if (uri.Port > 0) src.Append($" port='{uri.Port}'");
             src.Append("/></source>");
-
-            var xml = "<disk type='network' device='cdrom'><driver name='qemu' type='raw'/>" +
-                      $"{src}<target dev='{target}' bus='sata'/><readonly/></disk>";
-            RunDeviceXml("attach-device", vm, xml);
+            return "<disk type='network' device='cdrom'><driver name='qemu' type='raw'/>" +
+                   $"{src}<target dev='{XmlAttr(target)}' bus='{XmlAttr(bus)}'/><readonly/></disk>";
         }
 
         private static string XmlAttr(string s) => s
@@ -361,11 +365,22 @@ namespace VmManager.Services
         public void DetachDisk(string vm, string target) =>
             _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config");
 
-        public void ChangeMedia(string vm, string target, string iso) =>
-            _ssh.RunSudoCommand($"virsh change-media {vm} {target} {iso} --update --config");
+        public void ChangeMedia(string vm, string target, string iso, bool live = false) =>
+            _ssh.RunSudoCommand($"virsh change-media {vm} {target} {iso} --update {(live ? "--live" : "--config")}");
 
-        public void EjectMedia(string vm, string target) =>
-            _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject --config");
+        public void EjectMedia(string vm, string target, bool live = false) =>
+            _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject {(live ? "--live" : "--config")}");
+
+        /// <summary>True if a regular file exists on the host at the given path (base64'd to dodge quoting).</summary>
+        public bool FileExistsOnHost(string path)
+        {
+            try
+            {
+                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+                return _ssh.RunSudoCommand($"p=$(echo {b64} | base64 -d); test -f \"$p\" && echo 1 || echo 0").Trim() == "1";
+            }
+            catch { return false; }
+        }
 
         public List<ZvolEntry> ListZvols()
         {

@@ -9,6 +9,7 @@ namespace VmManager.Forms
         private ToolStripDropDownButton btnKeyboard;
         private ToolStripDropDownButton btnMouse;
         private ToolStripDropDownButton btnDisplay;
+        private ToolStripDropDownButton btnCdDvd;
         private ToolStripButton btnFitWindow;
         private ToolStripButton btnLog;
         private ToolStripMenuItem menuStart;
@@ -40,6 +41,7 @@ namespace VmManager.Forms
             btnKeyboard = new ToolStripDropDownButton();
             btnMouse = new ToolStripDropDownButton();
             btnDisplay = new ToolStripDropDownButton();
+            btnCdDvd = new ToolStripDropDownButton();
             btnFitWindow = new ToolStripButton();
             menuStart = new ToolStripMenuItem();
             menuShutdown = new ToolStripMenuItem();
@@ -120,6 +122,24 @@ namespace VmManager.Forms
             useRawBitmapsItem.Click += (_, _) => ApplyCompression("off", "raw bitmaps");
             btnDisplay.DropDownItems.AddRange(new ToolStripItem[] { useLzCompressionItem, useRawBitmapsItem });
 
+            // CD/DVD — only shown when the VM has an optical drive (set in code after connect)
+            btnCdDvd.Text = "CD/DVD";
+            btnCdDvd.ShowDropDownArrow = true;
+            btnCdDvd.AutoToolTip = false;
+            btnCdDvd.Image = AppIcons.Get("drive_cd");
+            btnCdDvd.Visible = false;
+            var cdEjectItem = new ToolStripMenuItem("Eject") { Image = AppIcons.Get("control_stop") };
+            cdEjectItem.Click += cdEject_Click;
+            var cdSelectItem = new ToolStripMenuItem("Select file") { Image = AppIcons.Get("drive_cd") };
+            var cdSelectServerItem = new ToolStripMenuItem("On the server…");
+            cdSelectServerItem.Click += cdSelectServer_Click;
+            var cdSelectLocalItem = new ToolStripMenuItem("Local machine…");
+            cdSelectLocalItem.Click += cdSelectLocal_Click;
+            cdSelectItem.DropDownItems.AddRange(new ToolStripItem[] { cdSelectServerItem, cdSelectLocalItem });
+            var cdGuestIsoItem = new ToolStripMenuItem("Insert Guest Agent ISO") { Image = AppIcons.Get("drive") };
+            cdGuestIsoItem.Click += cdGuestIso_Click;
+            btnCdDvd.DropDownItems.AddRange(new ToolStripItem[] { cdEjectItem, cdSelectItem, cdGuestIsoItem });
+
             // Fit window
             btnFitWindow.Text = "Fit Window";
             btnFitWindow.AutoToolTip = false;
@@ -135,7 +155,7 @@ namespace VmManager.Forms
             btnLog.Click += (_, _) => LogForm.ShowLog();
 
             toolStrip.Items.AddRange(new ToolStripItem[]
-                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnFitWindow, btnLog });
+                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnCdDvd, btnFitWindow, btnLog });
 
             // displayControl
             displayControl.Dock = DockStyle.Fill;
