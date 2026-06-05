@@ -117,13 +117,11 @@ namespace VmManager.Forms
             foreach (var d in _original!.Disks)
             {
                 if (_diskRemoves.Contains(d.Target)) continue;
-                var eff = _diskEdits.TryGetValue(d.Target, out var ed) ? ed : d;
                 string src = _mediaChanges.TryGetValue(d.Target, out var iso) ? (iso ?? "(empty)") : d.Source;
                 var it = new ListViewItem(d.Target);
                 it.SubItems.Add(d.IsCdrom ? "cdrom" : "disk");
                 it.SubItems.Add(d.Bus);
                 it.SubItems.Add(src);
-                it.SubItems.Add(d.IsCdrom ? "" : DriverDesc(eff.DriverType, eff.Cache, eff.Io, eff.Discard));
                 it.Tag = d;
                 if (_diskEdits.ContainsKey(d.Target)) it.ForeColor = Color.Navy; // pending driver edit
                 lvDisks.Items.Add(it);
@@ -134,21 +132,23 @@ namespace VmManager.Forms
                 it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
                 it.SubItems.Add(op.Bus);
                 it.SubItems.Add(op.Source);
-                it.SubItems.Add(op.IsCdrom ? "" : DriverDesc(op.Format, op.Cache, op.Io, op.Discard));
                 it.Tag = op;
                 it.ForeColor = SystemColors.GrayText; // pending
                 lvDisks.Items.Add(it);
             }
         }
 
-        /// <summary>Compact driver summary for the list, e.g. "raw  none/native/unmap" or "qcow2".</summary>
-        private static string DriverDesc(string type, string cache, string io, string discard)
+        // Change ISO / Eject only apply to a CD-ROM, so they're shown only when one is selected.
+        private void lvDisks_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            string t = string.IsNullOrEmpty(type) ? "auto" : type;
-            if (string.IsNullOrEmpty(cache) && string.IsNullOrEmpty(io) && string.IsNullOrEmpty(discard))
-                return t;
-            string Dash(string s) => string.IsNullOrEmpty(s) ? "-" : s;
-            return $"{t}  {Dash(cache)}/{Dash(io)}/{Dash(discard)}";
+            bool isCdrom = lvDisks.SelectedItems.Count > 0 && lvDisks.SelectedItems[0].Tag switch
+            {
+                DiskInfo d => d.IsCdrom,
+                DiskAddOp op => op.IsCdrom,
+                _ => false
+            };
+            btnChangeIso.Visible = isCdrom;
+            btnEject.Visible = isCdrom;
         }
 
         private string AllocTarget(string bus)

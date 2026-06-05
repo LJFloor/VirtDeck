@@ -25,9 +25,11 @@ namespace VmManager.Forms
         private string? _cdromTarget;
         private string? _cdromBus;
         private readonly List<IsoHttpServer> _isoServers = new(); // streamed "Local machine" media; alive while open
-        private const string GuestVirtioServerPath = "/usr/share/virtio-win/virtio-win.iso";
         private const string GuestVirtioUrl =
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
+        // Keep the URL's versioned filename; download into /var/lib/libvirt/images (AppArmor-allowed for live change-media).
+        private static string GuestVirtioServerPath =>
+            "/var/lib/libvirt/images/" + GuestVirtioUrl[(GuestVirtioUrl.LastIndexOf('/') + 1)..];
         private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
         private const string CdromTip = "Eject or change the VM's CD/DVD media.";
         private bool _settingsLoaded;
@@ -169,6 +171,7 @@ namespace VmManager.Forms
             InstallKeyboardHook();
             _clipboardListening = AddClipboardFormatListener(Handle); // watch host clipboard for host→guest sync
             ActiveControl = displayControl;
+            UpdateToolbarState(); // everything but Power disabled until connected
             await TryConnectOrShowStatus();
         }
 
@@ -218,7 +221,8 @@ namespace VmManager.Forms
                 _session.Start();
                 _connected = true;
                 toolStripStatus.Text = "Connected";
-                _ = DetectCdromAsync(); // show the CD/DVD menu if this VM has an optical drive
+                UpdateToolbarState();
+                _ = DetectCdromAsync(); // enable the CD/DVD menu if this VM has an optical drive
             }
             catch (Exception ex)
             {
@@ -231,8 +235,7 @@ namespace VmManager.Forms
         {
             _connected = false;
             _cdromTarget = null;
-            btnCdDvd.Enabled = false;
-            btnCdDvd.ToolTipText = NoCdromTip;
+            UpdateToolbarState();
             try { displayControl.ClearFramebuffer(); } catch { }
             try { _session?.Dispose(); } catch { }
             _session = null;
@@ -487,6 +490,31 @@ namespace VmManager.Forms
 
         // ---- CD/DVD media --------------------------------------------------
 
+        /// <summary>Enables the toolbar menus only while connected (Power and Log stay available).</summary>
+        private void UpdateToolbarState()
+        {
+            bool live = _connected;
+            btnKeyboard.Enabled = live;
+            btnMouse.Enabled = live;
+            btnDisplay.Enabled = live; // gates its Fit Window / compression items too
+
+            if (!live)
+            {
+                btnCdDvd.Enabled = false;
+                btnCdDvd.ToolTipText = "Start the VM to manage CD/DVD.";
+            }
+            else if (_cdromTarget == null)
+            {
+                btnCdDvd.Enabled = false;
+                btnCdDvd.ToolTipText = NoCdromTip;
+            }
+            else
+            {
+                btnCdDvd.Enabled = true;
+                btnCdDvd.ToolTipText = CdromTip;
+            }
+        }
+
         private async Task DetectCdromAsync()
         {
             try
@@ -496,19 +524,9 @@ namespace VmManager.Forms
                 RunUi(() =>
                 {
                     if (_closing) return;
-                    if (cd != null)
-                    {
-                        _cdromTarget = cd.Target;
-                        _cdromBus = string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus;
-                        btnCdDvd.Enabled = true;
-                        btnCdDvd.ToolTipText = CdromTip;
-                    }
-                    else
-                    {
-                        _cdromTarget = null;
-                        btnCdDvd.Enabled = false;
-                        btnCdDvd.ToolTipText = NoCdromTip;
-                    }
+                    _cdromTarget = cd?.Target;
+                    _cdromBus = cd == null ? null : (string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus);
+                    UpdateToolbarState();
                 });
             }
             catch { /* leave the menu hidden */ }
@@ -517,7 +535,9 @@ namespace VmManager.Forms
         private void cdEject_Click(object? sender, EventArgs e)
         {
             if (_cdromTarget is not { } t) return;
-            RunMediaAction("Eject", () => _virsh.EjectMedia(_vmName, t, live: true));
+            RunMediaAction("Eject",
+                () => _virsh.EjectMedia(_vmName, t, live: true),
+                () => _virsh.EjectMedia(_vmName, t, live: false));
         }
 
         private void cdSelectServer_Click(object? sender, EventArgs e)
@@ -526,7 +546,9 @@ namespace VmManager.Forms
             using var dlg = new RemoteFileBrowserDialog(_virsh, "/var/lib/libvirt/images",
                 "ISO images (*.iso)|*.iso|All files (*.*)|*.*", false, "Select ISO on the server");
             if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedPath is not { } iso) return;
-            RunMediaAction("Insert media", () => _virsh.ChangeMedia(_vmName, t, iso, live: true));
+            RunMediaAction("Insert media",
+                () => _virsh.ChangeMedia(_vmName, t, iso, live: true),
+                () => _virsh.ChangeMedia(_vmName, t, iso, live: false));
         }
 
         private void cdSelectLocal_Click(object? sender, EventArgs e)
@@ -550,32 +572,75 @@ namespace VmManager.Forms
             });
         }
 
-        private void cdGuestIso_Click(object? sender, EventArgs e)
+        private async void cdGuestIso_Click(object? sender, EventArgs e)
         {
             if (_cdromTarget is not { } t) return;
-            string bus = _cdromBus ?? "sata";
-            RunMediaAction("Insert guest agent ISO", () =>
+
+            bool exists;
+            try { exists = await Task.Run(() => _virsh.FileExistsOnHost(GuestVirtioServerPath)); }
+            catch (Exception ex)
             {
-                // Prefer the host's local virtio-win ISO; otherwise let QEMU stream it over HTTPS.
-                if (_virsh.FileExistsOnHost(GuestVirtioServerPath))
-                    _virsh.ChangeMedia(_vmName, t, GuestVirtioServerPath, live: true);
-                else
-                    _virsh.UpdateCdromNetwork(_vmName, t, bus, GuestVirtioUrl, live: true);
-            });
+                MessageBox.Show(this, ex.Message, "CD/DVD", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!exists)
+            {
+                if (MessageBox.Show(this,
+                        $"Guest ISO not found on the server. Download it to {GuestVirtioServerPath}?",
+                        "Insert Guest Agent ISO", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return;
+                using var dl = new DownloadProgressDialog(_virsh, GuestVirtioUrl, GuestVirtioServerPath);
+                if (dl.ShowDialog(this) != DialogResult.OK) return; // cancelled or failed
+            }
+
+            RunMediaAction("Insert guest agent ISO",
+                () => _virsh.ChangeMedia(_vmName, t, GuestVirtioServerPath, live: true),
+                () => _virsh.ChangeMedia(_vmName, t, GuestVirtioServerPath, live: false));
         }
 
-        private async void RunMediaAction(string label, Action op)
+        private async void RunMediaAction(string label, Action liveOp, Action? configOp = null)
         {
             toolStripStatus.Text = $"CD/DVD: {label}…";
             try
             {
-                await Task.Run(op);
+                await Task.Run(liveOp);
                 if (!_closing) toolStripStatus.Text = $"CD/DVD: {label} — done";
+                return;
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"{label} failed:\n{ex.Message}", "CD/DVD",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Changing media on a running VM can be blocked by the host (e.g. an AppArmor profile reload).
+                // Offer to apply it to the saved config instead — no live relabel, effective after a restart.
+                if (configOp == null || _closing)
+                {
+                    if (!_closing)
+                    {
+                        MessageBox.Show(this, $"{label} failed:\n{ex.Message}", "CD/DVD",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        toolStripStatus.Text = "Ready";
+                    }
+                    return;
+                }
+                if (MessageBox.Show(this,
+                        $"{label} on the running VM failed:\n{ex.Message}\n\nApply it to the saved configuration "
+                        + "instead? It will take effect the next time the VM starts.",
+                        "CD/DVD", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    toolStripStatus.Text = "Ready";
+                    return;
+                }
+            }
+
+            try
+            {
+                await Task.Run(configOp);
+                if (!_closing) toolStripStatus.Text = $"CD/DVD: {label} — saved (restart the VM to apply)";
+            }
+            catch (Exception ex2)
+            {
+                MessageBox.Show(this, $"{label} failed:\n{ex2.Message}", "CD/DVD",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 if (!_closing) toolStripStatus.Text = "Ready";
             }
         }

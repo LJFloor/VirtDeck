@@ -5,6 +5,7 @@ namespace VmManager.Forms
         private System.ComponentModel.IContainer components = null;
         private TextBox txtDir;
         private Button btnUp;
+        private ToolTip toolTip;
         private ListView lvFiles;
         private ColumnHeader colName;
         private ColumnHeader colSize;
@@ -27,6 +28,7 @@ namespace VmManager.Forms
             components = new System.ComponentModel.Container();
             txtDir = new TextBox();
             btnUp = new Button();
+            toolTip = new ToolTip(components);
             lvFiles = new ListView();
             colName = new ColumnHeader();
             colSize = new ColumnHeader();
@@ -42,14 +44,15 @@ namespace VmManager.Forms
 
             // Path bar
             txtDir.Location = new Point(12, 12);
-            txtDir.Size = new Size(524, 23);
+            txtDir.Size = new Size(566, 23);
             txtDir.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             txtDir.KeyDown += txtDir_KeyDown;
-            btnUp.Text = "Up";
-            btnUp.Location = new Point(542, 11);
-            btnUp.Size = new Size(70, 25);
+            btnUp.Image = AppIcons.Get("arrow_up");
+            btnUp.Location = new Point(584, 11);
+            btnUp.Size = new Size(28, 25);
             btnUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnUp.Click += btnUp_Click;
+            toolTip.SetToolTip(btnUp, "Up one folder");
 
             // File list
             lvFiles.Location = new Point(12, 44);

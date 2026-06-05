@@ -382,6 +382,67 @@ namespace VmManager.Services
             catch { return false; }
         }
 
+        // ---- Host download (e.g. the guest-agent ISO) ----------------------
+
+        /// <summary>Content-Length of a URL (follows redirects), or -1 if unknown.</summary>
+        public long GetUrlContentLength(string url)
+        {
+            try
+            {
+                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(url));
+                var headers = _ssh.RunSudoCommand($"u=$(echo {b64} | base64 -d); curl -sIL --max-time 25 \"$u\"");
+                long total = -1;
+                foreach (var line in headers.Split('\n'))
+                {
+                    var m = Regex.Match(line, @"(?i)^\s*content-length:\s*(\d+)");
+                    if (m.Success) total = long.Parse(m.Groups[1].Value); // last one wins (after redirects)
+                }
+                return total;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// Starts a detached server-side download of <paramref name="url"/> to <paramref name="destPath"/>
+        /// (downloads to .part, then renames; writes .dlstatus = 0/1). Returns immediately so it doesn't
+        /// hold the SSH lock — poll with <see cref="PollHostDownload"/>.
+        /// </summary>
+        public void StartHostDownload(string url, string destPath)
+        {
+            var script =
+                $"dest='{destPath}'; url='{url}'\n" +
+                "mkdir -p \"$(dirname \"$dest\")\"; rm -f \"$dest.dlstatus\" \"$dest.part\"\n" +
+                "if curl -fL --retry 2 -o \"$dest.part\" \"$url\"; then mv -f \"$dest.part\" \"$dest\"; echo 0 > \"$dest.dlstatus\"; " +
+                "else echo 1 > \"$dest.dlstatus\"; rm -f \"$dest.part\"; fi\n";
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
+            _ssh.RunSudoCommand($"setsid bash -c \"$(echo {b64} | base64 -d)\" >/dev/null 2>&1 </dev/null &");
+        }
+
+        /// <summary>Polls a download: bytes fetched so far, whether it finished, and whether it succeeded.</summary>
+        public (long bytes, bool done, bool ok) PollHostDownload(string destPath)
+        {
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(destPath));
+            var outp = _ssh.RunSudoCommand(
+                $"d=$(echo {b64} | base64 -d); " +
+                "sz=$(stat -c %s \"$d.part\" 2>/dev/null); [ -z \"$sz\" ] && sz=$(stat -c %s \"$d\" 2>/dev/null); [ -z \"$sz\" ] && sz=0; " +
+                "st=$(cat \"$d.dlstatus\" 2>/dev/null); echo \"$sz|$st\"").Trim();
+            var parts = outp.Split('|');
+            long bytes = parts.Length > 0 && long.TryParse(parts[0].Trim(), out var b) ? b : 0;
+            string st = parts.Length > 1 ? parts[1].Trim() : "";
+            return (bytes, done: st is "0" or "1", ok: st == "0");
+        }
+
+        /// <summary>Aborts an in-progress download and removes its partial/status files.</summary>
+        public void CancelHostDownload(string destPath)
+        {
+            try
+            {
+                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(destPath));
+                _ssh.RunSudoCommand($"d=$(echo {b64} | base64 -d); pkill -f \"$d.part\" 2>/dev/null; rm -f \"$d.part\" \"$d.dlstatus\"");
+            }
+            catch { /* best effort */ }
+        }
+
         public List<ZvolEntry> ListZvols()
         {
             try

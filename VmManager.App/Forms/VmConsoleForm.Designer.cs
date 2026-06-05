@@ -10,7 +10,6 @@ namespace VmManager.Forms
         private ToolStripDropDownButton btnMouse;
         private ToolStripDropDownButton btnDisplay;
         private ToolStripDropDownButton btnCdDvd;
-        private ToolStripButton btnFitWindow;
         private ToolStripButton btnLog;
         private ToolStripMenuItem menuStart;
         private ToolStripMenuItem menuShutdown;
@@ -42,7 +41,6 @@ namespace VmManager.Forms
             btnMouse = new ToolStripDropDownButton();
             btnDisplay = new ToolStripDropDownButton();
             btnCdDvd = new ToolStripDropDownButton();
-            btnFitWindow = new ToolStripButton();
             menuStart = new ToolStripMenuItem();
             menuShutdown = new ToolStripMenuItem();
             menuForceStop = new ToolStripMenuItem();
@@ -120,7 +118,11 @@ namespace VmManager.Forms
                 "Set this VM's SPICE image compression to 'off'. Highest bandwidth; rarely needed.\n" +
                 "Requires a VM restart to take effect.";
             useRawBitmapsItem.Click += (_, _) => ApplyCompression("off", "raw bitmaps");
-            btnDisplay.DropDownItems.AddRange(new ToolStripItem[] { useLzCompressionItem, useRawBitmapsItem });
+            var fitWindowItem = new ToolStripMenuItem("Fit Window") { Image = AppIcons.Get("arrow_out") };
+            fitWindowItem.ToolTipText = "Resize the window to the VM's resolution.";
+            fitWindowItem.Click += FitWindow_Click;
+            btnDisplay.DropDownItems.AddRange(new ToolStripItem[]
+                { fitWindowItem, new ToolStripSeparator(), useLzCompressionItem, useRawBitmapsItem });
 
             // CD/DVD — only shown when the VM has an optical drive (set in code after connect)
             btnCdDvd.Text = "CD/DVD";
@@ -142,12 +144,6 @@ namespace VmManager.Forms
             cdGuestIsoItem.Click += cdGuestIso_Click;
             btnCdDvd.DropDownItems.AddRange(new ToolStripItem[] { cdEjectItem, cdSelectItem, cdGuestIsoItem });
 
-            // Fit window
-            btnFitWindow.Text = "Fit Window";
-            btnFitWindow.AutoToolTip = false;
-            btnFitWindow.Image = AppIcons.Get("arrow_out");
-            btnFitWindow.Click += FitWindow_Click;
-
             // Log
             btnLog = new ToolStripButton();
             btnLog.Text = "Log";
@@ -157,7 +153,7 @@ namespace VmManager.Forms
             btnLog.Click += (_, _) => LogForm.ShowLog();
 
             toolStrip.Items.AddRange(new ToolStripItem[]
-                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnCdDvd, btnFitWindow, btnLog });
+                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnCdDvd, btnLog });
 
             // displayControl
             displayControl.Dock = DockStyle.Fill;
