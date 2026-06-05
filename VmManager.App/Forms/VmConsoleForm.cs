@@ -28,6 +28,8 @@ namespace VmManager.Forms
         private const string GuestVirtioServerPath = "/usr/share/virtio-win/virtio-win.iso";
         private const string GuestVirtioUrl =
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
+        private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
+        private const string CdromTip = "Eject or change the VM's CD/DVD media.";
         private bool _settingsLoaded;
         private Size? _lastResolution;
         private bool _autoFitted;
@@ -229,7 +231,8 @@ namespace VmManager.Forms
         {
             _connected = false;
             _cdromTarget = null;
-            btnCdDvd.Visible = false;
+            btnCdDvd.Enabled = false;
+            btnCdDvd.ToolTipText = NoCdromTip;
             try { displayControl.ClearFramebuffer(); } catch { }
             try { _session?.Dispose(); } catch { }
             _session = null;
@@ -497,12 +500,14 @@ namespace VmManager.Forms
                     {
                         _cdromTarget = cd.Target;
                         _cdromBus = string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus;
-                        btnCdDvd.Visible = true;
+                        btnCdDvd.Enabled = true;
+                        btnCdDvd.ToolTipText = CdromTip;
                     }
                     else
                     {
                         _cdromTarget = null;
-                        btnCdDvd.Visible = false;
+                        btnCdDvd.Enabled = false;
+                        btnCdDvd.ToolTipText = NoCdromTip;
                     }
                 });
             }

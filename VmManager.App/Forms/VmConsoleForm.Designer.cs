@@ -127,7 +127,9 @@ namespace VmManager.Forms
             btnCdDvd.ShowDropDownArrow = true;
             btnCdDvd.AutoToolTip = false;
             btnCdDvd.Image = AppIcons.Get("drive_cd");
-            btnCdDvd.Visible = false;
+            // Always shown; disabled (with a tooltip) until a connected VM is found to have an optical drive.
+            btnCdDvd.Enabled = false;
+            btnCdDvd.ToolTipText = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
             var cdEjectItem = new ToolStripMenuItem("Eject") { Image = AppIcons.Get("control_stop") };
             cdEjectItem.Click += cdEject_Click;
             var cdSelectItem = new ToolStripMenuItem("Select file") { Image = AppIcons.Get("drive_cd") };
