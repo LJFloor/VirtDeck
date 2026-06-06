@@ -25,6 +25,8 @@ AppId={{B5E9F2A1-7C3D-4E6B-9A2F-1D8C5E0A4B70}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
+; Shown on the "License Agreement" page during setup (user must accept to continue).
+LicenseFile=..\LICENSE.txt
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#AppExe}
@@ -46,8 +48,9 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 ; produced by publish.bat. Installed beside the app so the binary is "accompanied by source"
 ; (LGPL/GPL §3(a)) — no separate written offer or hosted URL required.
 Source: "..\publish\SpiceClient-src.zip"; DestDir: "{app}"; Flags: ignoreversion
-; Third-party notices + license texts. We redistribute the LGPL/MIT native DLLs and the
-; Apache-licensed UsbDk MSI, so their licenses are installed beside the binaries.
+; The app's freeware EULA, plus third-party notices + license texts. We redistribute the
+; LGPL/MIT native DLLs and the Apache-licensed UsbDk MSI, so their licenses ship beside them.
+Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\native\win-x64\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "redist\UsbDk-LICENSE-Apache-2.0.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion

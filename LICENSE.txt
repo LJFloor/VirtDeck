@@ -1,0 +1,91 @@
+SpiceVmManager — End User License Agreement (Freeware)
+
+============================================================================
+ TEMPLATE NOTICE — READ AND DELETE THIS BLOCK BEFORE DISTRIBUTION
+ This is a starting-point template, NOT legal advice. Fill in every [BRACKETED]
+ field and have a qualified lawyer review it for your jurisdiction before you
+ rely on it. A disclaimer reduces but does not perfectly eliminate liability —
+ some liability cannot be excluded by agreement in some countries.
+============================================================================
+
+Software:  SpiceVmManager (the "Software")
+Licensor:  [Your name or company — e.g. "S for Software"] (the "Licensor", "we", "us")
+Contact:   [email / website]
+Version:   [version], [year]
+
+By installing, copying, or using the Software, you ("you") agree to this
+Agreement. If you do not agree, do not install or use the Software.
+
+1. LICENSE GRANT
+   The Software is provided free of charge. Subject to this Agreement, the
+   Licensor grants you a worldwide, royalty-free, non-exclusive license to
+   install and use the Software for personal or commercial purposes, and to copy
+   and redistribute it, provided that it is distributed (a) complete and
+   unmodified, (b) at no charge, and (c) together with this Agreement and the
+   accompanying THIRD-PARTY-NOTICES.md.
+
+2. RESERVATION OF RIGHTS
+   The Software is licensed, not sold. The Licensor retains all right, title, and
+   interest in and to the Software, except for the third-party components
+   described in Section 4 and the rights expressly granted in Section 1.
+
+3. RESTRICTIONS
+   Except to the extent prohibited by applicable law or expressly permitted by
+   Section 4, you may not: (a) sell, rent, lease, or charge a fee for the
+   Software; (b) modify, reverse engineer, decompile, or disassemble the
+   proprietary portions of the Software; or (c) remove or alter any copyright,
+   license, or attribution notice. Nothing in this Section limits any right
+   granted to you by a third-party license listed in THIRD-PARTY-NOTICES.md.
+
+4. THIRD-PARTY COMPONENTS
+   The Software includes third-party components licensed separately under their
+   own terms (including the GNU LGPL; the GNU GPL with the GCC Runtime Library
+   Exception; the Apache License 2.0; and the MIT license). Those components,
+   their versions, and their licenses are listed in THIRD-PARTY-NOTICES.md, with
+   full license texts in the "licenses" folder and corresponding source where
+   required (e.g. SpiceClient-src.zip). To the extent a third-party license
+   conflicts with this Agreement as to its component, the third-party license
+   controls for that component, and this Agreement does not limit any right it
+   grants you.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES
+   OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+   NON-INFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL BE
+   ERROR-FREE, SECURE, OR UNINTERRUPTED, OR THAT IT WILL NOT CAUSE LOSS OF DATA OR
+   DAMAGE TO HARDWARE, VIRTUAL MACHINES, OR DATA. YOU USE THE SOFTWARE ENTIRELY AT
+   YOUR OWN RISK.
+
+6. LIMITATION OF LIABILITY
+   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL THE
+   LICENSOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+   CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY LOSS OF DATA, PROFITS, OR
+   BUSINESS, ARISING OUT OF OR RELATED TO THE SOFTWARE OR THIS AGREEMENT, EVEN IF
+   ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. BECAUSE THE SOFTWARE IS PROVIDED
+   FREE OF CHARGE, THE LICENSOR'S TOTAL AGGREGATE LIABILITY UNDER THIS AGREEMENT
+   WILL NOT EXCEED THE TOTAL AMOUNT YOU PAID FOR THE SOFTWARE, WHICH IS ZERO.
+   NOTHING IN THIS AGREEMENT EXCLUDES OR LIMITS LIABILITY THAT CANNOT BE EXCLUDED
+   OR LIMITED UNDER APPLICABLE LAW (FOR EXAMPLE, LIABILITY FOR DEATH OR PERSONAL
+   INJURY CAUSED BY NEGLIGENCE, OR FOR FRAUD).
+
+7. NO SUPPORT
+   The Licensor has no obligation to provide maintenance, updates, or support.
+
+8. TERMINATION
+   This Agreement terminates automatically if you breach it. On termination you
+   must stop using the Software and destroy your copies of it. Sections 2 and
+   4–10 survive termination.
+
+9. GOVERNING LAW
+   This Agreement is governed by the laws of [your country/region], without regard
+   to its conflict-of-laws rules. [Optional: the courts of [place] have exclusive
+   jurisdiction over any dispute arising from it.]
+
+10. ENTIRE AGREEMENT; SEVERABILITY
+   This Agreement is the entire agreement between you and the Licensor regarding
+   the Software and supersedes any prior understanding. If any provision is held
+   unenforceable, the remaining provisions remain in full effect.
+
+Copyright (c) [year] [Your name or company]. All rights reserved, except as
+licensed above and as set out in THIRD-PARTY-NOTICES.md.
