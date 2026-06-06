@@ -1,21 +1,40 @@
-# Build output
+# ---- Build output ----
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
 
-# IDE
+# Publish output: the self-contained app and the generated SpiceClient-src.zip (see publish.bat)
+/publish/
+
+# Built installers
+/installer/output/
+
+# ---- IDE / editor ----
 .vs/
+.vscode/
 .idea/
 *.user
 *.suo
 *.userprefs
-
-# Rider
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+*.DotSettings.user
 *.sln.iml
 
-# OS
+# ---- NuGet ----
+*.nupkg
+*.snupkg
+[Pp]ackages/
+
+# ---- OS / editor cruft ----
 Thumbs.db
 .DS_Store
+*.swp
+*~
 
-# Logs / temp
+# ---- Logs / temp ----
 *.log
+
+# NOTE: the third-party redistributables (native\win-x64\*.dll, installer\redist\*.msi) are
+# committed on purpose so the build inputs aren't lost — they are intentionally NOT ignored.
