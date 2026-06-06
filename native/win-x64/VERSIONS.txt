@@ -2,7 +2,8 @@ Native USB-redirection libraries (Windows x64)
 ==============================================
 
 Drop the following 64-bit DLLs into this folder. The build copies every *.dll here
-next to VmManager.exe (loaded by bare DllImport name); they are NOT committed binaries.
+next to VmManager.exe (loaded by bare DllImport name). These DLLs ARE committed to the
+repo (build inputs); their license texts are in licenses\ — see THIRD-PARTY-NOTICES.md.
 
 Required (MinGW/MSYS2 builds use the SONAME-suffixed names on the right; the app's
 DllImport resolver accepts either, so stage whichever your build produces):

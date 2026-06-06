@@ -11,5 +11,6 @@ The installer (SpiceVmManager.iss) bundles this MSI and runs it silently
 UsbDk is already present. Ship the MSI unmodified — it is already Authenticode-signed;
 repackaging or re-signing would break its signature.
 
-This binary is intentionally NOT committed. Fetch it (and verify its SHA-256) in CI, or
-drop it here manually before running `iscc installer\SpiceVmManager.iss`.
+This binary is committed to the repo (build input). Its license is
+UsbDk-LICENSE-Apache-2.0.txt (Apache-2.0). If you replace it, keep the version pinned
+and verify its SHA-256.
