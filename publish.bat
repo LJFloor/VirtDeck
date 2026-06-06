@@ -1,12 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
 rem ===========================================================================
-rem  publish.bat - build SpiceVmManager and produce the Windows installer.
+rem  publish.bat - build VirtDeck and produce the Windows installer.
 rem
 rem  Steps:
 rem    1) dotnet publish (self-contained x64 -> publish\win-x64)
-rem    2) compile installer\SpiceVmManager.iss with Inno Setup (ISCC)
-rem       -> installer\output\SpiceVmManagerSetup-<ver>.exe
+rem    2) compile installer\VirtDeck.iss with Inno Setup (ISCC)
+rem       -> installer\output\VirtDeckSetup-<ver>.exe
 rem
 rem  Run from anywhere; it cd's to its own folder (the repo root).
 rem ===========================================================================
@@ -17,8 +17,8 @@ pushd "%~dp0"
 set "CONFIG=Release"
 set "RID=win-x64"
 set "PUBLISH_DIR=publish\win-x64"
-set "PROJECT=VmManager.App\VmManager.App.csproj"
-set "ISS=installer\SpiceVmManager.iss"
+set "PROJECT=VirtDeck\VirtDeck.csproj"
+set "ISS=installer\VirtDeck.iss"
 set "SRC_ZIP=publish\SpiceClient-src.zip"
 
 echo.

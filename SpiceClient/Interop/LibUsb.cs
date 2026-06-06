@@ -8,7 +8,7 @@ namespace SpiceClient.Interop;
 /// use the C calling convention (the MinGW/MSVC libusb build is cdecl).
 ///
 /// The DLL is loaded by bare name; <c>libusb-1.0.dll</c> + its runtime deps must sit
-/// beside VmManager.exe (see the native\win-x64 staging in the build). Callers must
+/// beside VirtDeck.exe (see the native\win-x64 staging in the build). Callers must
 /// tolerate <see cref="DllNotFoundException"/>/<see cref="BadImageFormatException"/>
 /// so the SPICE session still works when the USB DLLs are absent.
 /// </summary>

@@ -74,7 +74,7 @@ internal sealed class UsbredirHostInstance : IDisposable
             ctx.Handle, IntPtr.Zero,
             _log, _read, _write, _flush,
             UsbRedirHost.AllocLock, UsbRedirHost.Lock, UsbRedirHost.Unlock, UsbRedirHost.FreeLock,
-            IntPtr.Zero, "SpiceVmManager 1.0", UsbRedirHost.LOG_WARNING, 0);
+            IntPtr.Zero, "SpiceVirtDeck 1.0", UsbRedirHost.LOG_WARNING, 0);
 
         if (_host == IntPtr.Zero)
         {
