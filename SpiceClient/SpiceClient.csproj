@@ -7,6 +7,9 @@
     <!-- Protocol engine. Uses System.Drawing (Bitmap/JPEG) but never WinForms. -->
     <UseWindowsForms>false</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- USB redirection P/Invokes the 64-bit libusb/usbredirhost DLLs, so the whole
+         process must be x64 (a 32-bit process would throw BadImageFormatException). -->
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>

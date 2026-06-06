@@ -3,6 +3,7 @@ using System.Threading;
 using SpiceClient.Channels;
 using SpiceClient.Imaging;
 using SpiceClient.Protocol;
+using SpiceClient.Usb;
 
 namespace SpiceClient;
 
@@ -25,6 +26,13 @@ public sealed class SpiceSession : IDisposable
     public SpiceFramebuffer? Framebuffer { get; private set; }
     public InputsChannel? Inputs { get; private set; }
     public DisplayChannel? Display { get; private set; }
+
+    /// <summary>
+    /// USB redirection manager — non-null once the host advertises at least one usbredir
+    /// channel (i.e. the VM has &lt;redirdev&gt; devices). Null means the VM has no redirect
+    /// channels. Check <see cref="UsbDeviceManager.UsbDkAvailable"/> for client-side readiness.
+    /// </summary>
+    public UsbDeviceManager? Usb => _usb;
 
     /// <summary>When true, channels log every received message (very chatty). Default off.</summary>
     public volatile bool VerboseLogging;
@@ -55,6 +63,8 @@ public sealed class SpiceSession : IDisposable
 
     private readonly List<SpiceChannel> _channels = new();
     private MainChannel? _main;
+    private UsbDeviceManager? _usb;
+    private LibUsbContext? _usbCtx;
     private int _down;
     private int _disposed;
     private bool _codecWarned;
@@ -83,6 +93,7 @@ public sealed class SpiceSession : IDisposable
             SpiceConstants.CHANNEL_DISPLAY when id == 0 => new DisplayChannel(this, Host, Port, ConnectionId, Password),
             SpiceConstants.CHANNEL_INPUTS => new InputsChannel(this, Host, Port, ConnectionId, Password),
             SpiceConstants.CHANNEL_CURSOR => new CursorChannel(this, Host, Port, ConnectionId, Password),
+            SpiceConstants.CHANNEL_USBREDIR => CreateUsbChannel(id),
             _ => null
         };
         if (ch == null) return;
@@ -91,6 +102,26 @@ public sealed class SpiceSession : IDisposable
         lock (_channels) _channels.Add(ch);
         ch.Start();
     }
+
+    // ---- USB redirection -----------------------------------------------
+
+    private UsbredirChannel CreateUsbChannel(byte id)
+    {
+        // First usbredir channel brings up the shared libusb context (UsbDk backend) + manager.
+        // This never throws: if the native USB libraries or UsbDk are missing, the manager
+        // reports itself unavailable and the channel still links (just stays dormant).
+        if (_usb == null)
+        {
+            _usbCtx = new LibUsbContext(Log);
+            _usb = new UsbDeviceManager(_usbCtx, Log);
+        }
+        var ch = new UsbredirChannel(this, Host, Port, id, ConnectionId, Password);
+        _usb.RegisterChannel(ch);
+        return ch;
+    }
+
+    internal void OnUsbChannelLinked(UsbredirChannel ch) => _usb?.OnChannelLinked(ch);
+    internal void OnUsbDeviceLost(UsbredirChannel ch) => _usb?.OnDeviceLost(ch);
 
     internal void HandleMouseMode(int current)
     {
@@ -189,6 +220,12 @@ public sealed class SpiceSession : IDisposable
         {
             try { ch.Dispose(); } catch { /* ignore */ }
         }
+        // Dispose the libusb context only AFTER all channels: each usbredir channel's
+        // Dispose runs usbredirhost_close (which closes device handles and reaps URBs).
+        // Calling libusb_exit while a host is still open would crash.
+        try { _usbCtx?.Dispose(); } catch { /* ignore */ }
+        _usbCtx = null;
+        _usb = null;
         try { Framebuffer?.Dispose(); } catch { /* ignore */ }
         Framebuffer = null;
     }

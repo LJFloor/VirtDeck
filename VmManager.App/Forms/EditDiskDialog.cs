@@ -3,10 +3,10 @@ using VmManager.Models;
 namespace VmManager.Forms
 {
     /// <summary>
-    /// Edits the &lt;driver&gt; tuning (cache / io / discard) of an existing disk in place.
-    /// Target, bus and source are fixed — changing those is a remove + re-add.
+    /// Edits a disk's bus and &lt;driver&gt; tuning (cache / io / discard). Source/format are fixed.
+    /// A bus change is structural (the caller re-targets and detach+re-attaches the disk).
     /// </summary>
-    public partial class EditDiskDialog : Form
+    public partial class EditDiskDialog : AppForm
     {
         private const string DefaultItem = "(default)";
         private readonly DiskInfo _disk;
@@ -19,9 +19,11 @@ namespace VmManager.Forms
             _disk = disk;
             InitializeComponent();
             Text = $"Edit Disk — {disk.Target}";
-            lblTarget.Text = $"{disk.Target}  ({(string.IsNullOrEmpty(disk.Bus) ? "?" : disk.Bus)})";
+            lblTarget.Text = disk.Target;
             lblSource.Text = disk.Source;
             lblType.Text = string.IsNullOrEmpty(disk.DriverType) ? "(auto)" : disk.DriverType;
+            cboBus.SelectedItem = disk.Bus;
+            if (cboBus.SelectedIndex < 0) cboBus.SelectedIndex = 0;
             Preselect(cboCache, disk.Cache);
             Preselect(cboIo, disk.Io);
             Preselect(cboDiscard, disk.Discard);
@@ -42,6 +44,7 @@ namespace VmManager.Forms
         private void btnOk_Click(object? sender, EventArgs e)
         {
             var d = _disk.Clone();
+            d.Bus = (string)cboBus.SelectedItem!;
             d.Cache = ValueOf(cboCache);
             d.Io = ValueOf(cboIo);
             d.Discard = ValueOf(cboDiscard);

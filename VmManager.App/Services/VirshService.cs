@@ -124,6 +124,23 @@ namespace VmManager.Services
             _ => addr
         };
 
+        /// <summary>
+        /// Captures a screenshot of a running VM via <c>virsh screenshot</c> and returns the raw
+        /// PPM bytes (the QXL/SPICE screenshot format), or null when the VM is off, has no
+        /// graphics, or the capture fails. The name is base64'd (cf. <see cref="DeleteFile"/>) so
+        /// quoting is safe; the host temp file is removed afterwards.
+        /// </summary>
+        public byte[]? CaptureScreenshotPpm(string vmName)
+        {
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(vmName));
+            var cmd = $"n=$(echo {b64} | base64 -d); f=$(mktemp); " +
+                      $"if virsh screenshot \"$n\" \"$f\" >/dev/null 2>&1; then base64 -w0 \"$f\"; fi; rm -f \"$f\"";
+            var outp = _ssh.RunSudoCommand(cmd).Trim();
+            if (outp.Length == 0) return null;
+            try { return Convert.FromBase64String(outp); }
+            catch { return null; }
+        }
+
         public async Task StartVmAsync(string name)
         {
             await Task.Run(() => _ssh.RunSudoCommand($"virsh start {name}"));
@@ -150,6 +167,9 @@ namespace VmManager.Services
 
         // ---- VM editing (offline, persistent config) -----------------------
 
+        /// <summary>Raw domain XML from `virsh dumpxml` (running config when the VM is up).</summary>
+        public string GetDomainXml(string vmName) => _ssh.RunSudoCommand($"virsh dumpxml {vmName}");
+
         /// <summary>Reads the full editable config from `virsh dumpxml` + `dominfo`.</summary>
         public VmConfig GetVmConfig(string vmName)
         {
@@ -165,6 +185,13 @@ namespace VmManager.Services
 
             if (int.TryParse((string?)domain.Element("vcpu"), out var vc)) cfg.Vcpus = Math.Max(1, vc);
             cfg.MemoryMiB = ReadMemMiB(domain.Element("currentMemory") ?? domain.Element("memory"));
+
+            cfg.CpuMode = (string?)domain.Element("cpu")?.Attribute("mode") switch
+            {
+                "host-passthrough" => "host-passthrough",
+                "host-model"       => "host-model",
+                _                  => "default",
+            };
 
             var os = domain.Element("os");
             if (os != null)
@@ -243,6 +270,17 @@ namespace VmManager.Services
         public void SetVcpus(string vm, int n) =>
             _ssh.RunSudoCommand($"virt-xml {vm} --edit --vcpus {n},maxvcpus={n}");
 
+        public void SetCpuMode(string vm, string mode)
+        {
+            var spec = mode switch
+            {
+                "host-passthrough" => "host-passthrough",
+                "host-model"       => "host-model",
+                _                  => "clearxml=yes",
+            };
+            _ssh.RunSudoCommand($"virt-xml {vm} --edit --cpu {spec}");
+        }
+
         public void SetMemoryMiB(string vm, long mib) =>
             _ssh.RunSudoCommand($"virt-xml {vm} --edit --memory {mib},maxmemory={mib}");
 
@@ -261,12 +299,44 @@ namespace VmManager.Services
         /// attaches devices with the normal Attach* helpers. The trailing rc capture makes a define
         /// failure propagate (RunSudoCommand throws). The VM is left shut off. `name` must be validated.
         /// </summary>
-        public void DefineVmShell(string name, int vcpus, long memoryMiB)
+        /// <summary>
+        /// Lists installable OS profiles from <c>osinfo-query os</c> (short-id + name) for
+        /// <c>virt-install --os-variant</c>. Sorted by name; empty if osinfo isn't installed.
+        /// </summary>
+        public List<OsVariant> ListOsVariants()
         {
+            var result = new List<OsVariant>();
+            try
+            {
+                // Pipe-separated table: "Short ID | Name | Version | ID", a "---+---" rule, then rows.
+                var output = _ssh.RunCommand("osinfo-query os 2>/dev/null");
+                bool pastRule = false;
+                foreach (var line in output.Split('\n'))
+                {
+                    if (!pastRule) { if (line.Contains("---")) pastRule = true; continue; }
+                    var parts = line.Split('|');
+                    if (parts.Length < 2) continue;
+                    var shortId = parts[0].Trim();
+                    if (shortId.Length == 0) continue;
+                    result.Add(new OsVariant { ShortId = shortId, Name = parts[1].Trim() });
+                }
+            }
+            catch { /* osinfo-db-tools not installed → no presets */ }
+            result.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            return result;
+        }
+
+        public void DefineVmShell(string name, int vcpus, long memoryMiB, bool useUefi = false, string osVariant = "generic")
+        {
+            if (string.IsNullOrWhiteSpace(osVariant) || !Regex.IsMatch(osVariant, @"^[A-Za-z0-9._-]+$"))
+                osVariant = "generic"; // guard the shell command against unexpected input
             var tmp = $"/tmp/newvm-{Guid.NewGuid():N}.xml";
+            var bootFlags = useUefi ? "--boot uefi " : "";
             var cmd =
-                $"virt-install --name {name} --vcpus {vcpus} --memory {memoryMiB} --os-variant generic " +
+                $"virt-install --name {name} --vcpus {vcpus} --memory {memoryMiB} --os-variant {osVariant} " +
+                "--cpu host-passthrough " +
                 "--graphics spice,listen=127.0.0.1 --video qxl --disk none --network none --boot hd,cdrom " +
+                $"{bootFlags}" +
                 $"--print-xml > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc";
             _ssh.RunSudoCommand(cmd);
         }
@@ -307,6 +377,14 @@ namespace VmManager.Services
         }
 
         public void AttachDataDisk(string vm, DiskInfo d) => RunDeviceXml("attach-device", vm, BuildDiskXml(d));
+
+        /// <summary>
+        /// Attaches an arbitrary device element. <paramref name="live"/> hot-plugs it into the
+        /// running domain as well as persisting it (`--live --config`); otherwise persistent-only
+        /// (`--config`, effective next power-cycle). Used for USB redirdev channels.
+        /// </summary>
+        public void AttachDeviceXml(string vm, string xml, bool live) =>
+            RunDeviceXml("attach-device", vm, xml, live ? "--live --config" : "--config");
 
         public void UpdateDiskDriver(string vm, DiskInfo d) => RunDeviceXml("update-device", vm, BuildDiskXml(d));
 
@@ -362,6 +440,48 @@ namespace VmManager.Services
 
         public void EjectMedia(string vm, string target, bool live = false) =>
             _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject {(live ? "--live" : "--config")}");
+
+        /// <summary>Size in bytes of a file on the host (base64'd path). Returns -1 on error.</summary>
+        public long GetFileSize(string path)
+        {
+            try
+            {
+                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+                var result = _ssh.RunSudoCommand($"p=$(echo {b64} | base64 -d); stat -c %s \"$p\"").Trim();
+                return long.TryParse(result, out var s) ? s : -1;
+            }
+            catch { return -1; }
+        }
+
+        public bool VirtSparseAvailable { get; private set; } = true;
+
+        public bool CheckVirtSparseAvailable()
+        {
+            try
+            {
+                var output = _ssh.RunCommand("which virt-sparsify 2>/dev/null").Trim();
+                VirtSparseAvailable = output.Length > 0;
+                Diagnostics.SpiceLog.Log($"[sparse] which virt-sparsify → '{output}' → available={VirtSparseAvailable}");
+            }
+            catch (Exception ex)
+            {
+                VirtSparseAvailable = false;
+                Diagnostics.SpiceLog.Log($"[sparse] CheckVirtSparseAvailable threw: {ex.Message}");
+            }
+            return VirtSparseAvailable;
+        }
+
+        /// <summary>
+        /// Runs <c>virt-sparsify --in-place</c> on a disk image, reclaiming unused qcow2 clusters.
+        /// Calls <paramref name="onLine"/> for each output line. VM must be shut down.
+        /// </summary>
+        public void SparsifyDisk(string path, Action<string> onLine, CancellationToken ct)
+        {
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+            _ssh.RunSudoCommandStreaming(
+                $"virt-sparsify --in-place \"$(echo {b64} | base64 -d)\"",
+                onLine, ct);
+        }
 
         /// <summary>True if a regular file exists on the host at the given path (base64'd to dodge quoting).</summary>
         public bool FileExistsOnHost(string path)
@@ -521,6 +641,43 @@ namespace VmManager.Services
         public void DetachNic(string vm, string type, string mac) =>
             _ssh.RunSudoCommand($"virsh detach-interface {vm} --type {type} --mac {mac} --config");
 
+        /// <summary>Whether the QEMU curl block driver is available on the host.</summary>
+        public bool QemuCurlAvailable { get; private set; } = true; // optimistic default until checked
+
+        /// <summary>
+        /// Probes the host for the QEMU curl block driver (required for HTTP ISO streaming).
+        /// Checks for block-curl.so first; falls back to querying qemu-system-x86_64 directly.
+        /// Sets <see cref="QemuCurlAvailable"/> and returns it. Never throws — unknown means true.
+        /// </summary>
+        public bool CheckQemuCurlDriver()
+        {
+            try
+            {
+                var found = _ssh.RunCommand("find /usr/lib /usr/lib64 -name 'block-curl.so' 2>/dev/null | wc -l").Trim();
+                if (int.TryParse(found, out var n) && n > 0) { QemuCurlAvailable = true; return true; }
+                var help = _ssh.RunCommand("qemu-system-x86_64 -drive driver=curl,help 2>&1 || true").Trim();
+                QemuCurlAvailable = help.Contains("Block driver", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { QemuCurlAvailable = true; }
+            return QemuCurlAvailable;
+        }
+
+        /// <summary>
+        /// Checks host CPU virtualization support, BIOS enablement, and libvirt state.
+        /// Returns: cpuSupports (svm/vmx flag in cpuinfo), biosEnabled (/dev/kvm exists),
+        /// libvirtState ("active" | "inactive" | "unknown").
+        /// All checks are best-effort — failures leave the corresponding value at its default.
+        /// </summary>
+        public (bool cpuSupports, bool biosEnabled, string libvirtState) CheckHostCapabilities()
+        {
+            bool cpu = false, bios = false;
+            string libvirt = "unknown";
+            try { cpu     = _ssh.RunCommand("grep -qE 'svm|vmx' /proc/cpuinfo && echo 1 || echo 0").Trim() == "1"; } catch { }
+            try { bios    = _ssh.RunCommand("test -c /dev/kvm && echo 1 || echo 0").Trim() == "1"; } catch { }
+            try { libvirt = _ssh.RunCommand("systemctl is-active libvirtd 2>/dev/null || true").Trim(); } catch { }
+            return (cpu, bios, libvirt);
+        }
+
         public List<string> ListNetworks()
         {
             try
@@ -531,6 +688,41 @@ namespace VmManager.Services
             }
             catch { return new(); }
         }
+
+        /// <summary>Returns all libvirt virtual networks with state, autostart, and persistence flags.</summary>
+        public List<NetworkInfo> ListNetworksInfo()
+        {
+            try
+            {
+                var output = _ssh.RunSudoCommand("virsh net-list --all");
+                var result = new List<NetworkInfo>();
+                bool pastSeparator = false;
+                foreach (var line in output.Split('\n'))
+                {
+                    if (!pastSeparator) { if (line.TrimStart().StartsWith("---")) pastSeparator = true; continue; }
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length < 3) continue;
+                    result.Add(new NetworkInfo
+                    {
+                        Name       = parts[0],
+                        State      = parts[1],
+                        Autostart  = parts[2].Equals("yes", StringComparison.OrdinalIgnoreCase),
+                        Persistent = parts.Length > 3 && parts[3].Equals("yes", StringComparison.OrdinalIgnoreCase),
+                    });
+                }
+                return result;
+            }
+            catch { return new(); }
+        }
+
+        public void StartNetwork(string name) =>
+            _ssh.RunSudoCommand($"virsh net-start {name}");
+
+        public void StopNetwork(string name) =>
+            _ssh.RunSudoCommand($"virsh net-destroy {name}");
+
+        public void SetNetworkAutostart(string name, bool on) =>
+            _ssh.RunSudoCommand($"virsh net-autostart {name}{(on ? "" : " --disable")}");
 
         public List<string> ListBridges()
         {

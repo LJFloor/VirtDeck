@@ -282,6 +282,7 @@ public abstract class SpiceChannel : IDisposable
         SpiceConstants.CHANNEL_DISPLAY => "display",
         SpiceConstants.CHANNEL_INPUTS => "inputs",
         SpiceConstants.CHANNEL_CURSOR => "cursor",
+        SpiceConstants.CHANNEL_USBREDIR => "usbredir",
         _ => $"chan{ChannelType}"
     };
 

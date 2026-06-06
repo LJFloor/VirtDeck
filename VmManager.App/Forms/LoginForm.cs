@@ -3,7 +3,7 @@ using VmManager.Services;
 
 namespace VmManager.Forms
 {
-    public partial class LoginForm : Form
+    public partial class LoginForm : AppForm
     {
         private const string RegistryKey = @"SOFTWARE\VmManager";
 

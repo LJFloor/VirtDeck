@@ -6,7 +6,7 @@ namespace VmManager.Forms
     /// Downloads a URL to a path on the SSH host, showing progress. The download runs detached on the
     /// server; this dialog polls it. DialogResult.OK = finished successfully.
     /// </summary>
-    public partial class DownloadProgressDialog : Form
+    public partial class DownloadProgressDialog : AppForm
     {
         private readonly VirshService _virsh;
         private readonly string _url;

@@ -107,6 +107,25 @@ public sealed class SpiceFramebuffer : IDisposable
         AddDirty(destX, destY, w, h);
     }
 
+    /// <summary>
+    /// Returns an independent, opaque 24bpp copy of the current surface — safe to keep, put on the
+    /// clipboard, or use after the framebuffer changes. Returns null if the surface is disposed.
+    /// Taken under <see cref="SyncRoot"/> so it never tears against a concurrent composite.
+    /// </summary>
+    public Bitmap? Snapshot()
+    {
+        lock (SyncRoot)
+        {
+            if (_disposed) return null;
+            // 24bpp (no alpha) so it pastes correctly everywhere — a 32bpp DIB with a zeroed alpha
+            // channel renders black in apps that honour it.
+            var copy = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
+            using var g = Graphics.FromImage(copy);
+            g.DrawImage(Bitmap, new Rectangle(0, 0, Width, Height), 0, 0, Width, Height, GraphicsUnit.Pixel);
+            return copy;
+        }
+    }
+
     private bool ClampDest(ref int x, ref int y, ref int w, ref int h)
     {
         int sx = 0, sy = 0;

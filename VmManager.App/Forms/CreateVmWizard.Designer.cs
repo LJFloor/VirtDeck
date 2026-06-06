@@ -3,6 +3,10 @@ namespace VmManager.Forms
     partial class CreateVmWizard
     {
         private System.ComponentModel.IContainer components = null;
+        private Panel pnlHeader;
+        private Panel pnlHeaderLine;
+        private Panel pnlFooter;
+        private Panel pnlFooterLine;
         private Label lblTitle;
 
         private Panel pnlGeneral;
@@ -13,7 +17,14 @@ namespace VmManager.Forms
         private Label lblMem;
         private NumericUpDown nudMem;
         private Label lblMemUnit;
+        private Label lblOs;
+        private ComboBox cboOs;
+        private Label lblFirmware;
+        private Panel pnlFirmwareRadios;
+        private RadioButton rdoBios;
+        private RadioButton rdoUefi;
         private Label lblIso;
+        private Panel pnlIsoTypeRadios;
         private RadioButton rdoIsoServer;
         private RadioButton rdoIsoUrl;
         private RadioButton rdoIsoStream;
@@ -49,6 +60,10 @@ namespace VmManager.Forms
         {
             components = new System.ComponentModel.Container();
             lblTitle = new Label();
+            pnlHeader = new Panel();
+            pnlHeaderLine = new Panel();
+            pnlFooter = new Panel();
+            pnlFooterLine = new Panel();
             pnlGeneral = new Panel();
             lblName = new Label();
             txtName = new TextBox();
@@ -57,7 +72,14 @@ namespace VmManager.Forms
             lblMem = new Label();
             nudMem = new NumericUpDown();
             lblMemUnit = new Label();
+            lblOs = new Label();
+            cboOs = new ComboBox();
+            lblFirmware = new Label();
+            pnlFirmwareRadios = new Panel();
+            rdoBios = new RadioButton();
+            rdoUefi = new RadioButton();
             lblIso = new Label();
+            pnlIsoTypeRadios = new Panel();
             rdoIsoServer = new RadioButton();
             rdoIsoUrl = new RadioButton();
             rdoIsoStream = new RadioButton();
@@ -82,14 +104,23 @@ namespace VmManager.Forms
 
             SuspendLayout();
 
-            lblTitle.Location = new Point(16, 12);
+            // ---- Header band (white, bottom divider) — holds the wizard step title ----
+            pnlHeader.Dock = DockStyle.Top;
+            pnlHeader.Height = 44;
+            pnlHeader.BackColor = Color.White;
+            pnlHeaderLine.Dock = DockStyle.Bottom;
+            pnlHeaderLine.Height = 1;
+            pnlHeaderLine.BackColor = Color.FromArgb(0xCC, 0xCC, 0xCC);
+            lblTitle.Location = new Point(16, 11);
             lblTitle.AutoSize = true;
             lblTitle.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
             lblTitle.Text = "General";
+            pnlHeader.Controls.Add(lblTitle);
+            pnlHeader.Controls.Add(pnlHeaderLine);
 
             // ---- Page 1: General ----
             pnlGeneral.Location = new Point(12, 44);
-            pnlGeneral.Size = new Size(676, 388);
+            pnlGeneral.Size = new Size(676, 384);
             lblName.Text = "Name:";
             lblName.Location = new Point(4, 12);
             lblName.AutoSize = true;
@@ -115,51 +146,75 @@ namespace VmManager.Forms
             lblMemUnit.Text = "MiB";
             lblMemUnit.Location = new Point(246, 80);
             lblMemUnit.AutoSize = true;
+            lblOs.Text = "OS type:";
+            lblOs.Location = new Point(4, 116);
+            lblOs.AutoSize = true;
+            cboOs.Location = new Point(120, 113);
+            cboOs.Size = new Size(300, 23);
+            cboOs.DropDownStyle = ComboBoxStyle.DropDownList;
+            lblFirmware.Text = "Firmware:";
+            lblFirmware.Location = new Point(4, 150);
+            lblFirmware.AutoSize = true;
+            pnlFirmwareRadios.Location = new Point(0, 142);
+            pnlFirmwareRadios.Size = new Size(676, 28);
+            rdoBios.Text = "BIOS";
+            rdoBios.Location = new Point(120, 5);
+            rdoBios.AutoSize = true;
+            rdoBios.Checked = true;
+            rdoUefi.Text = "UEFI";
+            rdoUefi.Location = new Point(212, 5);
+            rdoUefi.AutoSize = true;
+            pnlFirmwareRadios.Controls.AddRange(new Control[] { rdoBios, rdoUefi });
             lblIso.Text = "Install media (optional):";
-            lblIso.Location = new Point(4, 122);
+            lblIso.Location = new Point(4, 192);
             lblIso.AutoSize = true;
+            pnlIsoTypeRadios.Location = new Point(0, 211);
+            pnlIsoTypeRadios.Size = new Size(676, 28);
             rdoIsoServer.Text = "File on server";
-            rdoIsoServer.Location = new Point(8, 146);
+            rdoIsoServer.Location = new Point(8, 5);
             rdoIsoServer.AutoSize = true;
             rdoIsoServer.Checked = true;
             rdoIsoServer.CheckedChanged += IsoMode_Changed;
             rdoIsoUrl.Text = "Network URL";
-            rdoIsoUrl.Location = new Point(140, 146);
+            rdoIsoUrl.Location = new Point(140, 5);
             rdoIsoUrl.AutoSize = true;
             rdoIsoUrl.CheckedChanged += IsoMode_Changed;
             rdoIsoStream.Text = "Stream from this PC";
-            rdoIsoStream.Location = new Point(268, 146);
+            rdoIsoStream.Location = new Point(268, 5);
             rdoIsoStream.AutoSize = true;
             rdoIsoStream.CheckedChanged += IsoMode_Changed;
+            pnlIsoTypeRadios.Controls.AddRange(new Control[] { rdoIsoServer, rdoIsoUrl, rdoIsoStream });
             // The three inputs share the same row; only one is visible at a time.
-            isoPicker.Location = new Point(8, 174);
+            isoPicker.Location = new Point(8, 244);
             isoPicker.Size = new Size(640, 23);
-            txtIsoUrl.Location = new Point(8, 174);
+            txtIsoUrl.Location = new Point(8, 244);
             txtIsoUrl.Size = new Size(640, 23);
             txtIsoUrl.Visible = false;
-            txtLocalIso.Location = new Point(8, 174);
+            txtLocalIso.Location = new Point(8, 244);
             txtLocalIso.Size = new Size(548, 23);
             txtLocalIso.ReadOnly = true;
             txtLocalIso.Visible = false;
             btnBrowseLocal.Text = "Browse…";
-            btnBrowseLocal.Location = new Point(560, 173);
+            btnBrowseLocal.Location = new Point(560, 243);
             btnBrowseLocal.Size = new Size(82, 25);
             btnBrowseLocal.Visible = false;
             btnBrowseLocal.Click += btnBrowseLocal_Click;
             lblHint.Text = "Leave the media empty to set it up later. The ISO appears as a CD-ROM on the Storage page.";
-            lblHint.Location = new Point(4, 210);
+            lblHint.Location = new Point(4, 280);
             lblHint.Size = new Size(660, 40);
             lblHint.ForeColor = SystemColors.GrayText;
             pnlGeneral.Controls.AddRange(new Control[]
             {
                 lblName, txtName, lblVcpus, nudVcpus, lblMem, nudMem, lblMemUnit,
-                lblIso, rdoIsoServer, rdoIsoUrl, rdoIsoStream,
+                lblOs, cboOs,
+                lblFirmware, pnlFirmwareRadios,
+                lblIso, pnlIsoTypeRadios,
                 isoPicker, txtIsoUrl, txtLocalIso, btnBrowseLocal, lblHint
             });
 
             // ---- Page 2: Network ----
             pnlNetwork.Location = new Point(12, 44);
-            pnlNetwork.Size = new Size(676, 388);
+            pnlNetwork.Size = new Size(676, 384);
             pnlNetwork.Visible = false;
             btnAddNic.Text = "Add…";
             btnAddNic.Image = AppIcons.Get("add");
@@ -188,7 +243,7 @@ namespace VmManager.Forms
 
             // ---- Page 3: Storage ----
             pnlStorage.Location = new Point(12, 44);
-            pnlStorage.Size = new Size(676, 388);
+            pnlStorage.Size = new Size(676, 384);
             pnlStorage.Visible = false;
             btnAddDisk.Text = "Add…";
             btnAddDisk.Image = AppIcons.Get("add");
@@ -225,28 +280,35 @@ namespace VmManager.Forms
             lvDisks.Columns.Add("Driver", 120);
             pnlStorage.Controls.AddRange(new Control[] { btnAddDisk, btnEditDisk, btnRemoveDisk, lvDisks });
 
-            // ---- Buttons ----
+            // ---- Footer band (white, top divider) — holds the wizard buttons (setup.exe style) ----
+            pnlFooter.Dock = DockStyle.Bottom;
+            pnlFooter.Height = 52;
+            pnlFooter.BackColor = Color.White;
+            pnlFooterLine.Dock = DockStyle.Top;
+            pnlFooterLine.Height = 1;
+            pnlFooterLine.BackColor = Color.FromArgb(0xCC, 0xCC, 0xCC);
             btnCancel.Text = "Cancel";
             btnCancel.Size = new Size(85, 28);
-            btnCancel.Location = new Point(16, 440);
-            btnCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnCancel.Location = new Point(16, 12);
             btnCancel.DialogResult = DialogResult.Cancel;
             btnBack.Text = "Back";
             btnBack.Size = new Size(85, 28);
-            btnBack.Location = new Point(512, 440);
-            btnBack.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnBack.Location = new Point(508, 12);
             btnBack.Click += btnBack_Click;
             btnNext.Text = "Next";
             btnNext.Size = new Size(85, 28);
-            btnNext.Location = new Point(603, 440);
-            btnNext.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnNext.Location = new Point(599, 12);
             btnNext.Click += btnNext_Click;
             btnFinish.Text = "Finish";
             btnFinish.Size = new Size(85, 28);
-            btnFinish.Location = new Point(603, 440);
-            btnFinish.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnFinish.Location = new Point(599, 12);
             btnFinish.Visible = false;
             btnFinish.Click += btnFinish_Click;
+            pnlFooter.Controls.Add(btnCancel);
+            pnlFooter.Controls.Add(btnBack);
+            pnlFooter.Controls.Add(btnNext);
+            pnlFooter.Controls.Add(btnFinish);
+            pnlFooter.Controls.Add(pnlFooterLine);
 
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(700, 480);
@@ -257,14 +319,11 @@ namespace VmManager.Forms
             StartPosition = FormStartPosition.CenterParent;
             CancelButton = btnCancel;
 
-            Controls.Add(lblTitle);
             Controls.Add(pnlGeneral);
             Controls.Add(pnlNetwork);
             Controls.Add(pnlStorage);
-            Controls.Add(btnCancel);
-            Controls.Add(btnBack);
-            Controls.Add(btnNext);
-            Controls.Add(btnFinish);
+            Controls.Add(pnlHeader);
+            Controls.Add(pnlFooter);
 
             Load += CreateVmWizard_Load;
 

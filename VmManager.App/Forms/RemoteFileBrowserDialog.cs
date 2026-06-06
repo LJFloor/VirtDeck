@@ -8,7 +8,7 @@ namespace VmManager.Forms
     /// Browses files on the remote host (over the sudo SSH channel) and returns the selected path(s).
     /// Shows the Windows-registered icon per file type. WinSCP-style: path bar, list, filter, file-name box.
     /// </summary>
-    public partial class RemoteFileBrowserDialog : Form
+    public partial class RemoteFileBrowserDialog : AppForm
     {
         private sealed class FilterEntry
         {

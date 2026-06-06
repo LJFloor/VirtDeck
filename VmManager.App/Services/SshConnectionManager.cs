@@ -46,11 +46,15 @@ namespace VmManager.Services
                 if (_client == null || !_client.IsConnected)
                     throw new InvalidOperationException("SSH is not connected.");
 
-                var escapedPassword = _password.Replace("'", "'\\''");
                 var escapedCommand = command.Replace("'", "'\\''");
-                var sudoCommand = $"echo '{escapedPassword}' | sudo -S bash -c 'export LANG=C; echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
+                // -S reads the password from stdin (fed below), -p '' silences the prompt. The
+                // password is delivered out-of-band, so it never appears on the command line (ps/proc).
+                var sudoCommand = $"sudo -S -p '' bash -c 'export LANG=C; echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
 
-                using var cmd = _client.RunCommand(sudoCommand);
+                using var cmd = _client.CreateCommand(sudoCommand);
+                var ar = cmd.BeginExecute();
+                FeedSudoPassword(cmd);
+                cmd.EndExecute(ar);
                 var output = cmd.Result;
 
                 // Everything before the marker is sudo noise (password prompt, lecture, etc.)
@@ -62,6 +66,150 @@ namespace VmManager.Services
                     throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}");
 
                 return output;
+            }
+        }
+
+        /// <summary>
+        /// Feeds the password to a running <c>sudo -S</c> command's stdin, then closes the stream (EOF).
+        /// Must be called after <c>BeginExecute</c>. The bytes go over the channel's input substream, so the
+        /// password never appears on the command line. Best-effort: if sudo isn't reading stdin (cached
+        /// credentials, or the command already exited) the write is ignored — the EOF on dispose still lets
+        /// sudo's read complete, so the command never hangs.
+        /// </summary>
+        private void FeedSudoPassword(SshCommand cmd)
+        {
+            try
+            {
+                using var stdin = cmd.CreateInputStream();
+                var pw = System.Text.Encoding.UTF8.GetBytes(_password + "\n");
+                stdin.Write(pw, 0, pw.Length);
+            }
+            catch { /* sudo not reading stdin / command already exited — EOF on dispose unblocks it */ }
+        }
+
+        /// <summary>
+        /// Streams a remote file to <paramref name="destination"/> using a dedicated SSH connection
+        /// (does not hold <c>_ioLock</c>) via <c>sudo dd</c>. Reports (bytesDownloaded, totalBytes)
+        /// where totalBytes is -1 when the size could not be determined.
+        /// Pass <paramref name="knownSize"/> to skip the remote stat call when size is already known.
+        /// </summary>
+        public async Task DownloadFileAsync(
+            string remotePath,
+            Stream destination,
+            IProgress<(long bytes, long total)> progress,
+            CancellationToken ct,
+            long knownSize = -1)
+        {
+            if (_client == null || !_client.IsConnected)
+                throw new InvalidOperationException("SSH is not connected.");
+
+            await Task.Run(() =>
+            {
+                using var sshDown = new SshClient(_client.ConnectionInfo);
+                sshDown.Connect();
+                try
+                {
+                    var pathB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(remotePath));
+
+                    long total = knownSize;
+                    if (total < 0)
+                    {
+                        try
+                        {
+                            using var sizeCmd = sshDown.CreateCommand(
+                                $"sudo -S -p '' stat -c %s \"$(echo {pathB64} | base64 -d)\" 2>/dev/null");
+                            var sizeAr = sizeCmd.BeginExecute();
+                            FeedSudoPassword(sizeCmd);
+                            sizeCmd.EndExecute(sizeAr);
+                            if (long.TryParse(sizeCmd.Result.Trim(), out var sz)) total = sz;
+                        }
+                        catch { }
+                    }
+
+                    using var cmd = sshDown.CreateCommand(
+                        $"sudo -S -p '' dd if=\"$(echo {pathB64} | base64 -d)\" bs=4M 2>/dev/null");
+
+                    using var reg = ct.Register(() =>
+                    {
+                        try { cmd.CancelAsync(); } catch { }
+                        try { sshDown.Disconnect(); } catch { }
+                    });
+
+                    var ar = cmd.BeginExecute();
+                    FeedSudoPassword(cmd);
+                    var buf = new byte[65536];
+                    long done = 0;
+
+                    try
+                    {
+                        int n;
+                        while ((n = cmd.OutputStream.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            if (ct.IsCancellationRequested) break;
+                            destination.Write(buf, 0, n);
+                            done += n;
+                            progress.Report((done, total));
+                        }
+                    }
+                    catch (Exception ex) when (ct.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException("Download cancelled.", ex, ct);
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    cmd.EndExecute(ar);
+
+                    if (cmd.ExitStatus != 0)
+                        throw new Exception($"Remote read failed (exit {cmd.ExitStatus}): {cmd.Error.Trim()}");
+                }
+                finally
+                {
+                    try { sshDown.Disconnect(); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// Runs a sudo command on a dedicated connection, calling <paramref name="onLine"/> for each
+        /// line of stdout. Blocks until the command exits. Throws on non-zero exit status.
+        /// </summary>
+        public void RunSudoCommandStreaming(string command, Action<string> onLine, CancellationToken ct)
+        {
+            if (_client == null || !_client.IsConnected)
+                throw new InvalidOperationException("SSH is not connected.");
+
+            using var sshRun = new SshClient(_client.ConnectionInfo);
+            sshRun.Connect();
+            try
+            {
+                using var cmd = sshRun.CreateCommand($"sudo -S -p '' {command}");
+                using var reg = ct.Register(() =>
+                {
+                    try { cmd.CancelAsync(); } catch { }
+                    try { sshRun.Disconnect(); } catch { }
+                });
+                var ar = cmd.BeginExecute();
+                FeedSudoPassword(cmd);
+                using var reader = new System.IO.StreamReader(cmd.OutputStream);
+                string? line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    onLine(line);
+                }
+                ct.ThrowIfCancellationRequested();
+                cmd.EndExecute(ar);
+                if (cmd.ExitStatus != 0)
+                {
+                    // sudo -S always echoes "[sudo] password for user: " to stderr; strip it.
+                    var err = System.Text.RegularExpressions.Regex.Replace(
+                        cmd.Error.Trim(), @"\[sudo\] password for [^:]+:\s*", "").Trim();
+                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {err}");
+                }
+            }
+            finally
+            {
+                try { sshRun.Disconnect(); } catch { }
             }
         }
 

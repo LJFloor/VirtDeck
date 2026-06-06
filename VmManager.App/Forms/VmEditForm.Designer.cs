@@ -10,10 +10,14 @@ namespace VmManager.Forms
         private TabPage tabNetwork;
         private ListView lvDisks;
         private Button btnAddDisk;
-        private Button btnEditDisk;
-        private Button btnChangeIso;
-        private Button btnEject;
-        private Button btnRemoveDisk;
+        private ContextMenuStrip contextMenuDisks;
+        private ToolStripMenuItem menuDiskEdit;
+        private ToolStripMenuItem menuDiskChangeIso;
+        private ToolStripMenuItem menuDiskChangeIsoServer;
+        private ToolStripMenuItem menuDiskChangeIsoLocal;
+        private ToolStripMenuItem menuDiskEject;
+        private ToolStripSeparator menuDiskSep;
+        private ToolStripMenuItem menuDiskRemove;
         private ListView lvNics;
         private Button btnAddNic;
         private Button btnRemoveNic;
@@ -25,6 +29,8 @@ namespace VmManager.Forms
         private NumericUpDown nudMemMiB;
         private Label lblMemUnit;
         private CheckBox chkAutostart;
+        private Label lblCpu;
+        private ComboBox cboCpu;
         private Label lblNote;
         private Label lblBootHint;
         private CheckedListBox clbBoot;
@@ -51,10 +57,14 @@ namespace VmManager.Forms
             tabNetwork = new TabPage();
             lvDisks = new ListView();
             btnAddDisk = new Button();
-            btnEditDisk = new Button();
-            btnChangeIso = new Button();
-            btnEject = new Button();
-            btnRemoveDisk = new Button();
+            contextMenuDisks = new ContextMenuStrip(components);
+            menuDiskEdit = new ToolStripMenuItem();
+            menuDiskChangeIso = new ToolStripMenuItem();
+            menuDiskChangeIsoServer = new ToolStripMenuItem();
+            menuDiskChangeIsoLocal = new ToolStripMenuItem();
+            menuDiskEject = new ToolStripMenuItem();
+            menuDiskSep = new ToolStripSeparator();
+            menuDiskRemove = new ToolStripMenuItem();
             lvNics = new ListView();
             btnAddNic = new Button();
             btnRemoveNic = new Button();
@@ -66,6 +76,8 @@ namespace VmManager.Forms
             nudMemMiB = new NumericUpDown();
             lblMemUnit = new Label();
             chkAutostart = new CheckBox();
+            lblCpu = new Label();
+            cboCpu = new ComboBox();
             lblNote = new Label();
             lblBootHint = new Label();
             clbBoot = new CheckedListBox();
@@ -120,8 +132,18 @@ namespace VmManager.Forms
             chkAutostart.Location = new Point(130, 128);
             chkAutostart.AutoSize = true;
 
+            lblCpu.Text = "CPU mode:";
+            lblCpu.Location = new Point(14, 162);
+            lblCpu.AutoSize = true;
+            cboCpu.Location = new Point(130, 159);
+            cboCpu.Size = new Size(200, 23);
+            cboCpu.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboCpu.Items.Add("Host passthrough");
+            cboCpu.Items.Add("Host model");
+            cboCpu.Items.Add("Default (qemu64)");
+
             lblNote.Text = "Changes are saved to the VM configuration and take effect on next boot.";
-            lblNote.Location = new Point(14, 176);
+            lblNote.Location = new Point(14, 200);
             lblNote.Size = new Size(400, 40);
             lblNote.ForeColor = SystemColors.GrayText;
 
@@ -133,6 +155,8 @@ namespace VmManager.Forms
             tabGeneral.Controls.Add(nudMemMiB);
             tabGeneral.Controls.Add(lblMemUnit);
             tabGeneral.Controls.Add(chkAutostart);
+            tabGeneral.Controls.Add(lblCpu);
+            tabGeneral.Controls.Add(cboCpu);
             tabGeneral.Controls.Add(lblNote);
 
             // tabBoot
@@ -167,8 +191,8 @@ namespace VmManager.Forms
             tabStorage.Text = "Storage";
             tabStorage.UseVisualStyleBackColor = true;
             tabStorage.Padding = new Padding(8);
-            // Action buttons live in a TOP toolbar — top-anchored controls always render,
-            // unlike bottom-anchored ones which DPI/tab-chrome can push off the visible area.
+            // "Add…" stays a top button (not a per-row action). Edit / Change ISO / Eject / Remove
+            // moved to a right-click context menu on the disk rows (contextMenuDisks).
             btnAddDisk.Text = "Add…";
             btnAddDisk.Image = AppIcons.Get("add");
             btnAddDisk.ImageAlign = ContentAlignment.MiddleLeft;
@@ -177,35 +201,29 @@ namespace VmManager.Forms
             btnAddDisk.Location = new Point(10, 10);
             btnAddDisk.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             btnAddDisk.Click += btnAddDisk_Click;
-            btnEditDisk.Text = "Edit…";
-            btnEditDisk.Image = AppIcons.Get("application_form_edit");
-            btnEditDisk.ImageAlign = ContentAlignment.MiddleLeft;
-            btnEditDisk.TextAlign = ContentAlignment.MiddleRight;
-            btnEditDisk.Size = new Size(66, 28);
-            btnEditDisk.Location = new Point(84, 10);
-            btnEditDisk.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            btnEditDisk.Click += btnEditDisk_Click;
-            btnRemoveDisk.Text = "Remove";
-            btnRemoveDisk.Image = AppIcons.Get("delete");
-            btnRemoveDisk.ImageAlign = ContentAlignment.MiddleLeft;
-            btnRemoveDisk.TextAlign = ContentAlignment.MiddleRight;
-            btnRemoveDisk.Size = new Size(90, 28);
-            btnRemoveDisk.Location = new Point(154, 10);
-            btnRemoveDisk.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            btnRemoveDisk.Click += btnRemoveDisk_Click;
-            // Change ISO / Eject apply only to a CD-ROM — shown when one is selected (lvDisks_SelectedIndexChanged).
-            btnChangeIso.Text = "Change ISO…";
-            btnChangeIso.Size = new Size(98, 28);
-            btnChangeIso.Location = new Point(248, 10);
-            btnChangeIso.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            btnChangeIso.Visible = false;
-            btnChangeIso.Click += btnChangeIso_Click;
-            btnEject.Text = "Eject";
-            btnEject.Size = new Size(56, 28);
-            btnEject.Location = new Point(350, 10);
-            btnEject.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            btnEject.Visible = false;
-            btnEject.Click += btnEject_Click;
+
+            // Disk row context menu — items are shown/hidden per row in contextMenuDisks_Opening.
+            menuDiskEdit.Text = "Edit…";
+            menuDiskEdit.Image = AppIcons.Get("application_form_edit");
+            menuDiskEdit.Click += DiskEdit_Click;
+            menuDiskChangeIso.Text = "Change ISO…";
+            menuDiskChangeIso.Image = AppIcons.Get("drive_cd");
+            menuDiskChangeIsoServer.Text = "On the server…";
+            menuDiskChangeIsoServer.Click += DiskChangeIso_Click;
+            menuDiskChangeIsoLocal.Text = "Local machine…";
+            menuDiskChangeIsoLocal.Click += DiskChangeIsoLocal_Click;
+            menuDiskChangeIso.DropDownItems.AddRange(new ToolStripItem[]
+                { menuDiskChangeIsoServer, menuDiskChangeIsoLocal });
+            menuDiskEject.Text = "Eject";
+            menuDiskEject.Image = AppIcons.Get("control_stop");
+            menuDiskEject.Click += DiskEject_Click;
+            menuDiskRemove.Text = "Remove";
+            menuDiskRemove.Image = AppIcons.Get("delete");
+            menuDiskRemove.Click += DiskRemove_Click;
+            contextMenuDisks.Items.AddRange(new ToolStripItem[]
+                { menuDiskEdit, menuDiskChangeIso, menuDiskEject, menuDiskSep, menuDiskRemove });
+            contextMenuDisks.Opening += contextMenuDisks_Opening;
+
             lvDisks.Location = new Point(10, 46);
             lvDisks.Size = new Size(416, 264);
             lvDisks.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
@@ -213,16 +231,13 @@ namespace VmManager.Forms
             lvDisks.FullRowSelect = true;
             lvDisks.MultiSelect = false;
             lvDisks.HideSelection = false;
-            lvDisks.SelectedIndexChanged += lvDisks_SelectedIndexChanged;
+            lvDisks.ContextMenuStrip = contextMenuDisks;
+            lvDisks.MouseDown += lvDisks_MouseDown;
             lvDisks.Columns.Add("Target", 60);
             lvDisks.Columns.Add("Kind", 56);
             lvDisks.Columns.Add("Bus", 56);
             lvDisks.Columns.Add("Source", 244);
             tabStorage.Controls.Add(btnAddDisk);
-            tabStorage.Controls.Add(btnEditDisk);
-            tabStorage.Controls.Add(btnChangeIso);
-            tabStorage.Controls.Add(btnEject);
-            tabStorage.Controls.Add(btnRemoveDisk);
             tabStorage.Controls.Add(lvDisks);
 
             // tabNetwork

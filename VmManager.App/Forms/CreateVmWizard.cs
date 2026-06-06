@@ -9,7 +9,7 @@ namespace VmManager.Forms
     /// shell (virt-install), attaches the disks/NICs with the same helpers the editor uses, sets boot order,
     /// and starts the VM. The caller opens the console for <see cref="CreatedVmName"/>.
     /// </summary>
-    public partial class CreateVmWizard : Form
+    public partial class CreateVmWizard : AppForm
     {
         private static readonly Regex NameRegex = new("^[a-zA-Z0-9_.-]+$");
         private const string ZvolPrefix = "/dev/zvol/";
@@ -27,6 +27,8 @@ namespace VmManager.Forms
         private string _name = "";
         private int _vcpus;
         private long _memMiB;
+        private bool _useUefi;
+        private string _osVariant = "generic";
 
         /// <summary>Name of the VM created on success, else null.</summary>
         public string? CreatedVmName { get; private set; }
@@ -48,8 +50,37 @@ namespace VmManager.Forms
         {
             _nics.Add(new NicAddOp { Type = "network", Source = "default", Model = "virtio" });
             RebuildNicList();
+            ApplyCurlAvailability();
             IsoMode_Changed(this, EventArgs.Empty);
             ShowPage(0);
+            _ = PopulateOsVariantsAsync(); // fill the OS dropdown from the host (osinfo-query)
+        }
+
+        // Seeds a "Generic" default immediately, then appends the host's osinfo profiles when SSH returns.
+        private async Task PopulateOsVariantsAsync()
+        {
+            cboOs.Items.Clear();
+            cboOs.Items.Add(new OsVariant { ShortId = "generic", Name = "Generic / default" });
+            cboOs.SelectedIndex = 0;
+            try
+            {
+                var list = await Task.Run(() => _virsh.ListOsVariants());
+                foreach (var o in list) cboOs.Items.Add(o);
+            }
+            catch { /* leave just the generic option */ }
+        }
+
+        private void ApplyCurlAvailability()
+        {
+            if (_virsh.QemuCurlAvailable) return;
+            rdoIsoUrl.Enabled = false;
+            rdoIsoStream.Enabled = false;
+            if (!rdoIsoServer.Checked) rdoIsoServer.Checked = true;
+            var tt = new ToolTip { ShowAlways = true };
+            const string msg = "Streaming is disabled — the QEMU curl block driver is not loaded on the host.\nInstall qemu-block-extra to enable Network URL and local streaming.";
+            tt.SetToolTip(pnlIsoTypeRadios, msg);
+            tt.SetToolTip(rdoIsoUrl, msg);
+            tt.SetToolTip(rdoIsoStream, msg);
         }
 
         // ---- Install media (General page) ----------------------------------
@@ -262,6 +293,12 @@ namespace VmManager.Forms
                 op.Cache = d.Cache;
                 op.Io = d.Io;
                 op.Discard = d.Discard;
+                if (d.Bus != op.Bus) // re-bus a not-yet-created disk: just re-target it
+                {
+                    _usedTargets.Remove(op.Target);
+                    op.Bus = d.Bus;
+                    op.Target = AllocTarget(d.Bus);
+                }
                 RebuildDiskList();
             }
         }
@@ -283,6 +320,8 @@ namespace VmManager.Forms
             _name = txtName.Text.Trim();
             _vcpus = (int)nudVcpus.Value;
             _memMiB = (long)nudMem.Value;
+            _useUefi = rdoUefi.Checked;
+            _osVariant = (cboOs.SelectedItem as OsVariant)?.ShortId ?? "generic";
 
             SetBusy(true);
             var errors = new List<string>();
@@ -314,7 +353,7 @@ namespace VmManager.Forms
 
         private void CreateVm(List<string> errors)
         {
-            _virsh.DefineVmShell(_name, _vcpus, _memMiB); // throws -> abort, no VM created
+            _virsh.DefineVmShell(_name, _vcpus, _memMiB, _useUefi, _osVariant); // throws -> abort, no VM created
 
             void Try(string what, Action a)
             {

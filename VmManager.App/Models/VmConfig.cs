@@ -6,6 +6,7 @@ namespace VmManager.Models
         public string Name { get; set; } = string.Empty;
         public string Uuid { get; set; } = string.Empty;
         public int Vcpus { get; set; } = 1;
+        public string CpuMode { get; set; } = "default"; // "host-passthrough" | "host-model" | "default"
         public long MemoryMiB { get; set; } = 1024;
         public bool Autostart { get; set; }
         public List<string> BootOrder { get; set; } = new();   // "hd", "cdrom", "network"
@@ -40,5 +41,21 @@ namespace VmManager.Models
         public string Model { get; set; } = string.Empty;       // virtio, e1000e
         public string SourceType { get; set; } = string.Empty;  // bridge | network
         public string Source { get; set; } = string.Empty;      // br0 | default
+    }
+
+    /// <summary>An installable OS profile from `osinfo-query os` — its short-id feeds virt-install --os-variant.</summary>
+    public class OsVariant
+    {
+        public string ShortId { get; set; } = string.Empty; // e.g. "winxp", "win10", "ubuntu22.04"
+        public string Name { get; set; } = string.Empty;    // e.g. "Microsoft Windows XP"
+        public override string ToString() => Name;
+    }
+
+    public class NetworkInfo
+    {
+        public string Name       { get; set; } = string.Empty;
+        public string State      { get; set; } = string.Empty;  // "active" | "inactive"
+        public bool   Autostart  { get; set; }
+        public bool   Persistent { get; set; }
     }
 }

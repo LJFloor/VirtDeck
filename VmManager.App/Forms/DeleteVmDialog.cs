@@ -6,7 +6,7 @@ namespace VmManager.Forms
     /// Confirms deleting a VM and lets the user pick which file-backed disk images to also remove
     /// (all checked by default). Non-file disks (zvol/block) and ISOs are never offered for deletion.
     /// </summary>
-    public partial class DeleteVmDialog : Form
+    public partial class DeleteVmDialog : AppForm
     {
         private readonly List<DiskInfo> _disks;
 

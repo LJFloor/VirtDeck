@@ -33,7 +33,11 @@ public static class SpiceConstants
     public const byte CHANNEL_CURSOR = 4;
     public const byte CHANNEL_PLAYBACK = 5;
     public const byte CHANNEL_RECORD = 6;
+    public const byte CHANNEL_TUNNEL = 7;
+    public const byte CHANNEL_SMARTCARD = 8;
+    public const byte CHANNEL_USBREDIR = 9;
     public const byte CHANNEL_PORT = 10;
+    public const byte CHANNEL_WEBDAV = 11;
 
     // Common messages (server -> client)
     public const ushort MSG_MIGRATE = 1;
@@ -170,6 +174,12 @@ public static class SpiceConstants
     public const ushort MSG_CURSOR_TRAIL = 106;
     public const ushort MSG_CURSOR_INVAL_ONE = 107;
     public const ushort MSG_CURSOR_INVAL_ALL = 108;
+
+    // SpiceVMC channels (usbredir / smartcard / port) — opaque byte-stream tunnel.
+    // The usbredir channel carries the raw usbredir wire protocol in these messages.
+    // We never advertise compression, so the server sends plain DATA (not COMPRESSED_DATA=102).
+    public const ushort MSG_SPICEVMC_DATA = 101;   // server -> client
+    public const ushort MSGC_SPICEVMC_DATA = 101;  // client -> server
 
     // Mouse modes
     public const int MOUSE_MODE_SERVER = 1 << 0;

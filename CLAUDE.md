@@ -40,6 +40,36 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Interop/CursorInterop` — builds a native `Cursor` (alpha + hotspot) via `CreateIconIndirect`; caller must `DestroyIcon` the HICON on replace/dispose.
 - `Forms/` — `LoginForm`, `VmListForm`, `VmConsoleForm` (low-level WH_KEYBOARD_LL hook → `InputsChannel.SendKey`; Power/Keyboard/Mouse/Display dropdowns; Fit Window).
 
+### Host capability checks
+
+`VirshService` probes the host once at login (`VmListForm.RefreshHostCapabilities`) and caches the results as properties:
+
+| Property | Check | Used by |
+|---|---|---|
+| `QemuCurlAvailable` | `find /usr/lib* -name block-curl.so` + qemu help | Create wizard + console — disables HTTP/stream ISO |
+| `VirtSparseAvailable` | `which virt-sparsify` | Export dialog — disables sparse checkbox |
+| `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VmListForm` |
+
+All checks default to `true`/available on SSH error to avoid false negatives, **except `VirtSparseAvailable`** which defaults to `false` (safe — prevents a silent no-op export).
+
+### Export VM (`Forms/ExportVmDialog.cs`)
+
+Right-click → Export VM → saves a `.tar` containing `domain.xml` + `disks/` subdirectory.
+
+**Streaming pipeline** (no temp file for known-size disks):
+```
+SSH (sudo dd) → Pipe.Writer → KnownLengthStream → TarWriter → FileStream
+```
+`TarWriter` (PAX format) requires the entry size in the header before data flows. `KnownLengthStream` wraps the pipe reader and reports a pre-measured `Length` while reading sequentially — satisfying TarWriter without buffering the whole file locally.
+
+**Sparse before export** — optional checkbox (requires `libguestfs-tools` on host, VM must be off):
+- Runs `virt-sparsify --in-place` on each selected disk before downloading; reclaims unused qcow2 clusters, shrinking the on-disk file size
+- Progress output from virt-sparsify streams live to the status label via `SshConnectionManager.RunSudoCommandStreaming`
+- Size is measured **after** sparsify so the tar entry header reflects the shrunken size
+- Checkbox disabled (with tooltip + hint label) when the VM is running or when virt-sparsify is not installed
+
+**SaveFileDialog** is shown first (in `Load`), while VM config fetch and virt-sparsify availability check run in the background — both SSH calls complete while the user is browsing for a save location.
+
 ## Cursor rule (the key requirement)
 
 Exactly ONE cursor must be visible over the display — never zero, never two. `SpiceDisplayControl.ApplyCursor()` is the single chokepoint and just sets `Control.Cursor` (the OS never stacks cursors):
@@ -59,6 +89,45 @@ QUIC/GLZ at runtime: `DisplayChannel` advertises `DISPLAY_CAP_PREF_COMPRESSION` 
 `<image compression>` change or restart**. The console's **Display ▸ Low bandwidth (LZ) / Raw** items send this
 message live (`SpiceSession.SetPreferredCompression`). Porting QUIC/GLZ is only needed to ride the server's
 native `auto_glz` for better bandwidth — not required for correctness.
+
+## USB redirection
+
+The console can redirect a physical USB device on the Windows client into the guest (the SPICE
+**usbredir** channel, type 9). It is independent of the guest agent — the guest only needs a USB
+controller + the device's normal driver.
+
+- **Native stack (not a C# port):** `SpiceClient` P/Invokes `usbredirhost` + `usbredirparser` +
+  `libusb-1.0` (UsbDk backend). These x64 DLLs are loaded by bare name and must sit next to
+  `VmManager.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) — the csproj copies
+  them to output. **The whole process is x64** (`PlatformTarget`) because the DLLs are 64-bit.
+- **Channel:** `Channels/UsbredirChannel` is a spicevmc tunnel — it shuttles opaque
+  `MSG/MSGC_SPICEVMC_DATA` (101) bytes, which are the raw usbredir wire protocol. On link it creates
+  one persistent `Usb/UsbredirHostInstance` (a managed wrapper over `usbredirhost`) with **no device**
+  so the usb_redir hello negotiates immediately; a device is attached/detached later via
+  `usbredirhost_set_device` (no second hello). One device per channel.
+- **usbredirhost owns the device handle** — `set_device(NULL)`/`close` call `libusb_close` themselves;
+  never close a handed-off handle from managed code. Callback delegates are rooted for the host
+  lifetime (collected-delegate crash otherwise). Disposal order is strict: close hosts (channels)
+  **before** `libusb_exit` (`Usb/LibUsbContext`, one shared context + one event thread).
+- **Manager/UI:** `Usb/UsbDeviceManager` (on `SpiceSession.Usb`, created when the host advertises a
+  usbredir channel) enumerates devices, filters out HID/hubs, and binds a device to a free channel.
+  `Forms/UsbDeviceDialog` is the picker (device names come from Windows via `Interop/UsbNames`,
+  SetupAPI — non-invasive); the console's **USB** toolbar button opens it.
+- **Mass storage:** UsbDk captures a device with a USB *reset*, which blocks/fails (libusb
+  `LIBUSB_ERROR_OTHER`) while a drive's volume is mounted and in use. Before binding, the picker calls
+  `Interop/UsbStorageDismount` to map the device (VID/PID) → its Windows drive letters (SetupAPI +
+  cfgmgr32 parent-walk) and `FSCTL_LOCK_VOLUME`+`FSCTL_DISMOUNT_VOLUME` them (held until capture; flushes
+  the FS so there's no surprise-removal corruption — spice-gtk/virt-viewer skip this). On release UsbDk's
+  reset makes Windows re-enumerate and auto-remount. If a volume can't be locked (open files), the user
+  is told to close them.
+- **Host provisioning:** `Services/UsbProvisioning` auto-ensures the domain has a USB controller +
+  4 `<redirdev type='spicevmc'>` channels. redirdevs hot-plug (`attach-device --live --config`) when a
+  controller exists (then the console reconnects to see them); adding a controller is persistent-only
+  and needs a power-cycle.
+- **Client driver:** the **UsbDk** kernel driver is required (installed by `installer\` — Inno Setup).
+  Without it (or the DLLs), channels still link but redirection is dormant and the picker says why.
+  Reliability: bulk/HID/mass-storage solid over the tunnel; isochronous (webcams/audio) is a known
+  weak spot. Pin a known-good `libusb-1.0.dll` (virt-viewer 10.x; v11's regressed redirection).
 
 ## Conventions
 

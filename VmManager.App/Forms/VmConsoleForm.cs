@@ -4,6 +4,7 @@ using Microsoft.Win32;
 using SpiceClient;
 using SpiceClient.Channels;
 using SpiceClient.Protocol;
+using SpiceClient.Usb;
 using VmManager.Controls;
 using VmManager.Diagnostics;
 using VmManager.Input;
@@ -11,7 +12,7 @@ using VmManager.Services;
 
 namespace VmManager.Forms
 {
-    public partial class VmConsoleForm : Form
+    public partial class VmConsoleForm : AppForm
     {
         private readonly SshConnectionManager _ssh;
         private readonly VirshService _virsh;
@@ -83,6 +84,7 @@ namespace VmManager.Forms
             _vmName = vmName;
             InitializeComponent();
             Text = $"Console — {vmName}";
+            ApplyCurlAvailability();
             _virsh.VmsChanged += OnVmsChanged;
 
             _resizeDebounce = new System.Windows.Forms.Timer { Interval = 300 };
@@ -174,6 +176,13 @@ namespace VmManager.Forms
             ActiveControl = displayControl;
             UpdateToolbarState(); // everything but Power disabled until connected
             await TryConnectOrShowStatus();
+        }
+
+        private void ApplyCurlAvailability()
+        {
+            if (_virsh.QemuCurlAvailable) return;
+            cdSelectLocalItem.Enabled = false;
+            cdSelectLocalItem.Text = "Local machine… (QEMU curl driver not loaded — install qemu-block-extra)";
         }
 
         private async Task TryConnectOrShowStatus()
@@ -391,6 +400,81 @@ namespace VmManager.Forms
 
         private void btnCtrlAltDel_Click(object? sender, EventArgs e) => _session?.Inputs?.SendCtrlAltDel();
 
+        // ---- USB redirection -----------------------------------------------
+
+        private async void btnUsb_Click(object? sender, EventArgs e)
+        {
+            if (!_connected || _session == null) return;
+
+            // Make sure the guest has a USB controller + redirdev channels. When a controller has
+            // to be added (none present) this is persistent-only and needs a power-cycle; otherwise
+            // the redirdev channels hot-plug live and we reconnect to negotiate them.
+            int added;
+            bool needsPowerCycle;
+            try
+            {
+                toolStripStatus.Text = "Configuring USB redirection…";
+                var prov = new UsbProvisioning(_virsh);
+                (added, needsPowerCycle) = await Task.Run(() => prov.EnsureRedirDevices(_vmName));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "USB Redirection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!_closing) toolStripStatus.Text = "Ready";
+                return;
+            }
+            if (_closing) return;
+
+            if (needsPowerCycle)
+            {
+                MessageBox.Show(this,
+                    "A USB controller was added to this VM's configuration.\n\n" +
+                    "Power the VM off and start it again (a restart from inside the guest is not enough) " +
+                    "to enable USB redirection.",
+                    "USB Redirection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                toolStripStatus.Text = "Ready";
+                return;
+            }
+
+            if (added > 0)
+            {
+                // New usbredir channels are only advertised to a fresh connection — reconnect.
+                toolStripStatus.Text = "Enabling USB redirection (reconnecting console)…";
+                await ConnectSpice();
+                if (_closing || !_connected) return;
+            }
+
+            var usb = await WaitForUsbReadyAsync(4000);
+            if (_closing) return;
+            if (usb == null)
+            {
+                MessageBox.Show(this,
+                    "USB redirection is not available for this VM (no usbredir channels were negotiated).",
+                    "USB Redirection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                toolStripStatus.Text = "Ready";
+                return;
+            }
+
+            toolStripStatus.Text = "Ready";
+            using var dlg = new UsbDeviceDialog(usb);
+            dlg.ShowDialog(this);
+        }
+
+        // Waits briefly for the usbredir channels to link after (re)connecting. Returns as soon as a
+        // slot is ready, or immediately if USB support is known-unavailable (e.g. UsbDk not installed).
+        private async Task<UsbDeviceManager?> WaitForUsbReadyAsync(int timeoutMs)
+        {
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs && !_closing)
+            {
+                var u = _session?.Usb;
+                if (u != null && (u.ReadySlots > 0 || !u.Available || !u.UsbDkAvailable))
+                    return u;
+                await Task.Delay(150);
+            }
+            return _session?.Usb;
+        }
+
         // ---- Clipboard sharing ---------------------------------------------
 
         protected override void WndProc(ref Message m)
@@ -502,6 +586,10 @@ namespace VmManager.Forms
             btnKeyboard.Enabled = live;
             btnMouse.Enabled = live;
             btnDisplay.Enabled = live; // gates its Fit Window / compression items too
+            btnUsb.Enabled = live;
+            btnUsb.ToolTipText = live
+                ? "Redirect a USB device from this PC to the VM."
+                : "Start the VM to redirect USB devices.";
 
             if (!live)
             {
@@ -672,6 +760,29 @@ namespace VmManager.Forms
             useLzCompressionItem.Checked = lz;
             useRawBitmapsItem.Checked = !lz;
             toolStripStatus.Text = lz ? "Image compression: LZ" : "Image compression: raw";
+        }
+
+        private void Screenshot_Click(object? sender, EventArgs e)
+        {
+            var bmp = _session?.Framebuffer?.Snapshot();
+            if (bmp == null)
+            {
+                toolStripStatus.Text = "Screenshot: nothing to capture yet.";
+                return;
+            }
+            try
+            {
+                Clipboard.SetImage(bmp); // copy:true by default — clipboard keeps its own copy, so we dispose ours
+                toolStripStatus.Text = $"Screenshot copied to clipboard — {bmp.Width}×{bmp.Height}";
+            }
+            catch (Exception ex)
+            {
+                toolStripStatus.Text = $"Screenshot failed: {ex.Message}";
+            }
+            finally
+            {
+                bmp.Dispose();
+            }
         }
 
         private void FitWindow_Click(object? sender, EventArgs e) => FitToResolution(center: false);

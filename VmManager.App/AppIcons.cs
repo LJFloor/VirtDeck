@@ -11,6 +11,29 @@ namespace VmManager
     {
         private static readonly Assembly Asm = typeof(AppIcons).Assembly;
         private static readonly Dictionary<string, Image?> Cache = new();
+        private static Icon? _app;
+
+        /// <summary>
+        /// The shared application icon (FatCow "computer", 16+32px) used for every window's
+        /// title bar / taskbar button. Cached; safe to assign to multiple Form.Icon (a Form
+        /// disposes its internal small/large copies, not the source Icon). Never null.
+        /// </summary>
+        public static Icon App
+        {
+            get
+            {
+                if (_app != null) return _app;
+                lock (Cache)
+                {
+                    if (_app != null) return _app;
+                    var resName = Array.Find(Asm.GetManifestResourceNames(),
+                        n => n.EndsWith("Icons.appicon.ico", StringComparison.OrdinalIgnoreCase));
+                    using var s = resName != null ? Asm.GetManifestResourceStream(resName) : null;
+                    _app = s != null ? new Icon(s) : SystemIcons.Application;
+                    return _app;
+                }
+            }
+        }
 
         public static Image? Get(string name)
         {

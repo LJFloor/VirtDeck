@@ -14,7 +14,7 @@
 ; The app is published self-contained, so the .NET runtime is bundled — no runtime check needed.
 
 #define AppName "SpiceVmManager"
-#define AppPublisher "S for Software"
+#define AppPublisher "Leendert-Jan Floor"
 #define AppVersion "1.0.0"
 #define AppExe "VmManager.exe"
 #define UsbDkMsi "UsbDk_1.0.22_x64.msi"

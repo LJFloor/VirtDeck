@@ -9,7 +9,7 @@ SpiceVmManager — End User License Agreement (Freeware)
 ============================================================================
 
 Software:  SpiceVmManager (the "Software")
-Licensor:  [Your name or company — e.g. "S for Software"] (the "Licensor", "we", "us")
+Licensor:  Leendert-Jan Floor (the "Licensor", "we", "us")
 Contact:   [email / website]
 Version:   [version], [year]
 

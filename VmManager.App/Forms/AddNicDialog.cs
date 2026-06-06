@@ -4,7 +4,7 @@ using VmManager.Services;
 namespace VmManager.Forms
 {
     /// <summary>Builds a <see cref="NicAddOp"/> for a bridge or virtual-network adapter.</summary>
-    public partial class AddNicDialog : Form
+    public partial class AddNicDialog : AppForm
     {
         private readonly VirshService _virsh;
         private List<string> _bridges = new();

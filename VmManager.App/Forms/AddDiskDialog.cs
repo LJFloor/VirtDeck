@@ -5,7 +5,7 @@ using VmManager.Services;
 namespace VmManager.Forms
 {
     /// <summary>Builds a <see cref="DiskAddOp"/>: new qcow2 file, existing/new ZFS volume, or CD-ROM.</summary>
-    public partial class AddDiskDialog : Form
+    public partial class AddDiskDialog : AppForm
     {
         private const string CreateZvolItem = "➕  Create new ZVOL…";
         private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");

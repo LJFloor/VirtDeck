@@ -10,11 +10,13 @@ namespace VmManager.Forms
         private ToolStripDropDownButton btnMouse;
         private ToolStripDropDownButton btnDisplay;
         private ToolStripDropDownButton btnCdDvd;
+        private ToolStripButton btnUsb;
         private ToolStripButton btnLog;
         private ToolStripMenuItem menuStart;
         private ToolStripMenuItem menuShutdown;
         private ToolStripMenuItem menuForceStop;
         private ToolStripMenuItem menuReboot;
+        private ToolStripMenuItem cdSelectLocalItem;
         private ToolStripMenuItem showHostCursorItem;
         private ToolStripMenuItem useLzCompressionItem;
         private ToolStripMenuItem useRawBitmapsItem;
@@ -122,8 +124,11 @@ namespace VmManager.Forms
             var fitWindowItem = new ToolStripMenuItem("Fit Window") { Image = AppIcons.Get("arrow_out") };
             fitWindowItem.ToolTipText = "Resize the window to the VM's resolution.";
             fitWindowItem.Click += FitWindow_Click;
+            var screenshotItem = new ToolStripMenuItem("Screenshot to Clipboard") { Image = AppIcons.Get("image") };
+            screenshotItem.ToolTipText = "Copy the current display to the clipboard.";
+            screenshotItem.Click += Screenshot_Click;
             btnDisplay.DropDownItems.AddRange(new ToolStripItem[]
-                { fitWindowItem, new ToolStripSeparator(), useLzCompressionItem, useRawBitmapsItem });
+                { fitWindowItem, screenshotItem, new ToolStripSeparator(), useLzCompressionItem, useRawBitmapsItem });
 
             // CD/DVD — only shown when the VM has an optical drive (set in code after connect)
             btnCdDvd.Text = "CD/DVD";
@@ -138,12 +143,22 @@ namespace VmManager.Forms
             var cdSelectItem = new ToolStripMenuItem("Select file") { Image = AppIcons.Get("drive_cd") };
             var cdSelectServerItem = new ToolStripMenuItem("On the server…");
             cdSelectServerItem.Click += cdSelectServer_Click;
-            var cdSelectLocalItem = new ToolStripMenuItem("Local machine…");
+            cdSelectLocalItem = new ToolStripMenuItem("Local machine…");
             cdSelectLocalItem.Click += cdSelectLocal_Click;
             cdSelectItem.DropDownItems.AddRange(new ToolStripItem[] { cdSelectServerItem, cdSelectLocalItem });
             var cdGuestIsoItem = new ToolStripMenuItem("Insert Guest Agent ISO") { Image = AppIcons.Get("drive") };
             cdGuestIsoItem.Click += cdGuestIso_Click;
             btnCdDvd.DropDownItems.AddRange(new ToolStripItem[] { cdEjectItem, cdSelectItem, cdGuestIsoItem });
+
+            // USB — always shown; enabled while connected. Ensures the VM has redirect channels
+            // on first use, then opens the device picker.
+            btnUsb = new ToolStripButton();
+            btnUsb.Text = "USB";
+            btnUsb.AutoToolTip = false;
+            btnUsb.Image = AppIcons.Get("connect");
+            btnUsb.Enabled = false;
+            btnUsb.ToolTipText = "Redirect a USB device from this PC to the VM.";
+            btnUsb.Click += btnUsb_Click;
 
             // Log
             btnLog = new ToolStripButton();
@@ -154,7 +169,7 @@ namespace VmManager.Forms
             btnLog.Click += (_, _) => LogForm.ShowLog();
 
             toolStrip.Items.AddRange(new ToolStripItem[]
-                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnCdDvd, btnLog });
+                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnCdDvd, btnUsb, btnLog });
 
             // displayControl
             displayControl.Dock = DockStyle.Fill;

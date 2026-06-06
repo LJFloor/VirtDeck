@@ -9,6 +9,8 @@ namespace VmManager.Forms
         private Label lblSource;
         private Label lblTypeCap;
         private Label lblType;
+        private Label lblBus;
+        private ComboBox cboBus;
         private Label lblCache;
         private ComboBox cboCache;
         private Label lblIo;
@@ -33,6 +35,8 @@ namespace VmManager.Forms
             lblSource = new Label();
             lblTypeCap = new Label();
             lblType = new Label();
+            lblBus = new Label();
+            cboBus = new ComboBox();
             lblCache = new Label();
             cboCache = new ComboBox();
             lblIo = new Label();
@@ -63,41 +67,49 @@ namespace VmManager.Forms
             lblType.Location = new Point(110, 70);
             lblType.AutoSize = true;
 
+            lblBus.Text = "Bus:";
+            lblBus.Location = new Point(14, 106);
+            lblBus.AutoSize = true;
+            cboBus.Location = new Point(110, 103);
+            cboBus.Size = new Size(150, 23);
+            cboBus.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboBus.Items.AddRange(new object[] { "virtio", "sata", "scsi", "ide" });
+
             lblCache.Text = "Cache:";
-            lblCache.Location = new Point(14, 106);
+            lblCache.Location = new Point(14, 138);
             lblCache.AutoSize = true;
-            cboCache.Location = new Point(110, 103);
+            cboCache.Location = new Point(110, 135);
             cboCache.Size = new Size(150, 23);
             cboCache.DropDownStyle = ComboBoxStyle.DropDownList;
             cboCache.Items.AddRange(new object[] { "(default)", "none", "writeback", "writethrough", "directsync", "unsafe" });
 
             lblIo.Text = "I/O:";
-            lblIo.Location = new Point(14, 138);
+            lblIo.Location = new Point(14, 170);
             lblIo.AutoSize = true;
-            cboIo.Location = new Point(110, 135);
+            cboIo.Location = new Point(110, 167);
             cboIo.Size = new Size(150, 23);
             cboIo.DropDownStyle = ComboBoxStyle.DropDownList;
             cboIo.Items.AddRange(new object[] { "(default)", "native", "threads", "io_uring" });
 
             lblDiscard.Text = "Discard:";
-            lblDiscard.Location = new Point(14, 170);
+            lblDiscard.Location = new Point(14, 202);
             lblDiscard.AutoSize = true;
-            cboDiscard.Location = new Point(110, 167);
+            cboDiscard.Location = new Point(110, 199);
             cboDiscard.Size = new Size(150, 23);
             cboDiscard.DropDownStyle = ComboBoxStyle.DropDownList;
             cboDiscard.Items.AddRange(new object[] { "(default)", "unmap", "ignore" });
 
             btnOk.Text = "OK";
             btnOk.Size = new Size(85, 28);
-            btnOk.Location = new Point(243, 212);
+            btnOk.Location = new Point(243, 244);
             btnOk.Click += btnOk_Click;
             btnCancel.Text = "Cancel";
             btnCancel.Size = new Size(85, 28);
-            btnCancel.Location = new Point(333, 212);
+            btnCancel.Location = new Point(333, 244);
             btnCancel.DialogResult = DialogResult.Cancel;
 
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(432, 254);
+            ClientSize = new Size(432, 286);
             Text = "Edit Disk";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -109,7 +121,7 @@ namespace VmManager.Forms
             Controls.AddRange(new Control[]
             {
                 lblTargetCap, lblTarget, lblSourceCap, lblSource, lblTypeCap, lblType,
-                lblCache, cboCache, lblIo, cboIo, lblDiscard, cboDiscard, btnOk, btnCancel
+                lblBus, cboBus, lblCache, cboCache, lblIo, cboIo, lblDiscard, cboDiscard, btnOk, btnCancel
             });
 
             ResumeLayout(false);

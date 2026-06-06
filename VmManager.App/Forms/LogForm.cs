@@ -9,7 +9,7 @@ namespace VmManager.Forms
     /// batched and flushed on a UI timer so even Verbose (per-frame) tracing can't
     /// flood the UI thread.
     /// </summary>
-    public partial class LogForm : Form
+    public partial class LogForm : AppForm
     {
         private static LogForm? _instance;
 
