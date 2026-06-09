@@ -1,0 +1,61 @@
+name: Build & Publish
+
+# Build the app and produce the Windows installer on every merge to main.
+# The installer EXE is uploaded as a build artifact (downloadable from the run's
+# "Artifacts" section). This mirrors publish.bat, run on a windows runner.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # No tag here, so stamp a traceable CI version from the run number.
+      - name: Derive CI version
+        id: ver
+        shell: pwsh
+        run: '"version=1.0.0.${{ github.run_number }}" >> $env:GITHUB_OUTPUT'
+
+      # Zip the SpiceClient source BEFORE building so no bin/obj leaks in. The
+      # installer ships this beside the app as LGPL "corresponding source"
+      # (see installer\VirtDeck.iss [Files]); ISCC fails if it's missing.
+      - name: Package SpiceClient source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          Compress-Archive -Path SpiceClient -DestinationPath publish/SpiceClient-src.zip -Force
+
+      - name: Restore
+        run: dotnet restore VirtDeck.sln
+
+      - name: Publish (self-contained win-x64)
+        run: >
+          dotnet publish VirtDeck/VirtDeck.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o publish/win-x64
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtDeck-installer
+          path: installer/output/*.exe
+          if-no-files-found: error
