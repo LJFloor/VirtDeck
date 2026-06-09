@@ -1,0 +1,71 @@
+name: Release
+
+# When a version tag (v*) is pushed, build the installer stamped with the tag
+# version, create a GitHub Release for that tag, and attach the installer EXE.
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Tag "v1.2.3" -> version "1.2.3" (used for the assembly and installer).
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing $version"
+
+      # Zip the SpiceClient source BEFORE building so no bin/obj leaks in. The
+      # installer ships this beside the app as LGPL "corresponding source"
+      # (see installer\VirtDeck.iss [Files]); ISCC fails if it's missing.
+      - name: Package SpiceClient source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          Compress-Archive -Path SpiceClient -DestinationPath publish/SpiceClient-src.zip -Force
+
+      - name: Restore
+        run: dotnet restore VirtDeck.sln
+
+      - name: Publish (self-contained win-x64)
+        run: >
+          dotnet publish VirtDeck/VirtDeck.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o publish/win-x64
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
+
+      - name: Create release and attach installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $exe = "installer/output/VirtDeckSetup-${{ steps.ver.outputs.version }}.exe"
+          if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
+          gh release create "${{ github.ref_name }}" "$exe" --title "${{ github.ref_name }}" --generate-notes
