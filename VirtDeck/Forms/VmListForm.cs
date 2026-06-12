@@ -2,6 +2,7 @@ using VirtDeck.Services;
 using VirtDeck.Models;
 using VirtDeck.Imaging;
 using System.ComponentModel;
+using SpiceClient;
 
 namespace VirtDeck.Forms
 {
@@ -13,6 +14,8 @@ namespace VirtDeck.Forms
         private readonly System.Windows.Forms.Timer _tickTimer;      // local 1s uptime tick (no SSH)
         private readonly System.Windows.Forms.Timer _previewTimer;   // debounces the per-selection details/screenshot fetch
         private int _previewGen;                                     // bumped on selection change; drops stale background results
+        private long _lastBytes;                                     // total tunnel bytes at last throughput sample
+        private long _lastSampleTs;                                  // Stopwatch timestamp at last throughput sample
         private readonly List<IsoHttpServer> _isoServers = new(); // host ISO streams, alive for the session
         private readonly Dictionary<string, VmConsoleForm> _consoles = new(); // one console window per VM; re-open focuses it
 
@@ -29,7 +32,7 @@ namespace VirtDeck.Forms
             _refreshTimer.Tick += async (_, _) => await RefreshVmList();
 
             _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-            _tickTimer.Tick += (_, _) => TickUptimes();
+            _tickTimer.Tick += (_, _) => { TickUptimes(); UpdateThroughput(); };
 
             _previewTimer = new System.Windows.Forms.Timer { Interval = 200 };
             _previewTimer.Tick += async (_, _) => { _previewTimer.Stop(); await LoadSelectedDetails(); };
@@ -49,6 +52,8 @@ namespace VirtDeck.Forms
 
             await RefreshVmList();
             await RefreshHostCapabilities();
+            _lastBytes = TotalTunnelBytes();
+            _lastSampleTs = System.Diagnostics.Stopwatch.GetTimestamp();
             _refreshTimer.Start();
             _tickTimer.Start();
         }
@@ -240,6 +245,33 @@ namespace VirtDeck.Forms
                 lvVms.SelectedItems[0].Tag is VmInfo sel && sel.StartedAtUtc != null)
                 vmDetails.Invalidate();
         }
+
+        // All bytes that ride the SSH tunnel: management channel + forwarded SPICE console sockets +
+        // reverse-forwarded ISO streaming. Each path is a distinct socket, so there's no double-count.
+        private long TotalTunnelBytes() =>
+            _ssh.BytesReceived + SpiceTraffic.BytesTransferred + IsoHttpServer.TotalBytesServed;
+
+        // Sample the combined tunnel-byte counter and show the rate since the last tick.
+        private void UpdateThroughput()
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            long bytes = TotalTunnelBytes();
+            double seconds = (now - _lastSampleTs) / (double)System.Diagnostics.Stopwatch.Frequency;
+            _lastSampleTs = now;
+            if (seconds <= 0) return;
+
+            long bps = (long)((bytes - _lastBytes) / seconds);
+            _lastBytes = bytes;
+            statusLabelThroughput.Text = FormatRate(bps);
+        }
+
+        private static string FormatRate(long bps) => bps switch
+        {
+            >= 1024L * 1024 * 1024 => $"{bps / (1024.0 * 1024 * 1024):0.#} GB/s",
+            >= 1024 * 1024         => $"{bps / (1024.0 * 1024):0.#} MB/s",
+            >= 1024                => $"{bps / 1024.0:0.#} KB/s",
+            _                      => $"{bps} B/s",
+        };
 
         private static string FormatUptime(DateTime? startedUtc)
         {

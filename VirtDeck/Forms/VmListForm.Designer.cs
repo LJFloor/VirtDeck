@@ -14,6 +14,7 @@ namespace VirtDeck.Forms
         private ToolStripButton btnLog;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel toolStripStatus;
+        private ToolStripStatusLabel statusLabelThroughput;
         private ToolStripStatusLabel statusLabelCpu;
         private ToolStripStatusLabel statusLabelBios;
         private ToolStripStatusLabel statusLabelLibvirt;
@@ -80,6 +81,7 @@ namespace VirtDeck.Forms
             btnLog            = new ToolStripButton();
             statusStrip         = new StatusStrip();
             toolStripStatus     = new ToolStripStatusLabel();
+            statusLabelThroughput = new ToolStripStatusLabel();
             statusLabelCpu      = new ToolStripStatusLabel();
             statusLabelBios     = new ToolStripStatusLabel();
             statusLabelLibvirt  = new ToolStripStatusLabel();
@@ -231,7 +233,15 @@ namespace VirtDeck.Forms
 
             // statusStrip
             toolStripStatus.Spring = true;
+            toolStripStatus.TextAlign = ContentAlignment.MiddleLeft; // sit next to the Refresh button, not centered
             toolStripStatus.Text = "Ready";
+
+            // Live SSH data throughput, just left of the capability indicators.
+            statusLabelThroughput.Text = "—";
+            statusLabelThroughput.Image = AppIcons.Get("network_adapter");
+            statusLabelThroughput.TextImageRelation = TextImageRelation.ImageBeforeText;
+            statusLabelThroughput.Margin = new Padding(8, 1, 0, 2);
+            statusLabelThroughput.ToolTipText = "Live data over the SSH tunnel: management, SPICE console, and ISO streaming.";
 
             statusLabelCpu.Text = "CPU";
             statusLabelCpu.TextImageRelation = TextImageRelation.ImageBeforeText;
@@ -248,6 +258,7 @@ namespace VirtDeck.Forms
             statusStrip.ShowItemToolTips = true;
             statusStrip.Items.Add(btnRefresh); // bottom-left, before the status message
             statusStrip.Items.Add(toolStripStatus);
+            statusStrip.Items.Add(statusLabelThroughput);
             statusStrip.Items.Add(statusLabelCpu);
             statusStrip.Items.Add(statusLabelBios);
             statusStrip.Items.Add(statusLabelLibvirt);

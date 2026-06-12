@@ -14,8 +14,6 @@
 
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="8.0.8" />
-    <!-- Pure-C# Opus decoder for the SPICE playback channel (no native DLL to stage). BSD/libopus terms. -->
-    <PackageReference Include="Concentus" Version="2.2.2" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Threading;
-using SpiceClient.Audio;
 using SpiceClient.Channels;
 using SpiceClient.Imaging;
 using SpiceClient.Protocol;
@@ -28,19 +27,6 @@ public sealed class SpiceSession : IDisposable
     public InputsChannel? Inputs { get; private set; }
     public DisplayChannel? Display { get; private set; }
 
-    private WaveOutPlayer? _audio;
-    private bool _audioMutedPref;
-
-    /// <summary>
-    /// Mute/un-mute guest speaker audio. Settable before the playback channel links — the
-    /// preference is applied to the sink as soon as audio starts.
-    /// </summary>
-    public bool AudioMuted
-    {
-        get => _audioMutedPref;
-        set { _audioMutedPref = value; if (_audio != null) _audio.Muted = value; }
-    }
-
     /// <summary>
     /// USB redirection manager — non-null once the host advertises at least one usbredir
     /// channel (i.e. the VM has &lt;redirdev&gt; devices). Null means the VM has no redirect
@@ -64,9 +50,6 @@ public sealed class SpiceSession : IDisposable
     public event Action<string>? Disconnected;
     public event Action<string>? LogMessage;
     public event Action<string>? StatusMessage;
-
-    /// <summary>Raised once the playback channel begins delivering audio (server offered speakers).</summary>
-    public event Action? AudioStarted;
 
     // File transfer (client -> guest)
     public event Action<string>? FileStarted;
@@ -110,7 +93,6 @@ public sealed class SpiceSession : IDisposable
             SpiceConstants.CHANNEL_DISPLAY when id == 0 => new DisplayChannel(this, Host, Port, ConnectionId, Password),
             SpiceConstants.CHANNEL_INPUTS => new InputsChannel(this, Host, Port, ConnectionId, Password),
             SpiceConstants.CHANNEL_CURSOR => new CursorChannel(this, Host, Port, ConnectionId, Password),
-            SpiceConstants.CHANNEL_PLAYBACK when id == 0 => new PlaybackChannel(this, Host, Port, ConnectionId, Password),
             SpiceConstants.CHANNEL_USBREDIR => CreateUsbChannel(id),
             _ => null
         };
@@ -217,21 +199,6 @@ public sealed class SpiceSession : IDisposable
     internal void RaiseCursorHidden() => CursorHidden?.Invoke();
     internal void RaiseCursorReset() => CursorReset?.Invoke();
 
-    // ---- Called by PlaybackChannel (channel thread) --------------------
-
-    internal void AudioStart(int frequency, int channels)
-    {
-        if (Volatile.Read(ref _disposed) == 1) return;
-        var audio = _audio ??= new WaveOutPlayer(Log);
-        audio.Configure(frequency, channels);
-        audio.Muted = _audioMutedPref;
-        AudioStarted?.Invoke();
-    }
-
-    internal void AudioData(byte[] data, int offset, int count) => _audio?.Write(data, offset, count);
-
-    internal void AudioStop() => _audio?.Stop();
-
     // ---- Shared --------------------------------------------------------
 
     internal void Log(string msg) => LogMessage?.Invoke(msg);
@@ -259,8 +226,6 @@ public sealed class SpiceSession : IDisposable
         try { _usbCtx?.Dispose(); } catch { /* ignore */ }
         _usbCtx = null;
         _usb = null;
-        try { _audio?.Dispose(); } catch { /* ignore */ }
-        _audio = null;
         try { Framebuffer?.Dispose(); } catch { /* ignore */ }
         Framebuffer = null;
     }

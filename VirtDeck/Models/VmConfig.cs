@@ -8,6 +8,8 @@ namespace VirtDeck.Models
         public int Vcpus { get; set; } = 1;
         public string CpuMode { get; set; } = "default"; // "host-passthrough" | "host-model" | "default"
         public long MemoryMiB { get; set; } = 1024;
+        public string VideoModel { get; set; } = string.Empty; // virtio, qxl, vga, bochs, …
+        public bool HasSoundDevice { get; set; }               // a <sound> device → SPICE offers audio
         public bool Autostart { get; set; }
         public List<string> BootOrder { get; set; } = new();   // "hd", "cdrom", "network"
         public List<DiskInfo> Disks { get; set; } = new();

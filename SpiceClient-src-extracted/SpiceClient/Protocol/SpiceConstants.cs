@@ -181,32 +181,6 @@ public static class SpiceConstants
     public const ushort MSG_SPICEVMC_DATA = 101;   // server -> client
     public const ushort MSGC_SPICEVMC_DATA = 101;  // client -> server
 
-    // Playback channel (server -> client). Speakers only; the client sends nothing here.
-    public const ushort MSG_PLAYBACK_DATA = 101;     // u32 time + raw PCM bytes
-    public const ushort MSG_PLAYBACK_MODE = 102;     // u32 time, u16 mode
-    public const ushort MSG_PLAYBACK_START = 103;    // u32 channels, u16 format, u32 frequency, u32 time
-    public const ushort MSG_PLAYBACK_STOP = 104;     // empty
-    public const ushort MSG_PLAYBACK_VOLUME = 105;   // unused (VOLUME cap not advertised)
-    public const ushort MSG_PLAYBACK_MUTE = 106;     // unused
-    public const ushort MSG_PLAYBACK_LATENCY = 107;  // unused (LATENCY cap not advertised)
-
-    // Audio data modes (SpiceMsgPlaybackMode.mode). We advertise no codec caps, so the
-    // server falls back to RAW signed-16-bit PCM (CELT/OPUS would need a decoder we don't have).
-    public const ushort AUDIO_DATA_MODE_INVALID = 0;
-    public const ushort AUDIO_DATA_MODE_RAW = 1;
-    public const ushort AUDIO_DATA_MODE_CELT_0_5_1 = 2;
-    public const ushort AUDIO_DATA_MODE_OPUS = 3;
-
-    // Audio sample formats (SpiceMsgPlaybackStart.format)
-    public const ushort AUDIO_FMT_INVALID = 0;
-    public const ushort AUDIO_FMT_S16 = 1;
-
-    // Playback channel capabilities (bit positions). We advertise NONE → server uses RAW S16.
-    public const int PLAYBACK_CAP_CELT_0_5_1 = 0;
-    public const int PLAYBACK_CAP_VOLUME = 1;
-    public const int PLAYBACK_CAP_LATENCY = 2;
-    public const int PLAYBACK_CAP_OPUS = 3;
-
     // Mouse modes
     public const int MOUSE_MODE_SERVER = 1 << 0;
     public const int MOUSE_MODE_CLIENT = 1 << 1;

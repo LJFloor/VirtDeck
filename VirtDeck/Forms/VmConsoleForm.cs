@@ -26,6 +26,7 @@ namespace VirtDeck.Forms
         // CD/DVD media (set after connect when the VM has an optical drive)
         private string? _cdromTarget;
         private string? _cdromBus;
+        private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers an audio channel
         private readonly List<IsoHttpServer> _isoServers = new(); // streamed "Local machine" media; alive while open
         private const string GuestVirtioUrl =
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
@@ -156,6 +157,8 @@ namespace VirtDeck.Forms
                 _lastWindowState = FormWindowState.Maximized;
                 WindowState = FormWindowState.Maximized;   // restore maximized for this VM
             }
+            // Audio is on by default; only a saved value of 1 starts muted.
+            audioMuteItem.Checked = key.GetValue("AudioMute") is int am && am == 1;
         }
 
         private void SaveVmSettings()
@@ -165,6 +168,7 @@ namespace VirtDeck.Forms
             using var key = Registry.CurrentUser.CreateSubKey($@"{RegistryKey}\VMs\{uuid}");
             key.SetValue("ShowHostCursor", showHostCursorItem.Checked ? 1 : 0, RegistryValueKind.DWord);
             key.SetValue("Maximized", _lastWindowState == FormWindowState.Maximized ? 1 : 0, RegistryValueKind.DWord);
+            key.SetValue("AudioMute", audioMuteItem.Checked ? 1 : 0, RegistryValueKind.DWord);
         }
 
         // ---- Lifecycle -----------------------------------------------------
@@ -221,6 +225,7 @@ namespace VirtDeck.Forms
                 _session.FileFailed += OnFileFailed;
                 _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
                 _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
+                _session.AudioMuted = audioMuteItem.Checked; // apply the remembered mute pref before audio starts
 
                 displayControl.Attach(_session);
                 displayControl.Policy = showHostCursorItem.Checked
@@ -247,6 +252,7 @@ namespace VirtDeck.Forms
         {
             _connected = false;
             _cdromTarget = null;
+            _hasSoundDevice = false;
             UpdateToolbarState();
             useLzCompressionItem.Checked = true;   // neutral default; the channel re-requests LZ on reconnect
             useRawBitmapsItem.Checked = false;
@@ -591,6 +597,13 @@ namespace VirtDeck.Forms
                 ? "Redirect a USB device from this PC to the VM."
                 : "Start the VM to redirect USB devices.";
 
+            btnAudio.Enabled = live && _hasSoundDevice;
+            btnAudio.ToolTipText = !live
+                ? "Start the VM to use audio."
+                : _hasSoundDevice
+                    ? "Guest speaker audio."
+                    : "This VM has no sound device — add one in the editor while the VM is shut off.";
+
             if (!live)
             {
                 btnCdDvd.Enabled = false;
@@ -619,6 +632,7 @@ namespace VirtDeck.Forms
                     if (_closing) return;
                     _cdromTarget = cd?.Target;
                     _cdromBus = cd == null ? null : (string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus);
+                    _hasSoundDevice = cfg.HasSoundDevice;
                     UpdateToolbarState();
                 });
             }
@@ -743,6 +757,13 @@ namespace VirtDeck.Forms
             displayControl.Policy = showHostCursorItem.Checked
                 ? SpiceDisplayControl.CursorPolicy.HostCursor
                 : SpiceDisplayControl.CursorPolicy.SpiceCursor;
+            SaveVmSettings();
+        }
+
+        private void audioMute_Click(object? sender, EventArgs e)
+        {
+            if (_session != null) _session.AudioMuted = audioMuteItem.Checked;
+            toolStripStatus.Text = audioMuteItem.Checked ? "Audio muted" : "Audio on";
             SaveVmSettings();
         }
 

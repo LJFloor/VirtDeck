@@ -235,6 +235,11 @@ namespace VirtDeck.Services
                                  ?? (string?)src?.Attribute("dev") ?? string.Empty,
                     });
                 }
+
+                var video = devices.Element("video");
+                cfg.VideoModel = (string?)video?.Element("model")?.Attribute("type") ?? string.Empty;
+
+                cfg.HasSoundDevice = devices.Elements("sound").Any();
             }
 
             cfg.Autostart = GetAutostart(vmName);
@@ -287,6 +292,9 @@ namespace VirtDeck.Services
         public void SetBootOrder(string vm, IEnumerable<string> order) =>
             _ssh.RunSudoCommand($"virt-xml {vm} --edit --boot {string.Join(",", order)}");
 
+        public void SetVideoModel(string vm, string model) =>
+            _ssh.RunSudoCommand($"virt-xml {vm} --edit --video model.type={model}");
+
         public void SetAutostart(string vm, bool on) =>
             _ssh.RunSudoCommand($"virsh autostart {vm}{(on ? "" : " --disable")}");
 
@@ -335,7 +343,9 @@ namespace VirtDeck.Services
             var cmd =
                 $"virt-install --name {name} --vcpus {vcpus} --memory {memoryMiB} --os-variant {osVariant} " +
                 "--cpu host-passthrough " +
-                "--graphics spice,listen=127.0.0.1 --video qxl --disk none --network none --boot hd,cdrom " +
+                // ich9 (Intel HD Audio) has broad guest driver support; with SPICE graphics, libvirt
+                // wires it to the spice audio backend so the console gets a playback channel for free.
+                "--graphics spice,listen=127.0.0.1 --video virtio --sound model=ich9 --disk none --network none --boot hd,cdrom " +
                 $"{bootFlags}" +
                 $"--print-xml > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc";
             _ssh.RunSudoCommand(cmd);

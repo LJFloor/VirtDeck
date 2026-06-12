@@ -107,6 +107,16 @@ namespace VirtDeck.Forms
             _ => "default",
         };
 
+        // Index-aligned with cboGpu's items (see VmEditForm.Designer.cs).
+        private static readonly string[] GpuModels = { "virtio", "qxl", "vga", "bochs" };
+
+        // Returns the selected libvirt model string, or the original model when an unknown/extra
+        // item is selected (so we never silently change a model we didn't offer).
+        private string SelectedGpuModel() =>
+            cboGpu.SelectedIndex >= 0 && cboGpu.SelectedIndex < GpuModels.Length
+                ? GpuModels[cboGpu.SelectedIndex]
+                : _original!.VideoModel;
+
         private void ApplyReadOnly()
         {
             txtName.Enabled = false;
@@ -114,6 +124,7 @@ namespace VirtDeck.Forms
             nudMemMiB.Enabled = false;
             chkAutostart.Enabled = false;
             cboCpu.Enabled = false;
+            cboGpu.Enabled = false;
             clbBoot.Enabled = false;
             btnBootUp.Enabled = false;
             btnBootDown.Enabled = false;
@@ -132,6 +143,14 @@ namespace VirtDeck.Forms
             nudMemMiB.Value = Math.Clamp((decimal)cfg.MemoryMiB, nudMemMiB.Minimum, nudMemMiB.Maximum);
             chkAutostart.Checked = cfg.Autostart;
             cboCpu.SelectedIndex = CpuModeToIndex(cfg.CpuMode);
+
+            int gi = Array.IndexOf(GpuModels, cfg.VideoModel);
+            if (gi < 0)
+            {
+                cboGpu.Items.Add(string.IsNullOrEmpty(cfg.VideoModel) ? "(unchanged)" : cfg.VideoModel);
+                gi = cboGpu.Items.Count - 1;
+            }
+            cboGpu.SelectedIndex = gi;
 
             clbBoot.Items.Clear();
             foreach (var dev in cfg.BootOrder)
@@ -467,6 +486,7 @@ namespace VirtDeck.Forms
             long mem = (long)nudMemMiB.Value;
             bool autostart = chkAutostart.Checked;
             string cpuMode = CpuModeFromIndex(cboCpu.SelectedIndex);
+            string gpu = SelectedGpuModel();
 
             var boot = new List<string>();
             for (int i = 0; i < clbBoot.Items.Count; i++)
@@ -481,7 +501,7 @@ namespace VirtDeck.Forms
 
             btnOk.Enabled = false;
             btnCancel.Enabled = false;
-            var errors = await Task.Run(() => ApplyChanges(newName, vcpus, mem, autostart, boot, cpuMode));
+            var errors = await Task.Run(() => ApplyChanges(newName, vcpus, mem, autostart, boot, cpuMode, gpu));
             if (errors.Count > 0)
             {
                 MessageBox.Show("Some changes could not be applied:\n\n" + string.Join("\n", errors),
@@ -494,7 +514,7 @@ namespace VirtDeck.Forms
             Close();
         }
 
-        private List<string> ApplyChanges(string newName, int vcpus, long mem, bool autostart, List<string> boot, string cpuMode)
+        private List<string> ApplyChanges(string newName, int vcpus, long mem, bool autostart, List<string> boot, string cpuMode, string gpu)
         {
             var errors = new List<string>();
             var o = _original!;
@@ -507,6 +527,7 @@ namespace VirtDeck.Forms
             if (vcpus != o.Vcpus) Try("vCPUs", () => _virsh.SetVcpus(_vmName, vcpus));
             if (mem != o.MemoryMiB) Try("Memory", () => _virsh.SetMemoryMiB(_vmName, mem));
             if (cpuMode != o.CpuMode) Try("CPU mode", () => _virsh.SetCpuMode(_vmName, cpuMode));
+            if (gpu != o.VideoModel && !string.IsNullOrEmpty(gpu)) Try("GPU", () => _virsh.SetVideoModel(_vmName, gpu));
             if (!boot.SequenceEqual(o.BootOrder)) Try("Boot order", () => _virsh.SetBootOrder(_vmName, boot));
             if (autostart != o.Autostart) Try("Autostart", () => _virsh.SetAutostart(_vmName, autostart));
 

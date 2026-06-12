@@ -13,6 +13,12 @@ namespace VirtDeck.Services
         public bool IsConnected => _client?.IsConnected ?? false;
         public string Host { get; private set; } = string.Empty;
 
+        // Running total of bytes received over this SSH connection (command output, screenshots,
+        // file downloads). Sampled by the UI to show a live throughput rate. Updated from
+        // background command threads, so access is via Interlocked.
+        private long _bytesReceived;
+        public long BytesReceived => Interlocked.Read(ref _bytesReceived);
+
         public SshClient Client => _client ?? throw new InvalidOperationException("Not connected.");
 
         public void Connect(string host, string username, string password)
@@ -33,6 +39,7 @@ namespace VirtDeck.Services
                     throw new InvalidOperationException("SSH is not connected.");
 
                 using var cmd = _client.RunCommand(command);
+                Interlocked.Add(ref _bytesReceived, cmd.Result.Length);
                 if (cmd.ExitStatus != 0)
                     throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}");
                 return cmd.Result;
@@ -56,6 +63,7 @@ namespace VirtDeck.Services
                 FeedSudoPassword(cmd);
                 cmd.EndExecute(ar);
                 var output = cmd.Result;
+                Interlocked.Add(ref _bytesReceived, output.Length);
 
                 // Everything before the marker is sudo noise (password prompt, lecture, etc.)
                 var markerIndex = output.IndexOf(SudoMarker, StringComparison.Ordinal);
@@ -148,6 +156,7 @@ namespace VirtDeck.Services
                             if (ct.IsCancellationRequested) break;
                             destination.Write(buf, 0, n);
                             done += n;
+                            Interlocked.Add(ref _bytesReceived, n);
                             progress.Report((done, total));
                         }
                     }
@@ -195,6 +204,7 @@ namespace VirtDeck.Services
                 while ((line = reader.ReadLine()) != null)
                 {
                     if (ct.IsCancellationRequested) break;
+                    Interlocked.Add(ref _bytesReceived, line.Length + 1);
                     onLine(line);
                 }
                 ct.ThrowIfCancellationRequested();

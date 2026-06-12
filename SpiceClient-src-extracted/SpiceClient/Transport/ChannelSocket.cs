@@ -33,7 +33,6 @@ public sealed class ChannelSocket : IDisposable
             if (n <= 0)
                 throw new IOException("SPICE connection closed by peer.");
             off += n;
-            SpiceTraffic.Add(n);
         }
         return buf;
     }
@@ -45,7 +44,6 @@ public sealed class ChannelSocket : IDisposable
             if (_closed) return;
             _stream.Write(data, 0, data.Length);
             _stream.Flush();
-            SpiceTraffic.Add(data.Length);
         }
     }
 

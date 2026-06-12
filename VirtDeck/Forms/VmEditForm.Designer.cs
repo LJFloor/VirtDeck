@@ -31,6 +31,8 @@ namespace VirtDeck.Forms
         private CheckBox chkAutostart;
         private Label lblCpu;
         private ComboBox cboCpu;
+        private Label lblGpu;
+        private ComboBox cboGpu;
         private Label lblNote;
         private Label lblBootHint;
         private CheckedListBox clbBoot;
@@ -78,6 +80,8 @@ namespace VirtDeck.Forms
             chkAutostart = new CheckBox();
             lblCpu = new Label();
             cboCpu = new ComboBox();
+            lblGpu = new Label();
+            cboGpu = new ComboBox();
             lblNote = new Label();
             lblBootHint = new Label();
             clbBoot = new CheckedListBox();
@@ -142,8 +146,19 @@ namespace VirtDeck.Forms
             cboCpu.Items.Add("Host model");
             cboCpu.Items.Add("Default (qemu64)");
 
+            lblGpu.Text = "GPU:";
+            lblGpu.Location = new Point(14, 196);
+            lblGpu.AutoSize = true;
+            cboGpu.Location = new Point(130, 193);
+            cboGpu.Size = new Size(200, 23);
+            cboGpu.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboGpu.Items.Add("Virtio (virtio-gpu)");
+            cboGpu.Items.Add("QXL");
+            cboGpu.Items.Add("VGA");
+            cboGpu.Items.Add("Bochs");
+
             lblNote.Text = "Changes are saved to the VM configuration and take effect on next boot.";
-            lblNote.Location = new Point(14, 200);
+            lblNote.Location = new Point(14, 234);
             lblNote.Size = new Size(400, 40);
             lblNote.ForeColor = SystemColors.GrayText;
 
@@ -157,6 +172,8 @@ namespace VirtDeck.Forms
             tabGeneral.Controls.Add(chkAutostart);
             tabGeneral.Controls.Add(lblCpu);
             tabGeneral.Controls.Add(cboCpu);
+            tabGeneral.Controls.Add(lblGpu);
+            tabGeneral.Controls.Add(cboGpu);
             tabGeneral.Controls.Add(lblNote);
 
             // tabBoot

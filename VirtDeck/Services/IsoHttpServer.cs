@@ -17,6 +17,12 @@ namespace VirtDeck.Services
         private ForwardedPortRemote? _forwardedPort;
         private string _isoFilePath = string.Empty;
 
+        // Process-wide total of ISO bytes served. Every transfer (console hot-swap, VM create/edit
+        // install ISO) funnels through CopyBytes, so this captures all ISO streaming over the reverse
+        // forward. The WinForms app samples it to fold ISO traffic into the SSH-tunnel throughput meter.
+        private static long _totalBytesServed;
+        public static long TotalBytesServed => Interlocked.Read(ref _totalBytesServed);
+
         /// <summary>URL reachable from the remote host (http://127.0.0.1:&lt;remotePort&gt;/&lt;file&gt;.iso).</summary>
         public string RemoteUrl { get; private set; } = string.Empty;
 
@@ -141,6 +147,7 @@ namespace VirtDeck.Services
                 int read = input.Read(buffer, 0, toRead);
                 if (read == 0) break;
                 output.Write(buffer, 0, read);
+                Interlocked.Add(ref _totalBytesServed, read);
                 remaining -= read;
             }
         }
