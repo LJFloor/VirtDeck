@@ -246,7 +246,7 @@ namespace VirtDeck.Forms
             lvDisks.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             lvDisks.View = View.Details;
             lvDisks.FullRowSelect = true;
-            lvDisks.MultiSelect = false;
+            lvDisks.MultiSelect = true;
             lvDisks.HideSelection = false;
             lvDisks.ContextMenuStrip = contextMenuDisks;
             lvDisks.MouseDown += lvDisks_MouseDown;
@@ -282,7 +282,7 @@ namespace VirtDeck.Forms
             lvNics.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             lvNics.View = View.Details;
             lvNics.FullRowSelect = true;
-            lvNics.MultiSelect = false;
+            lvNics.MultiSelect = true;
             lvNics.HideSelection = false;
             lvNics.Columns.Add("Model", 80);
             lvNics.Columns.Add("Type", 80);

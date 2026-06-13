@@ -29,6 +29,9 @@
     <!-- The window icon, loaded at runtime via AppIcons.App and set on every AppForm. The
          same .ico is also baked into the exe as the shell icon by <ApplicationIcon> above. -->
     <EmbeddedResource Include="Icons\appicon.ico" />
+    <!-- Fallback osinfo short-id → label map, read by OsLabelCatalog when the host has no
+         live osinfo-query to enrich the Create-VM OS dropdown. -->
+    <EmbeddedResource Include="Data\*.json" />
   </ItemGroup>
 
   <!-- Native USB redirection libraries (x64), hand-staged outside the project (see

@@ -209,8 +209,10 @@ namespace VirtDeck.Forms
         {
             if (e.Button != MouseButtons.Right) return;
             var item = lvDisks.GetItemAt(e.X, e.Y);
-            if (item != null) item.Selected = true;
-            else lvDisks.SelectedItems.Clear();
+            if (item == null) lvDisks.SelectedItems.Clear();
+            // Right-clicking a row outside the current selection retargets to just that row;
+            // right-clicking inside a multi-selection keeps it so the menu acts on them all.
+            else if (!item.Selected) { lvDisks.SelectedItems.Clear(); item.Selected = true; }
         }
 
         // Show only the actions valid for the right-clicked disk row.
@@ -219,6 +221,13 @@ namespace VirtDeck.Forms
             if (_readOnly || lvDisks.SelectedItems.Count == 0)
             {
                 e.Cancel = true; // read-only, or right-click on empty space
+                return;
+            }
+            if (lvDisks.SelectedItems.Count > 1)
+            {
+                // Edit/Change ISO/Eject are inherently single-disk; only bulk Remove applies.
+                menuDiskEdit.Visible = menuDiskChangeIso.Visible = menuDiskEject.Visible = menuDiskSep.Visible = false;
+                menuDiskRemove.Visible = true;
                 return;
             }
             var tag = lvDisks.SelectedItems[0].Tag;
@@ -300,25 +309,33 @@ namespace VirtDeck.Forms
 
         private void DiskRemove_Click(object? sender, EventArgs e)
         {
-            var tag = lvDisks.SelectedItems.Count > 0 ? lvDisks.SelectedItems[0].Tag : null;
-            if (tag is DiskAddOp add)
-            {
+            var tags = lvDisks.SelectedItems.Cast<ListViewItem>().Select(i => i.Tag).ToList();
+            var adds = tags.OfType<DiskAddOp>().ToList();
+            var existing = tags.OfType<DiskInfo>().ToList();
+            if (adds.Count == 0 && existing.Count == 0) return;
+
+            // One combined confirmation for existing disks; pending adds drop silently.
+            if (existing.Count > 0 &&
+                MessageBox.Show(
+                    (existing.Count == 1
+                        ? $"Remove disk '{existing[0].Target}' ({existing[0].Source})?"
+                        : "Remove these disks?\n\n" +
+                          string.Join("\n", existing.Select(d => $"{d.Target}  ({d.Source})"))) +
+                    "\n\nThe backing files/volumes are left in place.",
+                    "Remove Disk", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            foreach (var add in adds)
                 _diskAdds.Remove(add);
-                RebuildDiskList();
-            }
-            else if (tag is DiskInfo d)
+            foreach (var d in existing)
             {
-                if (MessageBox.Show(
-                        $"Remove disk '{d.Target}' ({d.Source})?\nThe backing file/volume is left in place.",
-                        "Remove Disk", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                    return;
                 _diskRemoves.Add(d.Target);
                 _diskEdits.Remove(d.Target);
                 _diskBusChanges.Remove(d.Target);
                 _mediaChanges.Remove(d.Target);
                 ClearStream(d.Target);
-                RebuildDiskList();
             }
+            RebuildDiskList();
         }
 
         private void DiskChangeIso_Click(object? sender, EventArgs e)
@@ -434,9 +451,13 @@ namespace VirtDeck.Forms
 
         private void btnRemoveNic_Click(object? sender, EventArgs e)
         {
-            var tag = lvNics.SelectedItems.Count > 0 ? lvNics.SelectedItems[0].Tag : null;
-            if (tag is NicAddOp add) { _nicAdds.Remove(add); RebuildNicList(); }
-            else if (tag is NicInfo n) { _nicRemoves.Add(n); RebuildNicList(); }
+            if (lvNics.SelectedItems.Count == 0) return;
+            foreach (var tag in lvNics.SelectedItems.Cast<ListViewItem>().Select(i => i.Tag).ToList())
+            {
+                if (tag is NicAddOp add) _nicAdds.Remove(add);
+                else if (tag is NicInfo n) _nicRemoves.Add(n);
+            }
+            RebuildNicList();
         }
 
         private void Warn(string msg) =>

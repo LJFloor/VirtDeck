@@ -50,7 +50,8 @@ namespace VirtDeck.Forms
         private ToolStripMenuItem menuNetActivate;
         private ToolStripMenuItem menuNetDeactivate;
         private ToolStripSeparator menuNetSep;
-        private ToolStripMenuItem menuNetAutostart;
+        private ToolStripMenuItem menuNetAutostartOn;
+        private ToolStripMenuItem menuNetAutostartOff;
 
         protected override void Dispose(bool disposing)
         {
@@ -103,10 +104,11 @@ namespace VirtDeck.Forms
             colNetState       = new ColumnHeader();
             colNetAutostart   = new ColumnHeader();
             contextMenuNetworks = new ContextMenuStrip(components);
-            menuNetActivate   = new ToolStripMenuItem();
-            menuNetDeactivate = new ToolStripMenuItem();
-            menuNetSep        = new ToolStripSeparator();
-            menuNetAutostart  = new ToolStripMenuItem();
+            menuNetActivate     = new ToolStripMenuItem();
+            menuNetDeactivate   = new ToolStripMenuItem();
+            menuNetSep          = new ToolStripSeparator();
+            menuNetAutostartOn  = new ToolStripMenuItem();
+            menuNetAutostartOff = new ToolStripMenuItem();
 
             SuspendLayout();
 
@@ -172,7 +174,7 @@ namespace VirtDeck.Forms
             lvVms.Columns.AddRange(new[] { colName, colState, colVCpus, colMemory, colUptime });
             lvVms.View = View.Details;
             lvVms.FullRowSelect = true;
-            lvVms.MultiSelect = false;
+            lvVms.MultiSelect = true;
             lvVms.Dock = DockStyle.Fill;
             lvVms.ContextMenuStrip = contextMenu;
             lvVms.DoubleClick += lvVms_DoubleClick;
@@ -185,11 +187,16 @@ namespace VirtDeck.Forms
             menuNetDeactivate.Text = "Deactivate";
             menuNetDeactivate.Image = AppIcons.Get("stop");
             menuNetDeactivate.Click += menuNetDeactivate_Click;
-            menuNetAutostart.Text = "Autostart";
-            menuNetAutostart.ToolTipText = "Start this network automatically when the host boots";
-            menuNetAutostart.Click += menuNetAutostart_Click; // Checked reflects current state (set in Opening)
+            menuNetAutostartOn.Text = "Enable autostart";
+            menuNetAutostartOn.Image = AppIcons.Get("control_play");
+            menuNetAutostartOn.ToolTipText = "Start these networks automatically when the host boots";
+            menuNetAutostartOn.Click += menuNetAutostartOn_Click;
+            menuNetAutostartOff.Text = "Disable autostart";
+            menuNetAutostartOff.Image = AppIcons.Get("control_stop");
+            menuNetAutostartOff.ToolTipText = "Do not start these networks automatically at host boot";
+            menuNetAutostartOff.Click += menuNetAutostartOff_Click;
             contextMenuNetworks.Items.AddRange(new ToolStripItem[]
-                { menuNetActivate, menuNetDeactivate, menuNetSep, menuNetAutostart });
+                { menuNetActivate, menuNetDeactivate, menuNetSep, menuNetAutostartOn, menuNetAutostartOff });
             contextMenuNetworks.Opening += contextMenuNetworks_Opening;
 
             // lvNetworks
@@ -199,7 +206,7 @@ namespace VirtDeck.Forms
             lvNetworks.Columns.AddRange(new[] { colNetName, colNetState, colNetAutostart });
             lvNetworks.View = View.Details;
             lvNetworks.FullRowSelect = true;
-            lvNetworks.MultiSelect = false;
+            lvNetworks.MultiSelect = true;
             lvNetworks.Dock = DockStyle.Fill;
             lvNetworks.ContextMenuStrip = contextMenuNetworks;
 

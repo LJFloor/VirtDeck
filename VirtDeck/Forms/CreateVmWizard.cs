@@ -20,6 +20,7 @@ namespace VirtDeck.Forms
         private readonly List<DiskAddOp> _disks = new();
         private readonly HashSet<string> _usedTargets = new();
         private readonly List<IsoHttpServer> _servers = new();
+        private readonly ToolTip _firmwareTip = new() { ShowAlways = true };
         private int _page;
         private bool _storageSeeded;
 
@@ -53,7 +54,7 @@ namespace VirtDeck.Forms
             ApplyCurlAvailability();
             IsoMode_Changed(this, EventArgs.Empty);
             ShowPage(0);
-            _ = PopulateOsVariantsAsync(); // fill the OS dropdown from the host (osinfo-query)
+            _ = PopulateOsVariantsAsync(); // fill the OS dropdown (virt-install --osinfo list + osinfo-query/embedded labels)
         }
 
         // Seeds a "Generic" default immediately, then appends the host's osinfo profiles when SSH returns.
@@ -68,6 +69,25 @@ namespace VirtDeck.Forms
                 foreach (var o in list) cboOs.Items.Add(o);
             }
             catch { /* leave just the generic option */ }
+        }
+
+        // Some OSes (e.g. Windows XP and earlier) have no UEFI firmware support — when one is picked,
+        // force BIOS and lock the UEFI option. The BIOS-only set is data in Data/osinfo-labels.json.
+        private void OsType_Changed(object? sender, EventArgs e)
+        {
+            bool biosOnly = IsBiosOnlyOsSelected();
+            if (biosOnly && !rdoBios.Checked) rdoBios.Checked = true;
+            rdoUefi.Enabled = !biosOnly;
+            _firmwareTip.SetToolTip(pnlFirmwareRadios,
+                biosOnly ? "This OS predates UEFI — only BIOS firmware is supported." : string.Empty);
+        }
+
+        // BIOS-only OSes (Windows XP and earlier; the curated set in Data/osinfo-labels.json) also lack
+        // virtio/AHCI drivers — they need IDE for both the disk and the install CD-ROM.
+        private bool IsBiosOnlyOsSelected()
+        {
+            var id = (cboOs.SelectedItem as OsVariant)?.ShortId;
+            return id != null && OsLabelCatalog.Load().BiosOnly.Contains(id);
         }
 
         private void ApplyCurlAvailability()
@@ -107,18 +127,19 @@ namespace VirtDeck.Forms
         /// <summary>The install CD-ROM op for the selected media mode, or null when no media is chosen.</summary>
         private DiskAddOp? BuildCdromOp()
         {
+            string bus = IsBiosOnlyOsSelected() ? "ide" : "sata";
             if (rdoIsoServer.Checked)
             {
                 var p = isoPicker.Path.Trim();
-                return p.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "file", Source = p };
+                return p.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "file", Source = p };
             }
             if (rdoIsoUrl.Checked)
             {
                 var u = txtIsoUrl.Text.Trim();
-                return u.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "url", Source = u };
+                return u.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "url", Source = u };
             }
             var local = txtLocalIso.Text.Trim();
-            return local.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = "sata", IsoMode = "stream", Source = local };
+            return local.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "stream", Source = local };
         }
 
         // ---- Navigation ----------------------------------------------------
@@ -219,7 +240,8 @@ namespace VirtDeck.Forms
             var disk = new DiskAddOp
             {
                 Kind = "qcow2", Format = "qcow2", SourceType = "file",
-                Source = $"/var/lib/libvirt/images/{name}.qcow2", SizeGiB = 127, Bus = "virtio",
+                Source = $"/var/lib/libvirt/images/{name}.qcow2", SizeGiB = 127,
+                Bus = IsBiosOnlyOsSelected() ? "ide" : "virtio",
             };
             disk.Target = AllocTarget(disk.Bus);
             _disks.Add(disk);
@@ -282,17 +304,20 @@ namespace VirtDeck.Forms
 
         private void btnEditDisk_Click(object? sender, EventArgs e)
         {
-            if (lvDisks.SelectedItems.Count == 0 || lvDisks.SelectedItems[0].Tag is not DiskAddOp op || op.IsCdrom)
+            if (lvDisks.SelectedItems.Count == 0 || lvDisks.SelectedItems[0].Tag is not DiskAddOp op)
             {
-                Warn("Select a data disk to edit its driver settings.");
+                Warn("Select a disk to edit.");
                 return;
             }
             using var dlg = new EditDiskDialog(op.ToDiskInfo());
             if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } d)
             {
-                op.Cache = d.Cache;
-                op.Io = d.Io;
-                op.Discard = d.Discard;
+                if (!op.IsCdrom) // driver tuning is meaningless for an optical drive
+                {
+                    op.Cache = d.Cache;
+                    op.Io = d.Io;
+                    op.Discard = d.Discard;
+                }
                 if (d.Bus != op.Bus) // re-bus a not-yet-created disk: just re-target it
                 {
                     _usedTargets.Remove(op.Target);
@@ -365,7 +390,9 @@ namespace VirtDeck.Forms
             foreach (var nic in _nics)
                 Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic.Type, nic.Source, nic.Model));
 
-            var boot = _disks.Any(d => d.IsCdrom) ? new[] { "cdrom", "hd" } : new[] { "hd" };
+            // Disk first, then cdrom: on a fresh install the empty disk isn't bootable so
+            // firmware falls through to the ISO; after install the disk boots — no more ISO loop.
+            var boot = _disks.Any(d => d.IsCdrom) ? new[] { "hd", "cdrom" } : new[] { "hd" };
             Try("Boot order", () => _virsh.SetBootOrder(_name, boot));
         }
 
@@ -389,13 +416,13 @@ namespace VirtDeck.Forms
                     switch (op.IsoMode)
                     {
                         case "url":
-                            _virsh.AttachNetworkCdrom(_name, op.Source, op.Target);
+                            _virsh.AttachNetworkCdrom(_name, op.Source, op.Target, op.Bus);
                             break;
                         case "stream":
                             var server = new IsoHttpServer();
                             server.Start(op.Source, _ssh.Client);
                             _servers.Add(server);
-                            _virsh.AttachNetworkCdrom(_name, server.RemoteUrl, op.Target);
+                            _virsh.AttachNetworkCdrom(_name, server.RemoteUrl, op.Target, op.Bus);
                             break;
                         default: // file on server
                             _virsh.AttachCdrom(_name, op.Source, op.Target, op.Bus);

@@ -293,25 +293,35 @@ namespace VirtDeck.Forms
             };
         }
 
+        /// <summary>All currently selected VMs (multi-select); empty if none.</summary>
+        private List<VmInfo> SelectedVms() =>
+            lvVms.SelectedItems.Cast<ListViewItem>().Select(i => (VmInfo)i.Tag!).ToList();
+
         private void contextMenu_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (lvVms.SelectedItems.Count == 0)
+            var vms = SelectedVms();
+            if (vms.Count == 0)
             {
                 e.Cancel = true;
                 return;
             }
 
-            var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
-            var isRunning = vm.State == "running";
-            var isStopped = vm.State == "shut off";
+            // Bulk power/delete actions enable if at least one selected VM qualifies; the
+            // action then runs only on the qualifying VMs and skips the rest.
+            var anyRunning = vms.Any(v => v.State == "running");
+            var anyStopped = vms.Any(v => v.State == "shut off");
 
-            menuStart.Enabled = isStopped;
-            menuStop.Enabled = isRunning;
-            menuForceStop.Enabled = isRunning;
-            menuReboot.Enabled = isRunning;
-            menuEdit.Enabled = true;        // always openable; read-only while the VM is running
-            menuDelete.Enabled = isStopped; // delete only a shut-off VM
-            menuExport.Enabled = true;
+            menuStart.Enabled = anyStopped;
+            menuStop.Enabled = anyRunning;
+            menuForceStop.Enabled = anyRunning;
+            menuReboot.Enabled = anyRunning;
+            menuDelete.Enabled = anyStopped; // delete only shut-off VMs
+
+            // Console/Edit/Export act on a single VM only.
+            var single = vms.Count == 1;
+            menuConsole.Enabled = single;
+            menuEdit.Enabled = single;        // always openable; read-only while the VM is running
+            menuExport.Enabled = single;
         }
 
         private void menuExport_Click(object sender, EventArgs e)
@@ -323,32 +333,36 @@ namespace VirtDeck.Forms
         }
 
         private async void menuStart_Click(object sender, EventArgs e) =>
-            await RunVmAction("Starting", vm => _virsh.StartVmAsync(vm));
+            await RunVmAction("Starting", v => v.State == "shut off", vm => _virsh.StartVmAsync(vm));
 
         private async void menuStop_Click(object sender, EventArgs e) =>
-            await RunVmAction("Shutting down", vm => _virsh.StopVmAsync(vm));
+            await RunVmAction("Shutting down", v => v.State == "running", vm => _virsh.StopVmAsync(vm));
 
         private async void menuForceStop_Click(object sender, EventArgs e) =>
-            await RunVmAction("Force stopping", vm => _virsh.ForceStopVmAsync(vm));
+            await RunVmAction("Force stopping", v => v.State == "running", vm => _virsh.ForceStopVmAsync(vm));
 
         private async void menuReboot_Click(object sender, EventArgs e) =>
-            await RunVmAction("Rebooting", vm => _virsh.RebootVmAsync(vm));
+            await RunVmAction("Rebooting", v => v.State == "running", vm => _virsh.RebootVmAsync(vm));
 
-        private async Task RunVmAction(string actionLabel, Func<string, Task> action)
+        /// <summary>
+        /// Runs <paramref name="action"/> on every selected VM that satisfies <paramref name="applies"/>,
+        /// skipping the rest. Errors are aggregated and the list is refreshed once at the end.
+        /// </summary>
+        private async Task RunVmAction(string actionLabel, Func<VmInfo, bool> applies, Func<string, Task> action)
         {
-            if (lvVms.SelectedItems.Count == 0) return;
-            var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
-            toolStripStatus.Text = $"{actionLabel} {vm.Name}...";
-            try
+            var targets = SelectedVms().Where(applies).ToList();
+            if (targets.Count == 0) return;
+            var errors = new List<string>();
+            int n = 0;
+            foreach (var vm in targets)
             {
-                await action(vm.Name);
-                await RefreshVmList(); // reflect the new state immediately, don't wait for the 30s tick
+                toolStripStatus.Text = $"{actionLabel} {vm.Name} ({++n}/{targets.Count})...";
+                try { await action(vm.Name); }
+                catch (Exception ex) { errors.Add($"{vm.Name}: {ex.Message}"); }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                toolStripStatus.Text = "Ready";
-            }
+            await RefreshVmList(); // reflect the new state immediately, don't wait for the 30s tick
+            if (errors.Count > 0)
+                MessageBox.Show(this, string.Join("\n", errors), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         private void menuConsole_Click(object sender, EventArgs e) => OpenConsole();
@@ -383,49 +397,62 @@ namespace VirtDeck.Forms
 
         private async void menuDelete_Click(object sender, EventArgs e)
         {
-            if (lvVms.SelectedItems.Count == 0) return;
-            var vm = (VmInfo)lvVms.SelectedItems[0].Tag!;
+            // Delete only targets shut-off VMs; running ones in the selection are skipped.
+            var targets = SelectedVms().Where(v => v.State == "shut off").ToList();
+            if (targets.Count == 0) return;
 
-            List<DiskInfo> fileDisks;
+            // Read each VM's file-backed disks and tag every disk row with its owning VM so the
+            // combined dialog can group them and the user can pick which images to also delete.
+            var vmNames = targets.Select(v => v.Name).ToList();
+            var fileDisks = new List<DiskInfo>();
+            var owners = new List<string>();
             try
             {
-                var cfg = await Task.Run(() => _virsh.GetVmConfig(vm.Name));
-                fileDisks = cfg.Disks
-                    .Where(d => !d.IsCdrom && d.SourceType == "file" && d.Source.Length > 0)
-                    .ToList();
+                foreach (var vm in targets)
+                {
+                    var cfg = await Task.Run(() => _virsh.GetVmConfig(vm.Name));
+                    foreach (var d in cfg.Disks.Where(d => !d.IsCdrom && d.SourceType == "file" && d.Source.Length > 0))
+                    {
+                        fileDisks.Add(d);
+                        owners.Add(vm.Name);
+                    }
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Couldn't read the VM's disks:\n{ex.Message}", "Delete VM",
+                MessageBox.Show(this, $"Couldn't read the VMs' disks:\n{ex.Message}", "Delete VM",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            using var dlg = new DeleteVmDialog(vm.Name, fileDisks);
+            using var dlg = new DeleteVmDialog(vmNames, fileDisks, owners);
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            var files = dlg.FilesToDelete;
+            var checkedIdx = dlg.CheckedDiskIndices;
 
-            string? undefineError = null;
+            var undefineErrors = new List<string>();
             var fileErrors = new List<string>();
+            var failed = new HashSet<string>();
             await Task.Run(() =>
             {
-                try { _virsh.UndefineVm(vm.Name); }
-                catch (Exception ex) { undefineError = ex.Message; return; }
-                foreach (var f in files)
+                foreach (var name in vmNames)
                 {
-                    try { _virsh.DeleteFile(f); }
-                    catch (Exception ex) { fileErrors.Add($"{f}: {ex.Message}"); }
+                    try { _virsh.UndefineVm(name); }
+                    catch (Exception ex) { undefineErrors.Add($"{name}: {ex.Message}"); failed.Add(name); }
+                }
+                // Don't delete the disk images of a VM that failed to undefine — it still exists.
+                foreach (var i in checkedIdx)
+                {
+                    if (failed.Contains(owners[i])) continue;
+                    try { _virsh.DeleteFile(fileDisks[i].Source); }
+                    catch (Exception ex) { fileErrors.Add($"{fileDisks[i].Source}: {ex.Message}"); }
                 }
             });
 
-            if (undefineError != null)
-            {
-                MessageBox.Show(this, $"Failed to delete VM:\n{undefineError}", "Delete VM",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
+            if (undefineErrors.Count > 0)
+                MessageBox.Show(this, "Some VMs could not be deleted:\n\n" + string.Join("\n", undefineErrors),
+                    "Delete VM", MessageBoxButtons.OK, MessageBoxIcon.Error);
             if (fileErrors.Count > 0)
-                MessageBox.Show(this, "VM deleted, but some files could not be removed:\n\n" + string.Join("\n", fileErrors),
+                MessageBox.Show(this, "Some files could not be removed:\n\n" + string.Join("\n", fileErrors),
                     "Delete VM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
             await RefreshVmList();
@@ -493,59 +520,55 @@ namespace VirtDeck.Forms
             lvNetworks.EndUpdate();
         }
 
+        /// <summary>All currently selected networks (multi-select); empty if none.</summary>
+        private List<NetworkInfo> SelectedNetworks() =>
+            lvNetworks.SelectedItems.Cast<ListViewItem>().Select(i => (NetworkInfo)i.Tag!).ToList();
+
         private void contextMenuNetworks_Opening(object sender, CancelEventArgs e)
         {
-            if (lvNetworks.SelectedItems.Count == 0) { e.Cancel = true; return; }
-            var net = (NetworkInfo)lvNetworks.SelectedItems[0].Tag!;
-            menuNetActivate.Enabled   = net.State == "inactive";
-            menuNetDeactivate.Enabled = net.State == "active";
-            menuNetAutostart.Checked  = net.Autostart;
+            var nets = SelectedNetworks();
+            if (nets.Count == 0) { e.Cancel = true; return; }
+            // Each item enables if at least one selected network qualifies; the action runs only
+            // on the qualifying networks and skips the rest.
+            menuNetActivate.Enabled     = nets.Any(n => n.State == "inactive");
+            menuNetDeactivate.Enabled   = nets.Any(n => n.State == "active");
+            menuNetAutostartOn.Enabled  = nets.Any(n => !n.Autostart);
+            menuNetAutostartOff.Enabled = nets.Any(n => n.Autostart);
         }
 
-        private async void menuNetAutostart_Click(object sender, EventArgs e)
+        /// <summary>
+        /// Runs <paramref name="op"/> on every selected network that satisfies <paramref name="applies"/>,
+        /// skipping the rest. Errors are aggregated and the list is refreshed once at the end.
+        /// </summary>
+        private async Task RunNetAction(string title, Func<NetworkInfo, bool> applies, Action<NetworkInfo> op)
         {
-            if (lvNetworks.SelectedItems.Count == 0) return;
-            var net = (NetworkInfo)lvNetworks.SelectedItems[0].Tag!;
-            try
+            var targets = SelectedNetworks().Where(applies).ToList();
+            if (targets.Count == 0) return;
+            var errors = new List<string>();
+            await Task.Run(() =>
             {
-                await Task.Run(() => _virsh.SetNetworkAutostart(net.Name, !net.Autostart));
-                await RefreshNetworks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Autostart Network", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+                foreach (var n in targets)
+                {
+                    try { op(n); }
+                    catch (Exception ex) { errors.Add($"{n.Name}: {ex.Message}"); }
+                }
+            });
+            await RefreshNetworks();
+            if (errors.Count > 0)
+                MessageBox.Show(this, string.Join("\n", errors), title, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
-        private async void menuNetActivate_Click(object sender, EventArgs e)
-        {
-            if (lvNetworks.SelectedItems.Count == 0) return;
-            var net = (NetworkInfo)lvNetworks.SelectedItems[0].Tag!;
-            try
-            {
-                await Task.Run(() => _virsh.StartNetwork(net.Name));
-                await RefreshNetworks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Activate Network", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
+        private async void menuNetActivate_Click(object sender, EventArgs e) =>
+            await RunNetAction("Activate Network", n => n.State == "inactive", n => _virsh.StartNetwork(n.Name));
 
-        private async void menuNetDeactivate_Click(object sender, EventArgs e)
-        {
-            if (lvNetworks.SelectedItems.Count == 0) return;
-            var net = (NetworkInfo)lvNetworks.SelectedItems[0].Tag!;
-            try
-            {
-                await Task.Run(() => _virsh.StopNetwork(net.Name));
-                await RefreshNetworks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Deactivate Network", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
+        private async void menuNetDeactivate_Click(object sender, EventArgs e) =>
+            await RunNetAction("Deactivate Network", n => n.State == "active", n => _virsh.StopNetwork(n.Name));
+
+        private async void menuNetAutostartOn_Click(object sender, EventArgs e) =>
+            await RunNetAction("Autostart Network", n => !n.Autostart, n => _virsh.SetNetworkAutostart(n.Name, true));
+
+        private async void menuNetAutostartOff_Click(object sender, EventArgs e) =>
+            await RunNetAction("Autostart Network", n => n.Autostart, n => _virsh.SetNetworkAutostart(n.Name, false));
 
         private void VmListForm_FormClosed(object sender, FormClosedEventArgs e)
         {

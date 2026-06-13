@@ -152,6 +152,7 @@ namespace VirtDeck.Forms
             cboOs.Location = new Point(120, 113);
             cboOs.Size = new Size(300, 23);
             cboOs.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboOs.SelectedIndexChanged += OsType_Changed;
             lblFirmware.Text = "Firmware:";
             lblFirmware.Location = new Point(4, 150);
             lblFirmware.AutoSize = true;

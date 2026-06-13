@@ -307,31 +307,55 @@ namespace VirtDeck.Services
         /// attaches devices with the normal Attach* helpers. The trailing rc capture makes a define
         /// failure propagate (RunSudoCommand throws). The VM is left shut off. `name` must be validated.
         /// </summary>
+        private static readonly Regex OsIdRegex = new("^[A-Za-z0-9._-]+$");
+
         /// <summary>
-        /// Lists installable OS profiles from <c>osinfo-query os</c> (short-id + name) for
-        /// <c>virt-install --os-variant</c>. Sorted by name; empty if osinfo isn't installed.
+        /// Installable OS profiles for the Create-VM dropdown. The embedded <see cref="OsLabelCatalog"/>
+        /// drives both the labels and the order: entries are emitted in JSON order, filtered to the
+        /// short-ids the host's <c>virt-install --osinfo list</c> actually accepts. If that probe returns
+        /// nothing, the whole catalog is shown unfiltered. Reorder the JSON to reorder the dropdown.
         /// </summary>
         public List<OsVariant> ListOsVariants()
         {
+            var hostIds = new HashSet<string>(ListOsInfoIds(), StringComparer.OrdinalIgnoreCase);
             var result = new List<OsVariant>();
-            try
+            foreach (var (id, label) in OsLabelCatalog.Load().Labels)
             {
-                // Pipe-separated table: "Short ID | Name | Version | ID", a "---+---" rule, then rows.
-                var output = _ssh.RunCommand("osinfo-query os 2>/dev/null");
-                bool pastRule = false;
-                foreach (var line in output.Split('\n'))
-                {
-                    if (!pastRule) { if (line.Contains("---")) pastRule = true; continue; }
-                    var parts = line.Split('|');
-                    if (parts.Length < 2) continue;
-                    var shortId = parts[0].Trim();
-                    if (shortId.Length == 0) continue;
-                    result.Add(new OsVariant { ShortId = shortId, Name = parts[1].Trim() });
-                }
+                // JSON order wins; include only what the host knows (or everything if the probe failed).
+                if (hostIds.Count > 0 && !hostIds.Contains(id)) continue;
+                // Drop the "Microsoft " vendor prefix so type-ahead finds Windows entries by "Windows", not "M".
+                result.Add(new OsVariant { ShortId = id, Name = label.Replace("Microsoft ", "") });
             }
-            catch { /* osinfo-db-tools not installed → no presets */ }
-            result.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
             return result;
+        }
+
+        /// <summary>
+        /// Base list of accepted <c>--os-variant</c> short-ids from <c>virt-install --osinfo list</c>
+        /// (one id per line). Falls back to the legacy <c>--os-variant list</c> on older virt-install;
+        /// empty if neither works.
+        /// </summary>
+        private List<string> ListOsInfoIds()
+        {
+            foreach (var probe in new[] { "virt-install --osinfo list 2>/dev/null",
+                                          "virt-install --os-variant list 2>/dev/null" })
+            {
+                try
+                {
+                    var output = _ssh.RunCommand(probe);
+                    var ids = new List<string>();
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var raw in output.Split('\n'))
+                    {
+                        var id = raw.Trim();
+                        // Each line is a single short-id; the regex drops any stray header/note lines.
+                        if (id.Length == 0 || !OsIdRegex.IsMatch(id)) continue;
+                        if (seen.Add(id)) ids.Add(id);
+                    }
+                    if (ids.Count > 0) return ids;
+                }
+                catch { /* try the legacy flag next, then give up */ }
+            }
+            return new List<string>();
         }
 
         public void DefineVmShell(string name, int vcpus, long memoryMiB, bool useUefi = false, string osVariant = "generic")
@@ -419,8 +443,8 @@ namespace VirtDeck.Services
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
         /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
         /// </summary>
-        public void AttachNetworkCdrom(string vm, string url, string target) =>
-            RunDeviceXml("attach-device", vm, BuildNetworkCdromXml(url, target, "sata"));
+        public void AttachNetworkCdrom(string vm, string url, string target, string bus = "sata") =>
+            RunDeviceXml("attach-device", vm, BuildNetworkCdromXml(url, target, bus));
 
         /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO — live by default.</summary>
         public void UpdateCdromNetwork(string vm, string target, string bus, string url, bool live = true) =>

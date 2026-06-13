@@ -87,8 +87,23 @@ namespace VirtDeck.Forms
             lblNewVol.Visible = txtNewVol.Visible = createZvol;
             lblNewSize.Visible = nudNewSize.Visible = lblNewSizeUnit.Visible = createZvol;
 
-            // CD-ROM rides a fixed optical bus (sata); data disks let you pick.
-            lblBus.Visible = cboBus.Visible = !cdrom;
+            // A CD-ROM rides an optical bus (ide/sata/scsi/usb, never virtio); data disks pick from the
+            // disk set. Swap the list only when crossing the CD-ROM boundary so toggling qcow2<->zvol
+            // doesn't reset the user's pick.
+            lblBus.Visible = cboBus.Visible = true;
+            bool opticalList = !cboBus.Items.Contains("virtio");
+            if (cdrom && !opticalList)
+            {
+                cboBus.Items.Clear();
+                cboBus.Items.AddRange(new object[] { "ide", "sata", "scsi", "usb" });
+                cboBus.SelectedItem = "sata";
+            }
+            else if (!cdrom && opticalList)
+            {
+                cboBus.Items.Clear();
+                cboBus.Items.AddRange(new object[] { "virtio", "sata", "scsi", "ide" });
+                cboBus.SelectedItem = "virtio";
+            }
         }
 
         private void btnOk_Click(object? sender, EventArgs e)
@@ -136,11 +151,10 @@ namespace VirtDeck.Forms
                     op.Source = path;
                     op.SizeGiB = (int)nudSize.Value;
                 }
-                else // cdrom
+                else // cdrom — op.Bus already holds the optical bus chosen above
                 {
                     op.Kind = "cdrom";
                     op.Source = path;
-                    op.Bus = "sata";
                 }
             }
 

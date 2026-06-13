@@ -5,12 +5,12 @@ Guidance for Claude Code when working in this repository.
 ## Build
 
 ```bash
-dotnet build SpiceVmManager.sln
+dotnet build VirtDeck.sln
 ```
 
 Two-project solution (.NET 8, `net8.0-windows`):
 - **SpiceClient** — a native, dependency-light SPICE protocol client library (no WinForms; uses `System.Drawing` for `Bitmap`/JPEG only).
-- **VmManager.App** — the WinForms desktop app (`WinExe`, assembly name `VmManager`). References SpiceClient + SSH.NET.
+- **VirtDeck** — the WinForms desktop app (`WinExe`, assembly name `virtdeck`, x64). References SpiceClient + SSH.NET.
 
 No tests yet.
 
@@ -33,7 +33,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `SpiceSession` — facade: orchestrates channel bring-up, owns the framebuffer, raises events (`ResolutionChanged`, `FrameDirty`, `CursorSet/Hidden/Reset`, `Disconnected`, `StatusMessage`). Events fire on channel threads — subscribers must marshal.
 - `CursorShape` — decoded ALPHA cursor (BGRA + hotspot).
 
-### VmManager.App (WinForms)
+### VirtDeck (WinForms)
 - `Services/` — `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker). Image compression is steered at the protocol level (see below), not via `virt-xml`.
 - `Controls/SpiceDisplayControl` — custom `Control`: paints the framebuffer (1:1 `DrawImage`, double-buffered, ~60 Hz dirty-rect repaint timer), forwards mouse, and **owns all cursor assignment** (the exactly-one-cursor state machine).
 - `Input/WinFormsKeyMap` — VK → AT set-1 scancode. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js — NOT `0xE0XX`. Key-up high bit applied in `InputsChannel.SendKey`.
@@ -78,7 +78,7 @@ Exactly ONE cursor must be visible over the display — never zero, never two. `
 - guest hid the cursor → a transparent blank cursor;
 - otherwise → the built SPICE cursor (or default if RESET).
 
-The "Show host cursor" toggle (per-VM, in `HKCU\SOFTWARE\VmManager`) is the user's accepted fallback.
+The "Show host cursor" toggle (per-VM, in `HKCU\SOFTWARE\VirtDeck`) is the user's accepted fallback.
 
 ## Image compression / QUIC
 
@@ -98,7 +98,7 @@ controller + the device's normal driver.
 
 - **Native stack (not a C# port):** `SpiceClient` P/Invokes `usbredirhost` + `usbredirparser` +
   `libusb-1.0` (UsbDk backend). These x64 DLLs are loaded by bare name and must sit next to
-  `VmManager.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) — the csproj copies
+  `VirtDeck.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) — the csproj copies
   them to output. **The whole process is x64** (`PlatformTarget`) because the DLLs are 64-bit.
 - **Channel:** `Channels/UsbredirChannel` is a spicevmc tunnel — it shuttles opaque
   `MSG/MSGC_SPICEVMC_DATA` (101) bytes, which are the raw usbredir wire protocol. On link it creates

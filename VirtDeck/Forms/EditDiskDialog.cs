@@ -18,15 +18,31 @@ namespace VirtDeck.Forms
         {
             _disk = disk;
             InitializeComponent();
-            Text = $"Edit Disk — {disk.Target}";
+            Text = $"Edit {(disk.IsCdrom ? "CD-ROM" : "Disk")} — {disk.Target}";
             lblTarget.Text = disk.Target;
             lblSource.Text = disk.Source;
-            lblType.Text = string.IsNullOrEmpty(disk.DriverType) ? "(auto)" : disk.DriverType;
+            if (disk.IsCdrom)
+                ConfigureForCdrom(); // optical bus list + hide driver tuning (cache/io/discard)
+            else
+                lblType.Text = string.IsNullOrEmpty(disk.DriverType) ? "(auto)" : disk.DriverType;
             cboBus.SelectedItem = disk.Bus;
             if (cboBus.SelectedIndex < 0) cboBus.SelectedIndex = 0;
             Preselect(cboCache, disk.Cache);
             Preselect(cboIo, disk.Io);
             Preselect(cboDiscard, disk.Discard);
+        }
+
+        // A CD-ROM can ride ide/sata/scsi/usb (never virtio), and &lt;driver&gt; tuning is meaningless for
+        // it — so swap the bus list and hide the cache/io/discard rows, pulling the buttons up.
+        private void ConfigureForCdrom()
+        {
+            lblType.Text = "CD-ROM";
+            cboBus.Items.Clear();
+            cboBus.Items.AddRange(new object[] { "ide", "sata", "scsi", "usb" });
+            foreach (var c in new Control[] { lblCache, cboCache, lblIo, cboIo, lblDiscard, cboDiscard })
+                c.Visible = false;
+            btnOk.Top = btnCancel.Top = cboBus.Bottom + 24;
+            ClientSize = new Size(ClientSize.Width, btnOk.Bottom + 14);
         }
 
         private static void Preselect(ComboBox cbo, string value)
