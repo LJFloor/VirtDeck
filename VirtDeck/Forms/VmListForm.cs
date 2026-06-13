@@ -10,9 +10,10 @@ namespace VirtDeck.Forms
     {
         private readonly SshConnectionManager _ssh;
         private readonly VirshService _virsh;
-        private readonly System.Windows.Forms.Timer _refreshTimer;   // periodic SSH refresh (state/resources)
+        private readonly System.Windows.Forms.Timer _refreshTimer;   // periodic SSH refresh (state/resources) — fallback
         private readonly System.Windows.Forms.Timer _tickTimer;      // local 1s uptime tick (no SSH)
         private readonly System.Windows.Forms.Timer _previewTimer;   // debounces the per-selection details/screenshot fetch
+        private readonly System.Windows.Forms.Timer _eventDebounce;  // coalesces bursts of libvirt lifecycle events into one refresh
         private int _previewGen;                                     // bumped on selection change; drops stale background results
         private long _lastBytes;                                     // total tunnel bytes at last throughput sample
         private long _lastSampleTs;                                  // Stopwatch timestamp at last throughput sample
@@ -36,6 +37,20 @@ namespace VirtDeck.Forms
 
             _previewTimer = new System.Windows.Forms.Timer { Interval = 200 };
             _previewTimer.Tick += async (_, _) => { _previewTimer.Stop(); await LoadSelectedDetails(); };
+
+            _eventDebounce = new System.Windows.Forms.Timer { Interval = 400 };
+            _eventDebounce.Tick += async (_, _) => { _eventDebounce.Stop(); await RefreshVmList(); };
+            _virsh.DomainEventReceived += OnDomainEvent;
+        }
+
+        // A libvirt lifecycle event fired (a VM started/stopped, from anywhere). Marshal off the
+        // listener's background thread and (re)arm the debounce so a burst collapses into one refresh.
+        // Refreshing on the UI thread keeps all _vms mutation on the UI thread (the existing invariant).
+        private void OnDomainEvent()
+        {
+            if (IsDisposed) return;
+            try { BeginInvoke(() => { _eventDebounce.Stop(); _eventDebounce.Start(); }); }
+            catch { /* handle not created / form closing */ }
         }
 
         private async void VmListForm_Load(object sender, EventArgs e)
@@ -56,6 +71,7 @@ namespace VirtDeck.Forms
             _lastSampleTs = System.Diagnostics.Stopwatch.GetTimestamp();
             _refreshTimer.Start();
             _tickTimer.Start();
+            _virsh.StartEventListener();   // live power-state updates; the 30s poll stays as a fallback
         }
 
         private async Task RefreshHostCapabilities()
@@ -572,6 +588,10 @@ namespace VirtDeck.Forms
         private void VmListForm_FormClosed(object sender, FormClosedEventArgs e)
         {
             _virsh.VmsChanged -= OnVmsChanged;
+            _virsh.DomainEventReceived -= OnDomainEvent;
+            _virsh.StopEventListener();
+            _eventDebounce.Stop();
+            _eventDebounce.Dispose();
             _refreshTimer.Stop();
             _refreshTimer.Dispose();
             _tickTimer.Stop();

@@ -13,6 +13,16 @@ namespace VirtDeck.Services
         public IReadOnlyDictionary<string, VmInfo> Vms => _vms;
         public event Action? VmsChanged;
 
+        /// <summary>
+        /// Raised (on a background streaming thread) whenever libvirt reports a domain lifecycle
+        /// event. Subscribers must marshal to the UI thread. The argument carries no payload — any
+        /// event simply means "power state may have changed, refresh".
+        /// </summary>
+        public event Action? DomainEventReceived;
+
+        private CancellationTokenSource? _eventCts;
+        private Task? _eventTask;
+
         public VirshService(SshConnectionManager ssh)
         {
             _ssh = ssh;
@@ -165,6 +175,66 @@ namespace VirtDeck.Services
             await RefreshAsync();
         }
 
+        /// <summary>Current libvirt state of a single domain ("running" / "shut off" / "paused" / …), or "" on error.</summary>
+        public string GetDomainState(string name)
+        {
+            try { return _ssh.RunSudoCommand($"virsh domstate {name}").Trim(); }
+            catch { return string.Empty; }
+        }
+
+        // ---- Live lifecycle events -----------------------------------------
+
+        /// <summary>
+        /// Tails libvirt's domain lifecycle events on a dedicated SSH connection and raises
+        /// <see cref="DomainEventReceived"/> for each one, so the UI reflects power-state changes
+        /// (started/stopped, including guest- and host-initiated) within ~a second instead of waiting
+        /// for the periodic poll. Idempotent. The loop self-heals if libvirtd restarts or the stream
+        /// drops. Runs on its own connection so it never holds the shared command lock.
+        /// </summary>
+        public void StartEventListener()
+        {
+            if (_eventCts != null) return; // already running
+            var cts = new CancellationTokenSource();
+            _eventCts = cts;
+            var ct = cts.Token;
+            _eventTask = Task.Run(() =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        // stdbuf -oL forces line buffering so each event arrives promptly through the
+                        // SSH pipe; without it virsh block-buffers and events stall until the buffer fills.
+                        // We don't parse the line — any lifecycle event just triggers a refresh.
+                        _ssh.RunSudoCommandStreaming(
+                            "stdbuf -oL virsh event --loop --event lifecycle",
+                            _ => DomainEventReceived?.Invoke(),
+                            ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!ct.IsCancellationRequested)
+                            Diagnostics.SpiceLog.Log($"[events] lifecycle listener dropped: {ex.Message}");
+                    }
+                    // Reconnect after a short delay (libvirtd restart / SSH blip) unless we're stopping.
+                    if (!ct.IsCancellationRequested)
+                        try { Task.Delay(3000, ct).Wait(ct); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>Stops the lifecycle listener and tears down its dedicated SSH connection.</summary>
+        public void StopEventListener()
+        {
+            var cts = _eventCts;
+            if (cts == null) return;
+            _eventCts = null;
+            try { cts.Cancel(); } catch { }
+            try { _eventTask?.Wait(2000); } catch { }
+            try { cts.Dispose(); } catch { }
+            _eventTask = null;
+        }
+
         // ---- VM editing (offline, persistent config) -----------------------
 
         /// <summary>Raw domain XML from `virsh dumpxml` (running config when the VM is up).</summary>
@@ -302,8 +372,14 @@ namespace VirtDeck.Services
             _ssh.RunSudoCommand($"virt-xml {vm} --add-device --sound model={model}");
 
         /// <summary>Changes the model of the existing <c>&lt;sound&gt;</c> device (errors if none).</summary>
+        /// <remarks>
+        /// <c>clearxml=yes</c> wipes the existing <c>&lt;sound&gt;</c> XML before re-applying the model, so the
+        /// stale <c>&lt;address&gt;</c> from the previous card is dropped and libvirt re-assigns an appropriate one.
+        /// Without this, switching a PCI card (ich9/ac97/es1370) to the ISA-only <c>sb16</c> keeps the old
+        /// <c>type='pci'</c> address and QEMU rejects it at start ("Device 'sb16' can't go on PCI bus").
+        /// </remarks>
         public void SetSoundModel(string vm, string model) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --sound model={model}");
+            _ssh.RunSudoCommand($"virt-xml {vm} --edit --sound clearxml=yes,model={model}");
 
         /// <summary>Removes all <c>&lt;sound&gt;</c> devices from the domain.</summary>
         public void RemoveSound(string vm) =>

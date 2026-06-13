@@ -241,7 +241,10 @@ public sealed class SpiceSession : IDisposable
     {
         if (Interlocked.Exchange(ref _down, 1) == 1) return;
         Log($"[{ch.ChannelType}] ERROR ({ex.GetType().Name}): {ex.Message}");
-        Disconnected?.Invoke(ex.Message);
+        // This runs on a channel thread. A throwing subscriber (e.g. BeginInvoke racing a closing
+        // form) must never escape here — a background-thread exception terminates the process.
+        try { Disconnected?.Invoke(ex.Message); }
+        catch (Exception hex) { Log($"Disconnected handler threw: {hex.Message}"); }
     }
 
     public void Dispose()

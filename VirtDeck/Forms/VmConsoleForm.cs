@@ -190,15 +190,19 @@ namespace VirtDeck.Forms
             _virsh.Vms.TryGetValue(_vmName, out var vm);
             if (vm?.State == "running")
                 await ConnectSpice();
+            else if (vm?.State == "shut off")
+            {
+                toolStripStatus.Text = "VM is powered off.";
+                ShowPoweredOffOverlay(true);
+            }
             else
-                toolStripStatus.Text = vm?.State == "shut off"
-                    ? "VM is shut off — use Power ▸ Start."
-                    : $"VM is {vm?.State ?? "unavailable"}.";
+                toolStripStatus.Text = $"VM is {vm?.State ?? "unavailable"}.";
         }
 
         private async Task ConnectSpice()
         {
             CleanupConnection();
+            ShowPoweredOffOverlay(false);   // hide the off-overlay while we (re)connect
             try
             {
                 toolStripStatus.Text = "Looking up SPICE port...";
@@ -261,13 +265,87 @@ namespace VirtDeck.Forms
 
         private void OnSessionDisconnected(string message)
         {
+            // Runs on a SPICE channel thread. Guard BeginInvoke: a handle/close race here would
+            // escape onto the channel thread and terminate the process (background-thread crash).
             if (_closing) return;
-            BeginInvoke(() =>
+            try
             {
-                if (_closing) return;
+                BeginInvoke(() =>
+                {
+                    if (_closing) return;
+                    CleanupConnection();
+                    _ = ShowDisconnectCauseAsync(message);
+                });
+            }
+            catch { /* handle not created / form closing */ }
+        }
+
+        // Decide what to show after a drop: a powered-off VM gets the Start overlay; any other
+        // cause (tunnel/network blip with the VM still running) just reports the disconnect.
+        // `virsh domstate` is one cheap round-trip and is authoritative even before the poll catches up.
+        private async Task ShowDisconnectCauseAsync(string message)
+        {
+            string state;
+            try { state = await Task.Run(() => _virsh.GetDomainState(_vmName)); }
+            catch { state = string.Empty; }
+            if (_closing) return;
+            if (state == "shut off")
+            {
+                toolStripStatus.Text = "VM is powered off.";
+                ShowPoweredOffOverlay(true);
+            }
+            else
+            {
                 toolStripStatus.Text = $"Disconnected: {message}";
-                CleanupConnection();
-            });
+            }
+        }
+
+        // ---- Powered-off overlay (Hyper-V VMConnect style) -----------------
+
+        /// <summary>Shows/hides the centered "turned off" message + Start button over the display.</summary>
+        private void ShowPoweredOffOverlay(bool show)
+        {
+            if (pnlPoweredOff == null) return;
+            if (show)
+            {
+                lblPoweredTitle.Text = $"The virtual machine '{_vmName}' is turned off";
+                btnPoweredStart.Enabled = true;     // fresh overlay → clickable Start
+                btnPoweredStart.Text = "Start";
+                LayoutPoweredOffOverlay();
+                pnlPoweredOff.Visible = true;
+                pnlPoweredOff.BringToFront();
+            }
+            else
+            {
+                pnlPoweredOff.Visible = false;
+            }
+        }
+
+        // Centers the title, hint, and Start button as a stacked group within the overlay.
+        private void LayoutPoweredOffOverlay()
+        {
+            if (pnlPoweredOff == null) return;
+            int cx = pnlPoweredOff.ClientSize.Width / 2;
+            int cy = pnlPoweredOff.ClientSize.Height / 2;
+            lblPoweredTitle.Location = new Point(cx - lblPoweredTitle.Width / 2, cy - 56);
+            lblPoweredHint.Location  = new Point(cx - lblPoweredHint.Width / 2,  cy - 20);
+            btnPoweredStart.Location = new Point(cx - btnPoweredStart.Width / 2, cy + 16);
+        }
+
+        private async void btnPoweredStart_Click(object? sender, EventArgs e)
+        {
+            btnPoweredStart.Enabled = false;
+            btnPoweredStart.Text = "Starting…";
+            try
+            {
+                await RunVmAction("Starting", () => _virsh.StartVmAsync(_vmName));
+            }
+            finally
+            {
+                // On success the overlay is already hidden by OnVmsChanged; on failure restore the
+                // button so the user can retry without reopening the console.
+                if (!_closing) { btnPoweredStart.Text = "Start"; btnPoweredStart.Enabled = true; }
+            }
         }
 
         private void OnSessionStatus(string message)
@@ -819,8 +897,8 @@ namespace VirtDeck.Forms
             btnAudio.Image = AppIcons.Get(btnAudio.Checked ? "sound_mute" : "sound");
             if (btnAudio.Enabled)
                 btnAudio.ToolTipText = btnAudio.Checked
-                    ? "Guest audio is muted on this PC — click to unmute. Remembered per-VM."
-                    : "Guest audio is on — click to mute on this PC. Remembered per-VM.";
+                    ? "Guest audio is muted on this PC — click to unmute."
+                    : "Guest audio is on — click to mute on this PC.";
         }
 
         private void useLz_Click(object? sender, EventArgs e) =>
@@ -911,11 +989,26 @@ namespace VirtDeck.Forms
 
             _virsh.Vms.TryGetValue(_vmName, out var vm);
             if (vm?.State == "running" && !_connected)
-                _ = ConnectSpice();
+            {
+                ShowPoweredOffOverlay(false);
+                _ = ConnectSpice();   // VM came back up → auto-reconnect
+            }
             else if (vm != null && vm.State != "running" && _connected)
             {
-                toolStripStatus.Text = $"VM is {vm.State}.";
                 CleanupConnection();
+                if (vm.State == "shut off")
+                {
+                    toolStripStatus.Text = "VM is powered off.";
+                    ShowPoweredOffOverlay(true);
+                }
+                else
+                    toolStripStatus.Text = $"VM is {vm.State}.";
+            }
+            else if (vm?.State == "shut off" && !_connected && !pnlPoweredOff.Visible)
+            {
+                // Off and idle (e.g. a failed connect, or state flapped) — make sure the overlay is shown.
+                toolStripStatus.Text = "VM is powered off.";
+                ShowPoweredOffOverlay(true);
             }
         }
 

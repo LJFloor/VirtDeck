@@ -112,6 +112,11 @@ namespace VirtDeck.Controls
         public void ClearFramebuffer()
         {
             _fb = null;
+            // Connection's gone: forget the guest's cursor state so the host arrow returns. Otherwise a
+            // guest that had hidden its cursor leaves the blank (invisible) cursor stuck over the display.
+            _haveCursorState = false;
+            _spiceVisible = false;
+            ApplyCursor();
             if (IsHandleCreated && !IsDisposed) Invalidate();
         }
 

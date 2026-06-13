@@ -27,6 +27,10 @@ namespace VirtDeck.Forms
         private ToolStripStatusLabel toolStripStatus;
         private ToolStripProgressBar progressXfer;
         private ToolStripButton btnCancelXfer;
+        private Panel pnlPoweredOff;
+        private Label lblPoweredTitle;
+        private Label lblPoweredHint;
+        private Button btnPoweredStart;
 
         protected override void Dispose(bool disposing)
         {
@@ -205,6 +209,40 @@ namespace VirtDeck.Forms
             // displayControl
             displayControl.Dock = DockStyle.Fill;
             displayControl.ResolutionChanged += DisplayControl_ResolutionChanged;
+
+            // Powered-off overlay — a child of the display so it covers exactly the display area
+            // (never the toolbar/status strip). Hidden while connected; shown when the VM is off.
+            pnlPoweredOff = new Panel { Dock = DockStyle.Fill, BackColor = Color.Black, Visible = false, Cursor = Cursors.Default };
+            lblPoweredTitle = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font(Font.FontFamily, 12f),
+                Text = "The virtual machine is turned off",
+            };
+            lblPoweredHint = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.Silver,
+                Text = "Select Start to power on the virtual machine.",
+            };
+            // Explicit colors: the button would otherwise inherit the panel's black BackColor/ForeColor
+            // (ambient), rendering "Start" as black-on-black. Give it a readable dark-grey face.
+            btnPoweredStart = new Button
+            {
+                Text = "Start",
+                Size = new Size(110, 32),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(60, 60, 63),
+                ForeColor = Color.White,
+                UseVisualStyleBackColor = false,
+                Cursor = Cursors.Default,
+            };
+            btnPoweredStart.FlatAppearance.BorderColor = Color.FromArgb(130, 130, 130);
+            btnPoweredStart.Click += btnPoweredStart_Click;
+            pnlPoweredOff.Controls.AddRange(new Control[] { lblPoweredTitle, lblPoweredHint, btnPoweredStart });
+            pnlPoweredOff.Resize += (_, _) => LayoutPoweredOffOverlay();
+            displayControl.Controls.Add(pnlPoweredOff);
 
             // statusStrip
             toolStripStatus.Text = "Initializing...";
