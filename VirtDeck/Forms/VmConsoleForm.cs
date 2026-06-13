@@ -309,7 +309,7 @@ namespace VirtDeck.Forms
             if (show)
             {
                 lblPoweredTitle.Text = $"The virtual machine '{_vmName}' is turned off";
-                btnPoweredStart.Enabled = true;     // fresh overlay → clickable Start
+                _starting = false;                  // fresh overlay → clickable Start
                 btnPoweredStart.Text = "Start";
                 LayoutPoweredOffOverlay();
                 pnlPoweredOff.Visible = true;
@@ -332,9 +332,14 @@ namespace VirtDeck.Forms
             btnPoweredStart.Location = new Point(cx - btnPoweredStart.Width / 2, cy + 16);
         }
 
+        private bool _starting;
+
         private async void btnPoweredStart_Click(object? sender, EventArgs e)
         {
-            btnPoweredStart.Enabled = false;
+            // Guard re-entry rather than disabling: a disabled flat button greys its text (dark on dark),
+            // so we keep it enabled with white "Starting…" text and just ignore further clicks.
+            if (_starting) return;
+            _starting = true;
             btnPoweredStart.Text = "Starting…";
             try
             {
@@ -343,8 +348,9 @@ namespace VirtDeck.Forms
             finally
             {
                 // On success the overlay is already hidden by OnVmsChanged; on failure restore the
-                // button so the user can retry without reopening the console.
-                if (!_closing) { btnPoweredStart.Text = "Start"; btnPoweredStart.Enabled = true; }
+                // label so the user can retry without reopening the console.
+                _starting = false;
+                if (!_closing) btnPoweredStart.Text = "Start";
             }
         }
 
