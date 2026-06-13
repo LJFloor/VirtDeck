@@ -199,8 +199,19 @@ namespace VirtDeck.Forms
                 toolStripStatus.Text = $"VM is {vm?.State ?? "unavailable"}.";
         }
 
+        private bool _connecting;
+
         private async Task ConnectSpice()
         {
+            // Re-entrancy guard. VmsChanged fires from both the periodic poll and the libvirt
+            // lifecycle-event stream, so "running" can be reported several times in quick succession
+            // while a connect is still in flight (its awaits run before _connected is set). A second
+            // overlapping ConnectSpice would CleanupConnection() the first attempt's forwarder/channels
+            // mid-handshake and rebuild a new forwarder — stale handshake bytes then leak into the new
+            // socket, misframing the stream (the intermittent "SPICE auth error" = "REDQ" link magic
+            // read where the auth result should be). Set synchronously, before any await.
+            if (_connecting) return;
+            _connecting = true;
             CleanupConnection();
             ShowPoweredOffOverlay(false);   // hide the off-overlay while we (re)connect
             try
@@ -245,6 +256,10 @@ namespace VirtDeck.Forms
             {
                 toolStripStatus.Text = $"Error: {ex.Message}";
                 CleanupConnection();
+            }
+            finally
+            {
+                _connecting = false;
             }
         }
 
@@ -994,7 +1009,7 @@ namespace VirtDeck.Forms
             if (_closing) return;
 
             _virsh.Vms.TryGetValue(_vmName, out var vm);
-            if (vm?.State == "running" && !_connected)
+            if (vm?.State == "running" && !_connected && !_connecting)
             {
                 ShowPoweredOffOverlay(false);
                 _ = ConnectSpice();   // VM came back up → auto-reconnect
