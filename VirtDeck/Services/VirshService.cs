@@ -239,7 +239,9 @@ namespace VirtDeck.Services
                 var video = devices.Element("video");
                 cfg.VideoModel = (string?)video?.Element("model")?.Attribute("type") ?? string.Empty;
 
-                cfg.HasSoundDevice = devices.Elements("sound").Any();
+                var sound = devices.Elements("sound").FirstOrDefault();
+                cfg.HasSoundDevice = sound != null;
+                cfg.SoundModel = (string?)sound?.Attribute("model") ?? string.Empty;
             }
 
             cfg.Autostart = GetAutostart(vmName);
@@ -294,6 +296,18 @@ namespace VirtDeck.Services
 
         public void SetVideoModel(string vm, string model) =>
             _ssh.RunSudoCommand($"virt-xml {vm} --edit --video model.type={model}");
+
+        /// <summary>Adds a new <c>&lt;sound&gt;</c> device of the given model (no existing device required).</summary>
+        public void AddSound(string vm, string model) =>
+            _ssh.RunSudoCommand($"virt-xml {vm} --add-device --sound model={model}");
+
+        /// <summary>Changes the model of the existing <c>&lt;sound&gt;</c> device (errors if none).</summary>
+        public void SetSoundModel(string vm, string model) =>
+            _ssh.RunSudoCommand($"virt-xml {vm} --edit --sound model={model}");
+
+        /// <summary>Removes all <c>&lt;sound&gt;</c> devices from the domain.</summary>
+        public void RemoveSound(string vm) =>
+            _ssh.RunSudoCommand($"virt-xml {vm} --remove-device --sound all");
 
         public void SetAutostart(string vm, bool on) =>
             _ssh.RunSudoCommand($"virsh autostart {vm}{(on ? "" : " --disable")}");
@@ -358,10 +372,12 @@ namespace VirtDeck.Services
             return new List<string>();
         }
 
-        public void DefineVmShell(string name, int vcpus, long memoryMiB, bool useUefi = false, string osVariant = "generic")
+        public void DefineVmShell(string name, int vcpus, long memoryMiB, bool useUefi = false, string osVariant = "generic", string soundModel = "ich9")
         {
             if (string.IsNullOrWhiteSpace(osVariant) || !Regex.IsMatch(osVariant, @"^[A-Za-z0-9._-]+$"))
                 osVariant = "generic"; // guard the shell command against unexpected input
+            if (string.IsNullOrWhiteSpace(soundModel) || !Regex.IsMatch(soundModel, @"^[A-Za-z0-9._-]+$"))
+                soundModel = "ich9"; // guard the shell command against unexpected input
             var tmp = $"/tmp/newvm-{Guid.NewGuid():N}.xml";
             var bootFlags = useUefi ? "--boot uefi " : "";
             var cmd =
@@ -369,7 +385,8 @@ namespace VirtDeck.Services
                 "--cpu host-passthrough " +
                 // ich9 (Intel HD Audio) has broad guest driver support; with SPICE graphics, libvirt
                 // wires it to the spice audio backend so the console gets a playback channel for free.
-                "--graphics spice,listen=127.0.0.1 --video virtio --sound model=ich9 --disk none --network none --boot hd,cdrom " +
+                // BIOS-only OSes (Windows XP and earlier) lack ich9 drivers, so they get ac97 instead.
+                $"--graphics spice,listen=127.0.0.1 --video virtio --sound model={soundModel} --disk none --network none --boot hd,cdrom " +
                 $"{bootFlags}" +
                 $"--print-xml > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc";
             _ssh.RunSudoCommand(cmd);
@@ -439,16 +456,16 @@ namespace VirtDeck.Services
             _ssh.RunSudoCommand($"virsh attach-disk {vm} {iso} {target} --type cdrom --targetbus {bus} --mode readonly --config");
 
         /// <summary>
-        /// Attaches a network CD-ROM (http/https/ftp URL) so QEMU streams the ISO via its curl block driver.
+        /// Attaches a network CD-ROM (NBD URL) so QEMU streams the ISO over its built-in NBD client.
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
         /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
         /// </summary>
         public void AttachNetworkCdrom(string vm, string url, string target, string bus = "sata") =>
-            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom"));
+            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom", readOnly: true));
 
         /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO — live by default.</summary>
         public void UpdateCdromNetwork(string vm, string target, string bus, string url, bool live = true) =>
-            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom"), live ? "--live" : "--config");
+            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom", readOnly: true), live ? "--live" : "--config");
 
         /// <summary>Attaches a file floppy (`.vfd`) as a raw fdc disk — config-only (the fdc can't hot-add).</summary>
         public void AttachFloppyFile(string vm, string path, string target) =>
@@ -458,38 +475,63 @@ namespace VirtDeck.Services
                 SourceType = "file", Source = path, DriverType = "raw",
             });
 
-        /// <summary>Attaches a network floppy (http/https/ftp URL) so QEMU streams the `.vfd` via its curl block driver.</summary>
+        /// <summary>Attaches a network floppy (NBD URL) so QEMU streams the `.vfd` over its built-in NBD client. Read-write — the guest's writes reach the local file.</summary>
         public void AttachNetworkFloppy(string vm, string url, string target) =>
-            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy"));
+            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy", readOnly: false));
 
-        /// <summary>Swaps the media of an existing floppy drive to a network (streamed) `.vfd` — live by default.</summary>
+        /// <summary>Swaps the media of an existing floppy drive to a network (streamed) `.vfd` — live by default. Read-write.</summary>
         public void UpdateFloppyNetwork(string vm, string target, string url, bool live = true) =>
-            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy"), live ? "--live" : "--config");
+            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy", readOnly: false), live ? "--live" : "--config");
 
-        private static string BuildNetworkMediaXml(string url, string target, string bus, string device)
+        // Builds a `<disk type='network'>` element for a streamed NBD export. The export name is omitted for
+        // the default (path-less) export. `<readonly/>` is emitted only for read-only media (CD-ROM); a
+        // writable floppy must stay read-write so the guest's writes reach the local file.
+        private static string BuildNetworkMediaXml(string url, string target, string bus, string device, bool readOnly)
         {
             var uri = new Uri(url);
             string name = (uri.AbsolutePath + uri.Query).TrimStart('/');
-            var src = new StringBuilder($"<source protocol='{uri.Scheme}' name='{XmlAttr(name)}'>");
+            var src = new StringBuilder($"<source protocol='{uri.Scheme}'");
+            if (name.Length > 0) src.Append($" name='{XmlAttr(name)}'");
+            src.Append('>');
             src.Append($"<host name='{XmlAttr(uri.Host)}'");
             if (uri.Port > 0) src.Append($" port='{uri.Port}'");
             src.Append("/></source>");
             return $"<disk type='network' device='{XmlAttr(device)}'><driver name='qemu' type='raw'/>" +
-                   $"{src}<target dev='{XmlAttr(target)}' bus='{XmlAttr(bus)}'/><readonly/></disk>";
+                   $"{src}<target dev='{XmlAttr(target)}' bus='{XmlAttr(bus)}'/>{(readOnly ? "<readonly/>" : "")}</disk>";
         }
 
         private static string XmlAttr(string s) => s
             .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
             .Replace("'", "&apos;").Replace("\"", "&quot;");
 
-        public void DetachDisk(string vm, string target) =>
-            _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config");
+        public void DetachDisk(string vm, string target)
+        {
+            // Idempotent: if the disk is already gone (e.g. an OK retry after a partial failure,
+            // which re-runs every pending op), libvirt says "No disk found" — the drive is already
+            // removed, which is the goal, so treat it as success.
+            try { _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config"); }
+            catch (Exception ex) when (IsBenign(ex, "No disk found")) { }
+        }
 
         public void ChangeMedia(string vm, string target, string iso, bool live = false) =>
             _ssh.RunSudoCommand($"virsh change-media {vm} {target} {iso} --update {(live ? "--live" : "--config")}");
 
-        public void EjectMedia(string vm, string target, bool live = false) =>
-            _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject {(live ? "--live" : "--config")}");
+        public void EjectMedia(string vm, string target, bool live = false)
+        {
+            // Idempotent: ejecting an already-empty drive errors with "doesn't have media" (or "tray
+            // is already open"). An empty drive is exactly the requested state, so swallow it.
+            try { _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject {(live ? "--live" : "--config")}"); }
+            catch (Exception ex) when (IsBenign(ex, "doesn't have media", "tray is already open")) { }
+        }
+
+        // True when a virsh failure message means the target is already in the desired state, so the
+        // command was effectively a no-op and should not surface as an error.
+        private static bool IsBenign(Exception ex, params string[] needles)
+        {
+            foreach (var n in needles)
+                if (ex.Message.Contains(n, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
 
         /// <summary>Size in bytes of a file on the host (base64'd path). Returns -1 on error.</summary>
         public long GetFileSize(string path)
@@ -690,27 +732,6 @@ namespace VirtDeck.Services
 
         public void DetachNic(string vm, string type, string mac) =>
             _ssh.RunSudoCommand($"virsh detach-interface {vm} --type {type} --mac {mac} --config");
-
-        /// <summary>Whether the QEMU curl block driver is available on the host.</summary>
-        public bool QemuCurlAvailable { get; private set; } = true; // optimistic default until checked
-
-        /// <summary>
-        /// Probes the host for the QEMU curl block driver (required for HTTP ISO streaming).
-        /// Checks for block-curl.so first; falls back to querying qemu-system-x86_64 directly.
-        /// Sets <see cref="QemuCurlAvailable"/> and returns it. Never throws — unknown means true.
-        /// </summary>
-        public bool CheckQemuCurlDriver()
-        {
-            try
-            {
-                var found = _ssh.RunCommand("find /usr/lib /usr/lib64 -name 'block-curl.so' 2>/dev/null | wc -l").Trim();
-                if (int.TryParse(found, out var n) && n > 0) { QemuCurlAvailable = true; return true; }
-                var help = _ssh.RunCommand("qemu-system-x86_64 -drive driver=curl,help 2>&1 || true").Trim();
-                QemuCurlAvailable = help.Contains("Block driver", StringComparison.OrdinalIgnoreCase);
-            }
-            catch { QemuCurlAvailable = true; }
-            return QemuCurlAvailable;
-        }
 
         /// <summary>
         /// Checks host CPU virtualization support, BIOS enablement, and libvirt state.

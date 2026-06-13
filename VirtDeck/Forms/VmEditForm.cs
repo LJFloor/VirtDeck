@@ -31,7 +31,7 @@ namespace VirtDeck.Forms
         private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
         private static readonly (string dev, string label)[] AllBootDevs =
         {
-            ("hd", "Hard disk"), ("cdrom", "CD-ROM"), ("network", "Network (PXE)")
+            ("hd", "Hard disk"), ("cdrom", "CD-ROM"), ("network", "Network (PXE)"), ("fd", "Floppy")
         };
 
         public VmEditForm(VirshService virsh, SshConnectionManager ssh, string vmName, bool readOnly = false)
@@ -42,18 +42,12 @@ namespace VirtDeck.Forms
             _readOnly = readOnly;
             InitializeComponent();
             Text = readOnly ? $"Edit — {vmName} (running — read-only)" : $"Edit — {vmName}";
-            // Streaming a local ISO needs QEMU's curl block driver on the host.
-            if (!_virsh.QemuCurlAvailable)
-            {
-                menuDiskChangeIsoLocal.Enabled = false;
-                menuDiskChangeIsoLocal.Text = "Local machine… (host qemu-block-extra not installed)";
-            }
         }
 
         /// <summary>Media streamed from this PC over SSH (pending until OK), plus the drive's bus/kind.</summary>
         private sealed class StreamedMedia
         {
-            public IsoHttpServer Server = null!;
+            public NbdServer Server = null!;
             public string Bus = "sata";
             public bool IsFloppy;
             public string Display = "";
@@ -63,7 +57,7 @@ namespace VirtDeck.Forms
         /// Streaming servers created in this editor that back saved cdrom URLs. The caller must keep them
         /// alive for the session on OK (and dispose them otherwise) — the URL is only reachable while they run.
         /// </summary>
-        public IReadOnlyList<IsoHttpServer> StreamingServers =>
+        public IReadOnlyList<NbdServer> StreamingServers =>
             _mediaStreams.Values.Select(s => s.Server).ToList();
 
         private sealed class BootItem
@@ -111,12 +105,27 @@ namespace VirtDeck.Forms
         // Index-aligned with cboGpu's items (see VmEditForm.Designer.cs).
         private static readonly string[] GpuModels = { "virtio", "qxl", "vga", "bochs" };
 
+        // Index-aligned with cboSound's items (see VmEditForm.Designer.cs).
+        private static readonly string[] SoundModels = { "ich9", "ich6", "ac97", "es1370", "sb16" };
+
         // Returns the selected libvirt model string, or the original model when an unknown/extra
         // item is selected (so we never silently change a model we didn't offer).
         private string SelectedGpuModel() =>
             cboGpu.SelectedIndex >= 0 && cboGpu.SelectedIndex < GpuModels.Length
                 ? GpuModels[cboGpu.SelectedIndex]
                 : _original!.VideoModel;
+
+        // Selected sound model, or the original (for an unknown/extra item we added to keep it).
+        private string SelectedSoundModel() =>
+            cboSound.SelectedIndex >= 0 && cboSound.SelectedIndex < SoundModels.Length
+                ? SoundModels[cboSound.SelectedIndex]
+                : _original!.SoundModel;
+
+        private void chkSound_CheckedChanged(object? sender, EventArgs e)
+        {
+            // The model only matters when sound is enabled (and never while read-only).
+            cboSound.Enabled = chkSound.Checked && !_readOnly;
+        }
 
         private void ApplyReadOnly()
         {
@@ -126,6 +135,8 @@ namespace VirtDeck.Forms
             chkAutostart.Enabled = false;
             cboCpu.Enabled = false;
             cboGpu.Enabled = false;
+            chkSound.Enabled = false;
+            cboSound.Enabled = false;
             clbBoot.Enabled = false;
             btnBootUp.Enabled = false;
             btnBootDown.Enabled = false;
@@ -152,6 +163,17 @@ namespace VirtDeck.Forms
                 gi = cboGpu.Items.Count - 1;
             }
             cboGpu.SelectedIndex = gi;
+
+            string defaultSound = string.IsNullOrEmpty(cfg.SoundModel) ? "ich9" : cfg.SoundModel;
+            int si = Array.IndexOf(SoundModels, defaultSound);
+            if (si < 0)
+            {
+                cboSound.Items.Add(cfg.SoundModel); // keep an unknown model so we never silently change it
+                si = cboSound.Items.Count - 1;
+            }
+            cboSound.SelectedIndex = si;
+            chkSound.Checked = cfg.HasSoundDevice;
+            cboSound.Enabled = chkSound.Checked; // ApplyReadOnly() overrides this for running VMs
 
             clbBoot.Items.Clear();
             foreach (var dev in cfg.BootOrder)
@@ -372,11 +394,11 @@ namespace VirtDeck.Forms
             var local = ofd.FileName;
             string bus = string.IsNullOrEmpty(d.Bus) ? (d.IsFloppy ? "fdc" : "sata") : d.Bus;
 
-            IsoHttpServer server;
+            NbdServer server;
             try
             {
-                server = new IsoHttpServer();
-                server.Start(local, _ssh.Client);
+                server = new NbdServer();
+                server.Start(local, _ssh.Client, writable: d.IsFloppy);
             }
             catch (Exception ex)
             {
@@ -517,6 +539,8 @@ namespace VirtDeck.Forms
             bool autostart = chkAutostart.Checked;
             string cpuMode = CpuModeFromIndex(cboCpu.SelectedIndex);
             string gpu = SelectedGpuModel();
+            bool soundOn = chkSound.Checked;
+            string soundModel = SelectedSoundModel();
 
             var boot = new List<string>();
             for (int i = 0; i < clbBoot.Items.Count; i++)
@@ -531,7 +555,7 @@ namespace VirtDeck.Forms
 
             btnOk.Enabled = false;
             btnCancel.Enabled = false;
-            var errors = await Task.Run(() => ApplyChanges(newName, vcpus, mem, autostart, boot, cpuMode, gpu));
+            var errors = await Task.Run(() => ApplyChanges(newName, vcpus, mem, autostart, boot, cpuMode, gpu, soundOn, soundModel));
             if (errors.Count > 0)
             {
                 MessageBox.Show("Some changes could not be applied:\n\n" + string.Join("\n", errors),
@@ -544,7 +568,7 @@ namespace VirtDeck.Forms
             Close();
         }
 
-        private List<string> ApplyChanges(string newName, int vcpus, long mem, bool autostart, List<string> boot, string cpuMode, string gpu)
+        private List<string> ApplyChanges(string newName, int vcpus, long mem, bool autostart, List<string> boot, string cpuMode, string gpu, bool soundOn, string soundModel)
         {
             var errors = new List<string>();
             var o = _original!;
@@ -558,6 +582,13 @@ namespace VirtDeck.Forms
             if (mem != o.MemoryMiB) Try("Memory", () => _virsh.SetMemoryMiB(_vmName, mem));
             if (cpuMode != o.CpuMode) Try("CPU mode", () => _virsh.SetCpuMode(_vmName, cpuMode));
             if (gpu != o.VideoModel && !string.IsNullOrEmpty(gpu)) Try("GPU", () => _virsh.SetVideoModel(_vmName, gpu));
+
+            if (soundOn && !o.HasSoundDevice)
+                Try("Sound", () => _virsh.AddSound(_vmName, soundModel));
+            else if (soundOn && soundModel != o.SoundModel)
+                Try("Sound", () => _virsh.SetSoundModel(_vmName, soundModel));
+            else if (!soundOn && o.HasSoundDevice)
+                Try("Sound", () => _virsh.RemoveSound(_vmName));
             if (!boot.SequenceEqual(o.BootOrder)) Try("Boot order", () => _virsh.SetBootOrder(_vmName, boot));
             if (autostart != o.Autostart) Try("Autostart", () => _virsh.SetAutostart(_vmName, autostart));
 

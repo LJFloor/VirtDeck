@@ -4,7 +4,7 @@ namespace VirtDeck.Models
     public class DiskAddOp
     {
         public string Kind { get; set; } = "qcow2";  // qcow2 | zvol | cdrom | floppy
-        // For Kind=cdrom/floppy: file (server path) | url (network URL) | stream (local PC path, served over HTTP at create).
+        // For Kind=cdrom/floppy: file (server path) | stream (local PC path, served over NBD at create).
         public string IsoMode { get; set; } = "file";
         public string Source { get; set; } = string.Empty; // path / dev / iso (for qcow2: path to create)
         public string Target { get; set; } = string.Empty; // assigned by the editor (vdb, sdb, …)

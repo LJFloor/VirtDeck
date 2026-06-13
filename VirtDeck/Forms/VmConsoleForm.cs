@@ -29,7 +29,7 @@ namespace VirtDeck.Forms
         // Floppy media (set after connect when the VM has a floppy drive; bus is always fdc)
         private string? _floppyTarget;
         private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers an audio channel
-        private readonly List<IsoHttpServer> _isoServers = new(); // streamed "Local machine" media; alive while open
+        private readonly List<NbdServer> _isoServers = new(); // streamed "Local machine" media; alive while open
         private const string GuestVirtioUrl =
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
         // Keep the URL's versioned filename; download into /var/lib/libvirt/images (AppArmor-allowed for live change-media).
@@ -37,7 +37,6 @@ namespace VirtDeck.Forms
             "/var/lib/libvirt/images/" + GuestVirtioUrl[(GuestVirtioUrl.LastIndexOf('/') + 1)..];
         private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
         private const string CdromTip = "Eject or change the VM's CD/DVD media.";
-        private const string NoFloppyTip = "This VM has no floppy drive — add one in the editor while the VM is shut off.";
         private const string FloppyTip = "Eject or change the VM's floppy media.";
         private bool _settingsLoaded;
         private Size? _lastResolution;
@@ -89,7 +88,6 @@ namespace VirtDeck.Forms
             _vmName = vmName;
             InitializeComponent();
             Text = $"Console — {vmName}";
-            ApplyCurlAvailability();
             _virsh.VmsChanged += OnVmsChanged;
 
             _resizeDebounce = new System.Windows.Forms.Timer { Interval = 300 };
@@ -162,7 +160,8 @@ namespace VirtDeck.Forms
                 WindowState = FormWindowState.Maximized;   // restore maximized for this VM
             }
             // Audio is on by default; only a saved value of 1 starts muted.
-            audioMuteItem.Checked = key.GetValue("AudioMute") is int am && am == 1;
+            btnAudio.Checked = key.GetValue("AudioMute") is int am && am == 1;
+            UpdateAudioButton();
         }
 
         private void SaveVmSettings()
@@ -172,7 +171,7 @@ namespace VirtDeck.Forms
             using var key = Registry.CurrentUser.CreateSubKey($@"{RegistryKey}\VMs\{uuid}");
             key.SetValue("ShowHostCursor", showHostCursorItem.Checked ? 1 : 0, RegistryValueKind.DWord);
             key.SetValue("Maximized", _lastWindowState == FormWindowState.Maximized ? 1 : 0, RegistryValueKind.DWord);
-            key.SetValue("AudioMute", audioMuteItem.Checked ? 1 : 0, RegistryValueKind.DWord);
+            key.SetValue("AudioMute", btnAudio.Checked ? 1 : 0, RegistryValueKind.DWord);
         }
 
         // ---- Lifecycle -----------------------------------------------------
@@ -184,16 +183,6 @@ namespace VirtDeck.Forms
             ActiveControl = displayControl;
             UpdateToolbarState(); // everything but Power disabled until connected
             await TryConnectOrShowStatus();
-        }
-
-        private void ApplyCurlAvailability()
-        {
-            if (_virsh.QemuCurlAvailable) return;
-            const string note = "Local machine… (QEMU curl driver not loaded — install qemu-block-extra)";
-            cdSelectLocalItem.Enabled = false;
-            cdSelectLocalItem.Text = note;
-            floppySelectLocalItem.Enabled = false;
-            floppySelectLocalItem.Text = note;
         }
 
         private async Task TryConnectOrShowStatus()
@@ -232,7 +221,7 @@ namespace VirtDeck.Forms
                 _session.FileFailed += OnFileFailed;
                 _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
                 _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
-                _session.AudioMuted = audioMuteItem.Checked; // apply the remembered mute pref before audio starts
+                _session.AudioMuted = btnAudio.Checked; // apply the remembered mute pref before audio starts
 
                 displayControl.Attach(_session);
                 displayControl.Policy = showHostCursorItem.Checked
@@ -605,11 +594,11 @@ namespace VirtDeck.Forms
                 : "Start the VM to redirect USB devices.";
 
             btnAudio.Enabled = live && _hasSoundDevice;
-            btnAudio.ToolTipText = !live
-                ? "Start the VM to use audio."
-                : _hasSoundDevice
-                    ? "Guest speaker audio."
+            if (!btnAudio.Enabled)
+                btnAudio.ToolTipText = !live
+                    ? "Start the VM to use audio."
                     : "This VM has no sound device — add one in the editor while the VM is shut off.";
+            UpdateAudioButton();
 
             if (!live)
             {
@@ -627,21 +616,11 @@ namespace VirtDeck.Forms
                 btnCdDvd.ToolTipText = CdromTip;
             }
 
-            if (!live)
-            {
-                btnFloppy.Enabled = false;
-                btnFloppy.ToolTipText = "Start the VM to manage floppy media.";
-            }
-            else if (_floppyTarget == null)
-            {
-                btnFloppy.Enabled = false;
-                btnFloppy.ToolTipText = NoFloppyTip;
-            }
-            else
-            {
-                btnFloppy.Enabled = true;
-                btnFloppy.ToolTipText = FloppyTip;
-            }
+            // Floppy is rare — show the button only when this VM actually has a floppy drive,
+            // hiding it entirely otherwise rather than showing a dead, disabled button.
+            btnFloppy.Visible = _floppyTarget != null;
+            btnFloppy.Enabled = live && _floppyTarget != null;
+            btnFloppy.ToolTipText = live ? FloppyTip : "Start the VM to manage floppy media.";
         }
 
         private async Task DetectCdromAsync()
@@ -697,8 +676,8 @@ namespace VirtDeck.Forms
             string bus = _cdromBus ?? "sata";
             RunMediaAction("Insert (streamed)", () =>
             {
-                var server = new IsoHttpServer();
-                server.Start(local, _ssh.Client);
+                var server = new NbdServer();
+                server.Start(local, _ssh.Client, writable: false);
                 lock (_isoServers) _isoServers.Add(server);
                 _virsh.UpdateCdromNetwork(_vmName, t, bus, server.RemoteUrl, live: true);
             });
@@ -738,8 +717,8 @@ namespace VirtDeck.Forms
             var local = ofd.FileName;
             RunMediaAction("Insert floppy (streamed)", () =>
             {
-                var server = new IsoHttpServer();
-                server.Start(local, _ssh.Client);
+                var server = new NbdServer();
+                server.Start(local, _ssh.Client, writable: true);
                 lock (_isoServers) _isoServers.Add(server);
                 _virsh.UpdateFloppyNetwork(_vmName, t, server.RemoteUrl, live: true);
             });
@@ -828,9 +807,20 @@ namespace VirtDeck.Forms
 
         private void audioMute_Click(object? sender, EventArgs e)
         {
-            if (_session != null) _session.AudioMuted = audioMuteItem.Checked;
-            toolStripStatus.Text = audioMuteItem.Checked ? "Audio muted" : "Audio on";
+            if (_session != null) _session.AudioMuted = btnAudio.Checked;
+            UpdateAudioButton();
+            toolStripStatus.Text = btnAudio.Checked ? "Audio muted" : "Audio on";
             SaveVmSettings();
+        }
+
+        /// <summary>Reflect the mute toggle on the single Audio button (icon + tooltip).</summary>
+        private void UpdateAudioButton()
+        {
+            btnAudio.Image = AppIcons.Get(btnAudio.Checked ? "sound_mute" : "sound");
+            if (btnAudio.Enabled)
+                btnAudio.ToolTipText = btnAudio.Checked
+                    ? "Guest audio is muted on this PC — click to unmute. Remembered per-VM."
+                    : "Guest audio is on — click to mute on this PC. Remembered per-VM.";
         }
 
         private void useLz_Click(object? sender, EventArgs e) =>

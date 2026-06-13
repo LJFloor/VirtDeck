@@ -8,6 +8,11 @@ namespace VirtDeck.Forms
         private TabPage tabBoot;
         private TabPage tabStorage;
         private TabPage tabNetwork;
+        private TabPage tabSound;
+        private CheckBox chkSound;
+        private Label lblSoundModel;
+        private ComboBox cboSound;
+        private Label lblSoundHint;
         private ListView lvDisks;
         private Button btnAddDisk;
         private ContextMenuStrip contextMenuDisks;
@@ -57,6 +62,11 @@ namespace VirtDeck.Forms
             tabBoot = new TabPage();
             tabStorage = new TabPage();
             tabNetwork = new TabPage();
+            tabSound = new TabPage();
+            chkSound = new CheckBox();
+            lblSoundModel = new Label();
+            cboSound = new ComboBox();
+            lblSoundHint = new Label();
             lvDisks = new ListView();
             btnAddDisk = new Button();
             contextMenuDisks = new ContextMenuStrip(components);
@@ -100,6 +110,7 @@ namespace VirtDeck.Forms
             tabControl.TabPages.Add(tabBoot);
             tabControl.TabPages.Add(tabStorage);
             tabControl.TabPages.Add(tabNetwork);
+            tabControl.TabPages.Add(tabSound);
 
             // tabGeneral
             tabGeneral.Text = "General";
@@ -291,6 +302,39 @@ namespace VirtDeck.Forms
             tabNetwork.Controls.Add(btnAddNic);
             tabNetwork.Controls.Add(btnRemoveNic);
             tabNetwork.Controls.Add(lvNics);
+
+            // tabSound
+            tabSound.Text = "Sound";
+            tabSound.UseVisualStyleBackColor = true;
+            tabSound.Padding = new Padding(8);
+
+            chkSound.Text = "Emulate a sound card";
+            chkSound.Location = new Point(14, 22);
+            chkSound.AutoSize = true;
+            chkSound.CheckedChanged += chkSound_CheckedChanged;
+
+            lblSoundModel.Text = "Model:";
+            lblSoundModel.Location = new Point(14, 60);
+            lblSoundModel.AutoSize = true;
+            cboSound.Location = new Point(130, 57);
+            cboSound.Size = new Size(200, 23);
+            cboSound.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboSound.Items.Add("ICH9 (HDA)");
+            cboSound.Items.Add("ICH6 (HDA)");
+            cboSound.Items.Add("AC97");
+            cboSound.Items.Add("ES1370");
+            cboSound.Items.Add("Sound Blaster 16");
+
+            lblSoundHint.Text = "A sound card lets the guest play audio over the SPICE console. " +
+                                "ICH9 is the modern default; AC97/SB16 suit older guests.";
+            lblSoundHint.Location = new Point(14, 100);
+            lblSoundHint.Size = new Size(400, 40);
+            lblSoundHint.ForeColor = SystemColors.GrayText;
+
+            tabSound.Controls.Add(chkSound);
+            tabSound.Controls.Add(lblSoundModel);
+            tabSound.Controls.Add(cboSound);
+            tabSound.Controls.Add(lblSoundHint);
 
             // buttons
             btnOk.Text = "OK";

@@ -9,7 +9,7 @@ namespace VirtDeck.Forms
         private ToolStripDropDownButton btnKeyboard;
         private ToolStripDropDownButton btnMouse;
         private ToolStripDropDownButton btnDisplay;
-        private ToolStripDropDownButton btnAudio;
+        private ToolStripButton btnAudio;
         private ToolStripDropDownButton btnCdDvd;
         private ToolStripDropDownButton btnFloppy;
         private ToolStripButton btnUsb;
@@ -23,7 +23,6 @@ namespace VirtDeck.Forms
         private ToolStripMenuItem showHostCursorItem;
         private ToolStripMenuItem useLzCompressionItem;
         private ToolStripMenuItem useRawBitmapsItem;
-        private ToolStripMenuItem audioMuteItem;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel toolStripStatus;
         private ToolStripProgressBar progressXfer;
@@ -46,7 +45,7 @@ namespace VirtDeck.Forms
             btnKeyboard = new ToolStripDropDownButton();
             btnMouse = new ToolStripDropDownButton();
             btnDisplay = new ToolStripDropDownButton();
-            btnAudio = new ToolStripDropDownButton();
+            btnAudio = new ToolStripButton();
             btnCdDvd = new ToolStripDropDownButton();
             btnFloppy = new ToolStripDropDownButton();
             menuStart = new ToolStripMenuItem();
@@ -56,7 +55,6 @@ namespace VirtDeck.Forms
             showHostCursorItem = new ToolStripMenuItem();
             useLzCompressionItem = new ToolStripMenuItem();
             useRawBitmapsItem = new ToolStripMenuItem();
-            audioMuteItem = new ToolStripMenuItem();
             statusStrip = new StatusStrip();
             toolStripStatus = new ToolStripStatusLabel();
             progressXfer = new ToolStripProgressBar();
@@ -137,18 +135,14 @@ namespace VirtDeck.Forms
             btnDisplay.DropDownItems.AddRange(new ToolStripItem[]
                 { fitWindowItem, screenshotItem, new ToolStripSeparator(), useLzCompressionItem, useRawBitmapsItem });
 
-            // Audio — enabled while connected to a VM that has a sound device (set after connect).
+            // Audio — a single toggle button: click to mute/unmute guest speaker audio on this
+            // PC. Enabled while connected to a VM that has a sound device (set after connect).
             btnAudio.Text = "Audio";
-            btnAudio.ShowDropDownArrow = true;
             btnAudio.AutoToolTip = false;
             btnAudio.Image = AppIcons.Get("sound");
             btnAudio.Enabled = false;
-            audioMuteItem.Text = "Mute speakers";
-            audioMuteItem.Image = AppIcons.Get("sound_mute");
-            audioMuteItem.CheckOnClick = true;
-            audioMuteItem.ToolTipText = "Silence guest audio on this PC. Remembered per-VM.";
-            audioMuteItem.Click += audioMute_Click;
-            btnAudio.DropDownItems.Add(audioMuteItem);
+            btnAudio.CheckOnClick = true;
+            btnAudio.Click += audioMute_Click;
 
             // CD/DVD — only shown when the VM has an optical drive (set in code after connect)
             btnCdDvd.Text = "CD/DVD";

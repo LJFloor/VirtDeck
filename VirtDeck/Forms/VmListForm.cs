@@ -16,7 +16,7 @@ namespace VirtDeck.Forms
         private int _previewGen;                                     // bumped on selection change; drops stale background results
         private long _lastBytes;                                     // total tunnel bytes at last throughput sample
         private long _lastSampleTs;                                  // Stopwatch timestamp at last throughput sample
-        private readonly List<IsoHttpServer> _isoServers = new(); // host ISO streams, alive for the session
+        private readonly List<NbdServer> _isoServers = new(); // host NBD media streams, alive for the session
         private readonly Dictionary<string, VmConsoleForm> _consoles = new(); // one console window per VM; re-open focuses it
 
         public VmListForm(SshConnectionManager ssh)
@@ -65,7 +65,6 @@ namespace VirtDeck.Forms
                 var (cpu, bios, libvirt) = await Task.Run(() =>
                 {
                     var caps = _virsh.CheckHostCapabilities();
-                    _virsh.CheckQemuCurlDriver();
                     _virsh.CheckVirtSparseAvailable();
                     return caps;
                 });
@@ -249,7 +248,7 @@ namespace VirtDeck.Forms
         // All bytes that ride the SSH tunnel: management channel + forwarded SPICE console sockets +
         // reverse-forwarded ISO streaming. Each path is a distinct socket, so there's no double-count.
         private long TotalTunnelBytes() =>
-            _ssh.BytesReceived + SpiceTraffic.BytesTransferred + IsoHttpServer.TotalBytesServed;
+            _ssh.BytesReceived + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed;
 
         // Sample the combined tunnel-byte counter and show the rate since the last tick.
         private void UpdateThroughput()

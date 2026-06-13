@@ -19,7 +19,7 @@ namespace VirtDeck.Forms
         private readonly List<NicAddOp> _nics = new();
         private readonly List<DiskAddOp> _disks = new();
         private readonly HashSet<string> _usedTargets = new();
-        private readonly List<IsoHttpServer> _servers = new();
+        private readonly List<NbdServer> _servers = new();
         private readonly ToolTip _firmwareTip = new() { ShowAlways = true };
         private int _page;
         private bool _storageSeeded;
@@ -30,12 +30,13 @@ namespace VirtDeck.Forms
         private long _memMiB;
         private bool _useUefi;
         private string _osVariant = "generic";
+        private string _soundModel = "ich9";
 
         /// <summary>Name of the VM created on success, else null.</summary>
         public string? CreatedVmName { get; private set; }
 
         /// <summary>Host ISO stream servers started during create; the caller keeps them alive.</summary>
-        public IReadOnlyList<IsoHttpServer> StreamingServers => _servers;
+        public IReadOnlyList<NbdServer> StreamingServers => _servers;
 
         public CreateVmWizard(VirshService virsh, SshConnectionManager ssh)
         {
@@ -43,20 +44,15 @@ namespace VirtDeck.Forms
             _ssh = ssh;
             InitializeComponent();
             isoPicker.Virsh = virsh;
-            isoPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
-            isoPicker.DialogTitle = "Select install ISO";
-            floppyPicker.Virsh = virsh;
-            floppyPicker.Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*";
-            floppyPicker.DialogTitle = "Select install floppy";
+            isoPicker.Filter = "Install media (*.iso;*.vfd)|*.iso;*.vfd|ISO images (*.iso)|*.iso|Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*";
+            isoPicker.DialogTitle = "Select install media";
         }
 
         private void CreateVmWizard_Load(object? sender, EventArgs e)
         {
             _nics.Add(new NicAddOp { Type = "network", Source = "default", Model = "virtio" });
             RebuildNicList();
-            ApplyCurlAvailability();
             IsoMode_Changed(this, EventArgs.Empty);
-            FloppyMode_Changed(this, EventArgs.Empty);
             ShowPage(0);
             _ = PopulateOsVariantsAsync(); // fill the OS dropdown (virt-install --osinfo list + osinfo-query/embedded labels)
         }
@@ -94,31 +90,11 @@ namespace VirtDeck.Forms
             return id != null && OsLabelCatalog.Load().BiosOnly.Contains(id);
         }
 
-        private void ApplyCurlAvailability()
-        {
-            if (_virsh.QemuCurlAvailable) return;
-            rdoIsoUrl.Enabled = false;
-            rdoIsoStream.Enabled = false;
-            if (!rdoIsoServer.Checked) rdoIsoServer.Checked = true;
-            rdoFloppyUrl.Enabled = false;
-            rdoFloppyStream.Enabled = false;
-            if (!rdoFloppyServer.Checked) rdoFloppyServer.Checked = true;
-            var tt = new ToolTip { ShowAlways = true };
-            const string msg = "Streaming is disabled — the QEMU curl block driver is not loaded on the host.\nInstall qemu-block-extra to enable Network URL and local streaming.";
-            tt.SetToolTip(pnlIsoTypeRadios, msg);
-            tt.SetToolTip(rdoIsoUrl, msg);
-            tt.SetToolTip(rdoIsoStream, msg);
-            tt.SetToolTip(pnlFloppyTypeRadios, msg);
-            tt.SetToolTip(rdoFloppyUrl, msg);
-            tt.SetToolTip(rdoFloppyStream, msg);
-        }
-
         // ---- Install media (General page) ----------------------------------
 
         private void IsoMode_Changed(object? sender, EventArgs e)
         {
             isoPicker.Visible = rdoIsoServer.Checked;
-            txtIsoUrl.Visible = rdoIsoUrl.Checked;
             txtLocalIso.Visible = btnBrowseLocal.Visible = rdoIsoStream.Checked;
         }
 
@@ -126,66 +102,26 @@ namespace VirtDeck.Forms
         {
             using var ofd = new OpenFileDialog
             {
-                Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*",
-                Title = "Select an ISO on this PC",
+                Filter = "Install media (*.iso;*.vfd)|*.iso;*.vfd|ISO images (*.iso)|*.iso|Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
+                Title = "Select install media (ISO or floppy) on this PC",
                 CheckFileExists = true,
             };
             if (ofd.ShowDialog(this) == DialogResult.OK)
                 txtLocalIso.Text = ofd.FileName;
         }
 
-        /// <summary>The install CD-ROM op for the selected media mode, or null when no media is chosen.</summary>
-        private DiskAddOp? BuildCdromOp()
+        /// <summary>
+        /// The install media op for the selected source, or null when none is chosen. A `.vfd` source is
+        /// attached as a floppy (fdc, raw); anything else is treated as a CD-ROM ISO.
+        /// </summary>
+        private DiskAddOp? BuildInstallMediaOp()
         {
-            string bus = IsBiosOnlyOsSelected() ? "ide" : "sata";
-            if (rdoIsoServer.Checked)
-            {
-                var p = isoPicker.Path.Trim();
-                return p.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "file", Source = p };
-            }
-            if (rdoIsoUrl.Checked)
-            {
-                var u = txtIsoUrl.Text.Trim();
-                return u.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "url", Source = u };
-            }
-            var local = txtLocalIso.Text.Trim();
-            return local.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "stream", Source = local };
-        }
-
-        private void FloppyMode_Changed(object? sender, EventArgs e)
-        {
-            floppyPicker.Visible = rdoFloppyServer.Checked;
-            txtFloppyUrl.Visible = rdoFloppyUrl.Checked;
-            txtLocalFloppy.Visible = btnBrowseLocalFloppy.Visible = rdoFloppyStream.Checked;
-        }
-
-        private void btnBrowseLocalFloppy_Click(object? sender, EventArgs e)
-        {
-            using var ofd = new OpenFileDialog
-            {
-                Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
-                Title = "Select a floppy image on this PC",
-                CheckFileExists = true,
-            };
-            if (ofd.ShowDialog(this) == DialogResult.OK)
-                txtLocalFloppy.Text = ofd.FileName;
-        }
-
-        /// <summary>The install floppy op for the selected media mode, or null when none is chosen.</summary>
-        private DiskAddOp? BuildFloppyOp()
-        {
-            if (rdoFloppyServer.Checked)
-            {
-                var p = floppyPicker.Path.Trim();
-                return p.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "file", Source = p };
-            }
-            if (rdoFloppyUrl.Checked)
-            {
-                var u = txtFloppyUrl.Text.Trim();
-                return u.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "url", Source = u };
-            }
-            var local = txtLocalFloppy.Text.Trim();
-            return local.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "stream", Source = local };
+            string source = (rdoIsoServer.Checked ? isoPicker.Path : txtLocalIso.Text).Trim();
+            if (source.Length == 0) return null;
+            string mode = rdoIsoServer.Checked ? "file" : "stream";
+            if (source.EndsWith(".vfd", StringComparison.OrdinalIgnoreCase))
+                return new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = mode, Source = source };
+            return new DiskAddOp { Kind = "cdrom", Bus = IsBiosOnlyOsSelected() ? "ide" : "sata", IsoMode = mode, Source = source };
         }
 
         // ---- Navigation ----------------------------------------------------
@@ -228,24 +164,6 @@ namespace VirtDeck.Forms
             {
                 Warn($"A VM named '{name}' already exists.");
                 return false;
-            }
-            if (rdoIsoUrl.Checked)
-            {
-                var u = txtIsoUrl.Text.Trim();
-                if (u.Length > 0 && !Uri.TryCreate(u, UriKind.Absolute, out _))
-                {
-                    Warn("Enter a valid absolute URL (e.g. http://host/path.iso).");
-                    return false;
-                }
-            }
-            if (rdoFloppyUrl.Checked)
-            {
-                var u = txtFloppyUrl.Text.Trim();
-                if (u.Length > 0 && !Uri.TryCreate(u, UriKind.Absolute, out _))
-                {
-                    Warn("Enter a valid absolute URL (e.g. http://host/path.vfd).");
-                    return false;
-                }
             }
             return true;
         }
@@ -301,15 +219,10 @@ namespace VirtDeck.Forms
             disk.Target = AllocTarget(disk.Bus);
             _disks.Add(disk);
 
-            if (BuildCdromOp() is { } cd)
+            if (BuildInstallMediaOp() is { } media)
             {
-                cd.Target = AllocTarget(cd.Bus);
-                _disks.Add(cd);
-            }
-            if (BuildFloppyOp() is { } fd)
-            {
-                fd.Target = AllocTarget(fd.Bus);
-                _disks.Add(fd);
+                media.Target = AllocTarget(media.Bus);
+                _disks.Add(media);
             }
             RebuildDiskList();
         }
@@ -407,6 +320,7 @@ namespace VirtDeck.Forms
             _memMiB = (long)nudMem.Value;
             _useUefi = rdoUefi.Checked;
             _osVariant = (cboOs.SelectedItem as OsVariant)?.ShortId ?? "generic";
+            _soundModel = IsBiosOnlyOsSelected() ? "ac97" : "ich9"; // XP and earlier lack ich9 (HD Audio) drivers
 
             SetBusy(true);
             var errors = new List<string>();
@@ -438,7 +352,7 @@ namespace VirtDeck.Forms
 
         private void CreateVm(List<string> errors)
         {
-            _virsh.DefineVmShell(_name, _vcpus, _memMiB, _useUefi, _osVariant); // throws -> abort, no VM created
+            _virsh.DefineVmShell(_name, _vcpus, _memMiB, _useUefi, _osVariant, _soundModel); // throws -> abort, no VM created
 
             void Try(string what, Action a)
             {
@@ -452,7 +366,9 @@ namespace VirtDeck.Forms
 
             // Disk first, then cdrom: on a fresh install the empty disk isn't bootable so
             // firmware falls through to the ISO; after install the disk boots — no more ISO loop.
-            var boot = _disks.Any(d => d.IsCdrom) ? new[] { "hd", "cdrom" } : new[] { "hd" };
+            var boot = new List<string> { "hd" };
+            if (_disks.Any(d => d.IsCdrom)) boot.Add("cdrom");
+            if (_disks.Any(d => d.IsFloppy)) boot.Add("fd");
             Try("Boot order", () => _virsh.SetBootOrder(_name, boot));
         }
 
@@ -475,12 +391,9 @@ namespace VirtDeck.Forms
                 case "cdrom":
                     switch (op.IsoMode)
                     {
-                        case "url":
-                            _virsh.AttachNetworkCdrom(_name, op.Source, op.Target, op.Bus);
-                            break;
                         case "stream":
-                            var server = new IsoHttpServer();
-                            server.Start(op.Source, _ssh.Client);
+                            var server = new NbdServer();
+                            server.Start(op.Source, _ssh.Client, writable: false);
                             _servers.Add(server);
                             _virsh.AttachNetworkCdrom(_name, server.RemoteUrl, op.Target, op.Bus);
                             break;
@@ -492,12 +405,9 @@ namespace VirtDeck.Forms
                 case "floppy":
                     switch (op.IsoMode)
                     {
-                        case "url":
-                            _virsh.AttachNetworkFloppy(_name, op.Source, op.Target);
-                            break;
                         case "stream":
-                            var fserver = new IsoHttpServer();
-                            fserver.Start(op.Source, _ssh.Client);
+                            var fserver = new NbdServer();
+                            fserver.Start(op.Source, _ssh.Client, writable: true);
                             _servers.Add(fserver);
                             _virsh.AttachNetworkFloppy(_name, fserver.RemoteUrl, op.Target);
                             break;

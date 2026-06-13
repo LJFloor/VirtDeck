@@ -46,7 +46,6 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 
 | Property | Check | Used by |
 |---|---|---|
-| `QemuCurlAvailable` | `find /usr/lib* -name block-curl.so` + qemu help | Create wizard + editor + console — disables HTTP/stream ISO **and** floppy |
 | `VirtSparseAvailable` | `which virt-sparsify` | Export dialog — disables sparse checkbox |
 | `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VmListForm` |
 
@@ -93,15 +92,20 @@ native `auto_glz` for better bandwidth — not required for correctness.
 ## Removable media (ISO / floppy)
 
 Optical (`.iso`, `device='cdrom'`) and floppy (`.vfd`, `device='floppy'` on the `fdc` bus, target `fda`) media
-share one pipeline. Each can be a **file on the server**, a **network URL**, or **streamed from this PC**: the
-local file is served by `Services/IsoHttpServer` (file-agnostic — reused as-is for `.vfd`) over an SSH
-reverse-forward, and QEMU pulls it via its curl block driver from a `<disk type='network'>` element
-(`VirshService.BuildNetworkMediaXml`, emitted `<readonly/>`). Streaming is gated by `QemuCurlAvailable`.
-Change/eject reuse `virsh change-media`/`--eject` (generic by target). The Create-VM wizard (install ISO +
-install floppy), the editor's disk context menu (Change ISO/floppy ▸ server/local, Eject), and the console's
-**CD/DVD** and **Floppy** toolbar dropdowns are the four parity surfaces. Caveat: the `fdc` controller is
-native on `i440fx` (the BIOS-only XP F6-driver-floppy case) but may be unavailable on `q35`/UEFI; a streamed
-floppy is read-only.
+share one pipeline. Each can be a **file on the server** or **streamed from this PC**: the
+local file is served by `Services/NbdServer` (a native C# NBD fixed-newstyle server — file-agnostic, used for
+both `.iso` and `.vfd`) over an SSH reverse-forward, and QEMU pulls it over its built-in **NBD client** from a
+`<disk type='network' protocol='nbd'>` element (`VirshService.BuildNetworkMediaXml`). NBD is always compiled
+into QEMU, so streaming needs **no host package** (the old curl driver / `qemu-block-extra` dependency and its
+`QemuCurlAvailable` gate are gone). ISO is exported read-only (`<readonly/>`); **floppy is exported read-write,
+so guest writes persist back to the local file**. Change/eject reuse `virsh change-media`/`--eject` (generic by
+target). The streaming surfaces are: the Create-VM wizard (a single **install-media** picker — `.iso` →
+CD-ROM, `.vfd` → floppy, auto-detected by extension in `BuildInstallMediaOp` and added to the boot order),
+the editor's disk context menu (Change ISO/floppy ▸ server/local, Eject), and the console's **CD/DVD** and
+**Floppy** toolbar dropdowns. The console's **Floppy** button is hidden unless the VM has a floppy drive, and
+the editor's boot-order list includes **Floppy** (`<boot dev='fd'/>`) so a manually-added floppy is bootable.
+Caveat: the `fdc` controller is native on `i440fx` (the BIOS-only XP F6-driver-floppy case) but may be
+unavailable on `q35`/UEFI.
 
 ## USB redirection
 

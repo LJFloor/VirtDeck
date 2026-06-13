@@ -10,6 +10,7 @@ namespace VirtDeck.Models
         public long MemoryMiB { get; set; } = 1024;
         public string VideoModel { get; set; } = string.Empty; // virtio, qxl, vga, bochs, …
         public bool HasSoundDevice { get; set; }               // a <sound> device → SPICE offers audio
+        public string SoundModel { get; set; } = string.Empty; // ich9, ac97, ich6, es1370, sb16, …
         public bool Autostart { get; set; }
         public List<string> BootOrder { get; set; } = new();   // "hd", "cdrom", "network"
         public List<DiskInfo> Disks { get; set; } = new();
