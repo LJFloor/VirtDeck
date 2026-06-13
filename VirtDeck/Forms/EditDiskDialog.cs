@@ -18,11 +18,13 @@ namespace VirtDeck.Forms
         {
             _disk = disk;
             InitializeComponent();
-            Text = $"Edit {(disk.IsCdrom ? "CD-ROM" : "Disk")} — {disk.Target}";
+            Text = $"Edit {(disk.IsCdrom ? "CD-ROM" : disk.IsFloppy ? "Floppy" : "Disk")} — {disk.Target}";
             lblTarget.Text = disk.Target;
             lblSource.Text = disk.Source;
             if (disk.IsCdrom)
-                ConfigureForCdrom(); // optical bus list + hide driver tuning (cache/io/discard)
+                ConfigureForRemovable("CD-ROM", new object[] { "ide", "sata", "scsi", "usb" });
+            else if (disk.IsFloppy)
+                ConfigureForRemovable("Floppy", new object[] { "fdc" });
             else
                 lblType.Text = string.IsNullOrEmpty(disk.DriverType) ? "(auto)" : disk.DriverType;
             cboBus.SelectedItem = disk.Bus;
@@ -32,13 +34,13 @@ namespace VirtDeck.Forms
             Preselect(cboDiscard, disk.Discard);
         }
 
-        // A CD-ROM can ride ide/sata/scsi/usb (never virtio), and &lt;driver&gt; tuning is meaningless for
-        // it — so swap the bus list and hide the cache/io/discard rows, pulling the buttons up.
-        private void ConfigureForCdrom()
+        // Removable media (CD-ROM rides ide/sata/scsi/usb; floppy is fixed to fdc) has no meaningful
+        // &lt;driver&gt; tuning — so swap the bus list and hide the cache/io/discard rows, pulling the buttons up.
+        private void ConfigureForRemovable(string type, object[] buses)
         {
-            lblType.Text = "CD-ROM";
+            lblType.Text = type;
             cboBus.Items.Clear();
-            cboBus.Items.AddRange(new object[] { "ide", "sata", "scsi", "usb" });
+            cboBus.Items.AddRange(buses);
             foreach (var c in new Control[] { lblCache, cboCache, lblIo, cboIo, lblDiscard, cboDiscard })
                 c.Visible = false;
             btnOk.Top = btnCancel.Top = cboBus.Bottom + 24;

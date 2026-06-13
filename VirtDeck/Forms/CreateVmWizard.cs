@@ -45,6 +45,9 @@ namespace VirtDeck.Forms
             isoPicker.Virsh = virsh;
             isoPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
             isoPicker.DialogTitle = "Select install ISO";
+            floppyPicker.Virsh = virsh;
+            floppyPicker.Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*";
+            floppyPicker.DialogTitle = "Select install floppy";
         }
 
         private void CreateVmWizard_Load(object? sender, EventArgs e)
@@ -53,6 +56,7 @@ namespace VirtDeck.Forms
             RebuildNicList();
             ApplyCurlAvailability();
             IsoMode_Changed(this, EventArgs.Empty);
+            FloppyMode_Changed(this, EventArgs.Empty);
             ShowPage(0);
             _ = PopulateOsVariantsAsync(); // fill the OS dropdown (virt-install --osinfo list + osinfo-query/embedded labels)
         }
@@ -96,11 +100,17 @@ namespace VirtDeck.Forms
             rdoIsoUrl.Enabled = false;
             rdoIsoStream.Enabled = false;
             if (!rdoIsoServer.Checked) rdoIsoServer.Checked = true;
+            rdoFloppyUrl.Enabled = false;
+            rdoFloppyStream.Enabled = false;
+            if (!rdoFloppyServer.Checked) rdoFloppyServer.Checked = true;
             var tt = new ToolTip { ShowAlways = true };
             const string msg = "Streaming is disabled — the QEMU curl block driver is not loaded on the host.\nInstall qemu-block-extra to enable Network URL and local streaming.";
             tt.SetToolTip(pnlIsoTypeRadios, msg);
             tt.SetToolTip(rdoIsoUrl, msg);
             tt.SetToolTip(rdoIsoStream, msg);
+            tt.SetToolTip(pnlFloppyTypeRadios, msg);
+            tt.SetToolTip(rdoFloppyUrl, msg);
+            tt.SetToolTip(rdoFloppyStream, msg);
         }
 
         // ---- Install media (General page) ----------------------------------
@@ -140,6 +150,42 @@ namespace VirtDeck.Forms
             }
             var local = txtLocalIso.Text.Trim();
             return local.Length == 0 ? null : new DiskAddOp { Kind = "cdrom", Bus = bus, IsoMode = "stream", Source = local };
+        }
+
+        private void FloppyMode_Changed(object? sender, EventArgs e)
+        {
+            floppyPicker.Visible = rdoFloppyServer.Checked;
+            txtFloppyUrl.Visible = rdoFloppyUrl.Checked;
+            txtLocalFloppy.Visible = btnBrowseLocalFloppy.Visible = rdoFloppyStream.Checked;
+        }
+
+        private void btnBrowseLocalFloppy_Click(object? sender, EventArgs e)
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
+                Title = "Select a floppy image on this PC",
+                CheckFileExists = true,
+            };
+            if (ofd.ShowDialog(this) == DialogResult.OK)
+                txtLocalFloppy.Text = ofd.FileName;
+        }
+
+        /// <summary>The install floppy op for the selected media mode, or null when none is chosen.</summary>
+        private DiskAddOp? BuildFloppyOp()
+        {
+            if (rdoFloppyServer.Checked)
+            {
+                var p = floppyPicker.Path.Trim();
+                return p.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "file", Source = p };
+            }
+            if (rdoFloppyUrl.Checked)
+            {
+                var u = txtFloppyUrl.Text.Trim();
+                return u.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "url", Source = u };
+            }
+            var local = txtLocalFloppy.Text.Trim();
+            return local.Length == 0 ? null : new DiskAddOp { Kind = "floppy", Bus = "fdc", Format = "raw", IsoMode = "stream", Source = local };
         }
 
         // ---- Navigation ----------------------------------------------------
@@ -189,6 +235,15 @@ namespace VirtDeck.Forms
                 if (u.Length > 0 && !Uri.TryCreate(u, UriKind.Absolute, out _))
                 {
                     Warn("Enter a valid absolute URL (e.g. http://host/path.iso).");
+                    return false;
+                }
+            }
+            if (rdoFloppyUrl.Checked)
+            {
+                var u = txtFloppyUrl.Text.Trim();
+                if (u.Length > 0 && !Uri.TryCreate(u, UriKind.Absolute, out _))
+                {
+                    Warn("Enter a valid absolute URL (e.g. http://host/path.vfd).");
                     return false;
                 }
             }
@@ -251,12 +306,17 @@ namespace VirtDeck.Forms
                 cd.Target = AllocTarget(cd.Bus);
                 _disks.Add(cd);
             }
+            if (BuildFloppyOp() is { } fd)
+            {
+                fd.Target = AllocTarget(fd.Bus);
+                _disks.Add(fd);
+            }
             RebuildDiskList();
         }
 
         private string AllocTarget(string bus)
         {
-            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", _ => "sd" };
+            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", "fdc" => "fd", _ => "sd" };
             for (char c = 'a'; c <= 'z'; c++)
             {
                 var t = prefix + c;
@@ -271,12 +331,12 @@ namespace VirtDeck.Forms
             foreach (var op in _disks)
             {
                 var it = new ListViewItem(op.Target);
-                it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(op.IsCdrom ? "cdrom" : op.IsFloppy ? "floppy" : "disk");
                 it.SubItems.Add(op.Bus);
                 bool hasSize = op.Kind == "qcow2" || (op.Kind == "zvol" && op.CreateZvol);
                 it.SubItems.Add(hasSize ? $"{op.SizeGiB} GiB" : "");
                 it.SubItems.Add(op.Source);
-                it.SubItems.Add(op.IsCdrom ? "" : DriverDesc(op.Format, op.Cache, op.Io, op.Discard));
+                it.SubItems.Add(op.IsCdrom || op.IsFloppy ? "" : DriverDesc(op.Format, op.Cache, op.Io, op.Discard));
                 it.Tag = op;
                 lvDisks.Items.Add(it);
             }
@@ -312,7 +372,7 @@ namespace VirtDeck.Forms
             using var dlg = new EditDiskDialog(op.ToDiskInfo());
             if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } d)
             {
-                if (!op.IsCdrom) // driver tuning is meaningless for an optical drive
+                if (!op.IsCdrom && !op.IsFloppy) // driver tuning is meaningless for removable media
                 {
                     op.Cache = d.Cache;
                     op.Io = d.Io;
@@ -426,6 +486,23 @@ namespace VirtDeck.Forms
                             break;
                         default: // file on server
                             _virsh.AttachCdrom(_name, op.Source, op.Target, op.Bus);
+                            break;
+                    }
+                    break;
+                case "floppy":
+                    switch (op.IsoMode)
+                    {
+                        case "url":
+                            _virsh.AttachNetworkFloppy(_name, op.Source, op.Target);
+                            break;
+                        case "stream":
+                            var fserver = new IsoHttpServer();
+                            fserver.Start(op.Source, _ssh.Client);
+                            _servers.Add(fserver);
+                            _virsh.AttachNetworkFloppy(_name, fserver.RemoteUrl, op.Target);
+                            break;
+                        default: // file on server
+                            _virsh.AttachFloppyFile(_name, op.Source, op.Target);
                             break;
                     }
                     break;

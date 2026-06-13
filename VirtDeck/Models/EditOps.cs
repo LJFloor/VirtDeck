@@ -3,8 +3,8 @@ namespace VirtDeck.Models
     /// <summary>A pending disk addition built by AddDiskDialog, applied on editor OK.</summary>
     public class DiskAddOp
     {
-        public string Kind { get; set; } = "qcow2";  // qcow2 | zvol | cdrom
-        // For Kind=cdrom: file (server path) | url (network URL) | stream (local PC path, served over HTTP at create).
+        public string Kind { get; set; } = "qcow2";  // qcow2 | zvol | cdrom | floppy
+        // For Kind=cdrom/floppy: file (server path) | url (network URL) | stream (local PC path, served over HTTP at create).
         public string IsoMode { get; set; } = "file";
         public string Source { get; set; } = string.Empty; // path / dev / iso (for qcow2: path to create)
         public string Target { get; set; } = string.Empty; // assigned by the editor (vdb, sdb, …)
@@ -22,11 +22,12 @@ namespace VirtDeck.Models
         public bool CreateZvol { get; set; }
 
         public bool IsCdrom => Kind == "cdrom";
+        public bool IsFloppy => Kind == "floppy";
 
         /// <summary>Carrier for VirshService.BuildDiskXml — same fields the editor renders/applies.</summary>
         public DiskInfo ToDiskInfo() => new()
         {
-            Target = Target, Device = IsCdrom ? "cdrom" : "disk", Bus = Bus,
+            Target = Target, Device = IsCdrom ? "cdrom" : IsFloppy ? "floppy" : "disk", Bus = Bus,
             SourceType = SourceType, Source = Source, DriverType = Format,
             Cache = Cache, Io = Io, Discard = Discard,
         };
@@ -36,6 +37,7 @@ namespace VirtDeck.Models
             "qcow2" => $"new qcow2 {SizeGiB} GiB → {Source}",
             "zvol" => $"zvol → {Source}",
             "cdrom" => $"CD-ROM → {Source}",
+            "floppy" => $"Floppy → {Source}",
             _ => Source
         };
     }

@@ -29,6 +29,8 @@ namespace VirtDeck.Models
         public string Discard { get; set; } = string.Empty;    // unmap, ignore
 
         public bool IsCdrom => Device == "cdrom";
+        public bool IsFloppy => Device == "floppy";
+        public bool IsRemovableMedia => IsCdrom || IsFloppy;
 
         public DiskInfo Clone() => new()
         {

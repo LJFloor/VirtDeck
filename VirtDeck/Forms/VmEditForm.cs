@@ -50,11 +50,12 @@ namespace VirtDeck.Forms
             }
         }
 
-        /// <summary>An ISO streamed from this PC over SSH (pending until OK), plus the drive's bus.</summary>
+        /// <summary>Media streamed from this PC over SSH (pending until OK), plus the drive's bus/kind.</summary>
         private sealed class StreamedMedia
         {
             public IsoHttpServer Server = null!;
             public string Bus = "sata";
+            public bool IsFloppy;
             public string Display = "";
         }
 
@@ -182,7 +183,7 @@ namespace VirtDeck.Forms
                 // DiskInfo as its Tag so the menu actions still key off the current target.
                 var busChange = _diskBusChanges.TryGetValue(d.Target, out var nbc) ? nbc : null;
                 var it = new ListViewItem(busChange?.Target ?? d.Target);
-                it.SubItems.Add(d.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(d.IsCdrom ? "cdrom" : d.IsFloppy ? "floppy" : "disk");
                 it.SubItems.Add(busChange?.Bus ?? d.Bus);
                 it.SubItems.Add(src);
                 it.Tag = d;
@@ -194,7 +195,7 @@ namespace VirtDeck.Forms
             foreach (var op in _diskAdds)
             {
                 var it = new ListViewItem(op.Target);
-                it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(op.IsCdrom ? "cdrom" : op.IsFloppy ? "floppy" : "disk");
                 it.SubItems.Add(op.Bus);
                 it.SubItems.Add(op.Source);
                 it.Tag = op;
@@ -231,18 +232,21 @@ namespace VirtDeck.Forms
                 return;
             }
             var tag = lvDisks.SelectedItems[0].Tag;
-            bool isExistingCdrom = tag is DiskInfo { IsCdrom: true };
+            bool isExistingRemovable = tag is DiskInfo { IsRemovableMedia: true };
+            bool isFloppy = tag is DiskInfo { IsFloppy: true };
 
-            menuDiskEdit.Visible = tag is DiskInfo { IsCdrom: false }; // driver tuning: existing data disk only
-            menuDiskChangeIso.Visible = isExistingCdrom;
-            menuDiskEject.Visible = isExistingCdrom;
+            // driver tuning: existing data disk only (not removable media)
+            menuDiskEdit.Visible = tag is DiskInfo { IsRemovableMedia: false };
+            menuDiskChangeIso.Visible = isExistingRemovable;
+            menuDiskChangeIso.Text = isFloppy ? "Change floppy…" : "Change ISO…";
+            menuDiskEject.Visible = isExistingRemovable;
             menuDiskRemove.Visible = true;                              // any selected row (pending add or existing)
-            menuDiskSep.Visible = menuDiskEdit.Visible || isExistingCdrom;
+            menuDiskSep.Visible = menuDiskEdit.Visible || isExistingRemovable;
         }
 
         private string AllocTarget(string bus)
         {
-            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", _ => "sd" };
+            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", "fdc" => "fd", _ => "sd" };
             for (char c = 'a'; c <= 'z'; c++)
             {
                 var t = prefix + c;
