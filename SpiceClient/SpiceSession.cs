@@ -79,6 +79,18 @@ public sealed class SpiceSession : IDisposable
     public event Action? ClipboardRequestedByGuest;        // guest is pasting → send host clipboard
 
     private readonly List<SpiceChannel> _channels = new();
+
+    /// <summary>
+    /// Serializes each channel's TCP connect + link handshake. The secondary channels
+    /// (display/inputs/cursor/playback/usbredir) are all opened in a tight burst from
+    /// MSG_MAIN_CHANNELS_LIST and dial the SAME SSH-forwarded local port at once. SSH.NET's
+    /// ForwardedPortLocal can cross simultaneous connections, leaking one channel's link-reply
+    /// bytes into another's socket — the crossed stream is then read misframed (the 4-byte auth
+    /// result lands on the next reply's "REDQ" magic = "SPICE auth error 1363428690"). Channels
+    /// hold this only for the short connect+handshake; their read loops still run in parallel.
+    /// </summary>
+    internal object ConnectGate { get; } = new();
+
     private MainChannel? _main;
     private UsbDeviceManager? _usb;
     private LibUsbContext? _usbCtx;

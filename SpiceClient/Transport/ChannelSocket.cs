@@ -22,6 +22,17 @@ public sealed class ChannelSocket : IDisposable
         _stream = _tcp.GetStream();
     }
 
+    /// <summary>
+    /// Read timeout in milliseconds (0 = infinite). Used to bound the link handshake while it
+    /// holds the session's connect gate, so a stalled handshake can't deadlock the other
+    /// channels; the read loop sets it back to infinite (SPICE servers idle between messages).
+    /// A timed-out read surfaces as an IOException, tearing the channel down normally.
+    /// </summary>
+    public int ReadTimeoutMs
+    {
+        set => _tcp.ReceiveTimeout = value;
+    }
+
     /// <summary>Reads exactly <paramref name="count"/> bytes or throws if the stream ends.</summary>
     public byte[] ReadExact(int count)
     {

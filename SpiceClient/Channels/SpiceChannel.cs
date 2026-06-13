@@ -33,6 +33,9 @@ public abstract class SpiceChannel : IDisposable
     private uint _ackWindow;
     private uint _msgsUntilAck;
 
+    /// <summary>Upper bound on each handshake read while the connect gate is held.</summary>
+    private const int HandshakeTimeoutMs = 20_000;
+
     protected SpiceChannel(SpiceSession session, string host, int port,
         byte channelType, byte channelId, uint connectionId, string password)
     {
@@ -62,10 +65,20 @@ public abstract class SpiceChannel : IDisposable
         try
         {
             Session.Log($"[{ChannelTypeName()}] connecting to {_host}:{_port}");
-            socket = new ChannelSocket(_host, _port);
-            _socket = socket;
-            if (_disposed) return;            // disposed during connect → finally closes socket
-            Handshake(socket);
+            // Serialize the TCP connect + link handshake across the session: secondary channels
+            // are opened in a burst and dial the one SSH-forwarded port at once, and SSH.NET can
+            // cross simultaneous connections — leaking another channel's link reply into this
+            // socket and misframing the stream (auth result reads the next "REDQ" magic). See
+            // SpiceSession.ConnectGate. The handshake is short; read loops below run in parallel.
+            lock (Session.ConnectGate)
+            {
+                socket = new ChannelSocket(_host, _port);
+                _socket = socket;
+                if (_disposed) return;        // disposed during connect → finally closes socket
+                socket.ReadTimeoutMs = HandshakeTimeoutMs;   // don't hold the gate forever on a stall
+                Handshake(socket);
+                socket.ReadTimeoutMs = 0;                    // read loop blocks indefinitely (idle servers)
+            }
             if (_disposed) return;            // disposed during handshake
             Session.Log($"[{ChannelTypeName()}] ready");
             OnLinked();
