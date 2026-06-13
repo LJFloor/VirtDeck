@@ -1,17 +1,9 @@
-SpiceVmManager — End User License Agreement (Freeware)
+VirtDeck — End User License Agreement (Freeware)
 
-============================================================================
- TEMPLATE NOTICE — READ AND DELETE THIS BLOCK BEFORE DISTRIBUTION
- This is a starting-point template, NOT legal advice. Fill in every [BRACKETED]
- field and have a qualified lawyer review it for your jurisdiction before you
- rely on it. A disclaimer reduces but does not perfectly eliminate liability —
- some liability cannot be excluded by agreement in some countries.
-============================================================================
-
-Software:  SpiceVmManager (the "Software")
+Software:  VirtDeck (the "Software")
 Licensor:  Leendert-Jan Floor (the "Licensor", "we", "us")
-Contact:   [email / website]
-Version:   [version], [year]
+Contact:   https://virtdeck.net
+Version:   1.0, 2026
 
 By installing, copying, or using the Software, you ("you") agree to this
 Agreement. If you do not agree, do not install or use the Software.
@@ -75,17 +67,12 @@ Agreement. If you do not agree, do not install or use the Software.
 8. TERMINATION
    This Agreement terminates automatically if you breach it. On termination you
    must stop using the Software and destroy your copies of it. Sections 2 and
-   4–10 survive termination.
+   4–9 survive termination.
 
-9. GOVERNING LAW
-   This Agreement is governed by the laws of [your country/region], without regard
-   to its conflict-of-laws rules. [Optional: the courts of [place] have exclusive
-   jurisdiction over any dispute arising from it.]
-
-10. ENTIRE AGREEMENT; SEVERABILITY
+9. ENTIRE AGREEMENT; SEVERABILITY
    This Agreement is the entire agreement between you and the Licensor regarding
    the Software and supersedes any prior understanding. If any provision is held
    unenforceable, the remaining provisions remain in full effect.
 
-Copyright (c) [year] [Your name or company]. All rights reserved, except as
+Copyright (c) 2026 Leendert-Jan Floor. All rights reserved, except as
 licensed above and as set out in THIRD-PARTY-NOTICES.md.
