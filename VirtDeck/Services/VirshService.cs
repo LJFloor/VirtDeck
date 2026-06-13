@@ -444,13 +444,29 @@ namespace VirtDeck.Services
         /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
         /// </summary>
         public void AttachNetworkCdrom(string vm, string url, string target, string bus = "sata") =>
-            RunDeviceXml("attach-device", vm, BuildNetworkCdromXml(url, target, bus));
+            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom"));
 
         /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO — live by default.</summary>
         public void UpdateCdromNetwork(string vm, string target, string bus, string url, bool live = true) =>
-            RunDeviceXml("update-device", vm, BuildNetworkCdromXml(url, target, bus), live ? "--live" : "--config");
+            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom"), live ? "--live" : "--config");
 
-        private static string BuildNetworkCdromXml(string url, string target, string bus)
+        /// <summary>Attaches a file floppy (`.vfd`) as a raw fdc disk — config-only (the fdc can't hot-add).</summary>
+        public void AttachFloppyFile(string vm, string path, string target) =>
+            AttachDataDisk(vm, new DiskInfo
+            {
+                Device = "floppy", Bus = "fdc", Target = target,
+                SourceType = "file", Source = path, DriverType = "raw",
+            });
+
+        /// <summary>Attaches a network floppy (http/https/ftp URL) so QEMU streams the `.vfd` via its curl block driver.</summary>
+        public void AttachNetworkFloppy(string vm, string url, string target) =>
+            RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy"));
+
+        /// <summary>Swaps the media of an existing floppy drive to a network (streamed) `.vfd` — live by default.</summary>
+        public void UpdateFloppyNetwork(string vm, string target, string url, bool live = true) =>
+            RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy"), live ? "--live" : "--config");
+
+        private static string BuildNetworkMediaXml(string url, string target, string bus, string device)
         {
             var uri = new Uri(url);
             string name = (uri.AbsolutePath + uri.Query).TrimStart('/');
@@ -458,7 +474,7 @@ namespace VirtDeck.Services
             src.Append($"<host name='{XmlAttr(uri.Host)}'");
             if (uri.Port > 0) src.Append($" port='{uri.Port}'");
             src.Append("/></source>");
-            return "<disk type='network' device='cdrom'><driver name='qemu' type='raw'/>" +
+            return $"<disk type='network' device='{XmlAttr(device)}'><driver name='qemu' type='raw'/>" +
                    $"{src}<target dev='{XmlAttr(target)}' bus='{XmlAttr(bus)}'/><readonly/></disk>";
         }
 

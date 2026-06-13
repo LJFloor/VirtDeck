@@ -6,6 +6,7 @@ namespace VirtDeck.Forms
         private RadioButton rdoQcow2;
         private RadioButton rdoZvol;
         private RadioButton rdoCdrom;
+        private RadioButton rdoFloppy;
         private Label lblPath;
         private VirtDeck.Controls.RemotePathTextBox pathPicker;
         private Label lblSize;
@@ -36,6 +37,7 @@ namespace VirtDeck.Forms
             rdoQcow2 = new RadioButton();
             rdoZvol = new RadioButton();
             rdoCdrom = new RadioButton();
+            rdoFloppy = new RadioButton();
             lblPath = new Label();
             pathPicker = new VirtDeck.Controls.RemotePathTextBox();
             lblSize = new Label();
@@ -69,6 +71,10 @@ namespace VirtDeck.Forms
             rdoCdrom.Location = new Point(14, 84);
             rdoCdrom.AutoSize = true;
             rdoCdrom.CheckedChanged += Mode_Changed;
+            rdoFloppy.Text = "Floppy (VFD)";
+            rdoFloppy.Location = new Point(14, 116);
+            rdoFloppy.AutoSize = true;
+            rdoFloppy.CheckedChanged += Mode_Changed;
 
             // Row 1: path (qcow2/cdrom) OR zvol picker
             lblPath.Text = "Path:";
@@ -150,7 +156,7 @@ namespace VirtDeck.Forms
 
             Controls.AddRange(new Control[]
             {
-                rdoQcow2, rdoZvol, rdoCdrom,
+                rdoQcow2, rdoZvol, rdoCdrom, rdoFloppy,
                 lblPath, pathPicker, lblZvol, cboZvol,
                 lblSize, nudSize, lblSizeUnit,
                 lblNewVol, txtNewVol, lblNewSize, nudNewSize, lblNewSizeUnit,

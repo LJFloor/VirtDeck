@@ -50,11 +50,12 @@ namespace VirtDeck.Forms
             }
         }
 
-        /// <summary>An ISO streamed from this PC over SSH (pending until OK), plus the drive's bus.</summary>
+        /// <summary>Media streamed from this PC over SSH (pending until OK), plus the drive's bus/kind.</summary>
         private sealed class StreamedMedia
         {
             public IsoHttpServer Server = null!;
             public string Bus = "sata";
+            public bool IsFloppy;
             public string Display = "";
         }
 
@@ -182,7 +183,7 @@ namespace VirtDeck.Forms
                 // DiskInfo as its Tag so the menu actions still key off the current target.
                 var busChange = _diskBusChanges.TryGetValue(d.Target, out var nbc) ? nbc : null;
                 var it = new ListViewItem(busChange?.Target ?? d.Target);
-                it.SubItems.Add(d.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(d.IsCdrom ? "cdrom" : d.IsFloppy ? "floppy" : "disk");
                 it.SubItems.Add(busChange?.Bus ?? d.Bus);
                 it.SubItems.Add(src);
                 it.Tag = d;
@@ -194,7 +195,7 @@ namespace VirtDeck.Forms
             foreach (var op in _diskAdds)
             {
                 var it = new ListViewItem(op.Target);
-                it.SubItems.Add(op.IsCdrom ? "cdrom" : "disk");
+                it.SubItems.Add(op.IsCdrom ? "cdrom" : op.IsFloppy ? "floppy" : "disk");
                 it.SubItems.Add(op.Bus);
                 it.SubItems.Add(op.Source);
                 it.Tag = op;
@@ -231,18 +232,21 @@ namespace VirtDeck.Forms
                 return;
             }
             var tag = lvDisks.SelectedItems[0].Tag;
-            bool isExistingCdrom = tag is DiskInfo { IsCdrom: true };
+            bool isExistingRemovable = tag is DiskInfo { IsRemovableMedia: true };
+            bool isFloppy = tag is DiskInfo { IsFloppy: true };
 
-            menuDiskEdit.Visible = tag is DiskInfo { IsCdrom: false }; // driver tuning: existing data disk only
-            menuDiskChangeIso.Visible = isExistingCdrom;
-            menuDiskEject.Visible = isExistingCdrom;
+            // driver tuning: existing data disk only (not removable media)
+            menuDiskEdit.Visible = tag is DiskInfo { IsRemovableMedia: false };
+            menuDiskChangeIso.Visible = isExistingRemovable;
+            menuDiskChangeIso.Text = isFloppy ? "Change floppy…" : "Change ISO…";
+            menuDiskEject.Visible = isExistingRemovable;
             menuDiskRemove.Visible = true;                              // any selected row (pending add or existing)
-            menuDiskSep.Visible = menuDiskEdit.Visible || isExistingCdrom;
+            menuDiskSep.Visible = menuDiskEdit.Visible || isExistingRemovable;
         }
 
         private string AllocTarget(string bus)
         {
-            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", _ => "sd" };
+            string prefix = bus switch { "virtio" => "vd", "ide" => "hd", "fdc" => "fd", _ => "sd" };
             for (char c = 'a'; c <= 'z'; c++)
             {
                 var t = prefix + c;
@@ -340,10 +344,10 @@ namespace VirtDeck.Forms
 
         private void DiskChangeIso_Click(object? sender, EventArgs e)
         {
-            if (SelectedCdrom() is not { } d) { Warn("Select a CD-ROM drive."); return; }
+            if (SelectedRemovable() is not { } d) { Warn("Select a CD-ROM or floppy drive."); return; }
             var initial = _mediaChanges.TryGetValue(d.Target, out var cur) ? (cur ?? "") : d.Source;
             using var dlg = new RemoteFileBrowserDialog(_virsh, initial,
-                "ISO images (*.iso)|*.iso|All files (*.*)|*.*", false, "Select ISO image");
+                MediaFilter(d), false, d.IsFloppy ? "Select floppy image" : "Select ISO image");
             if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedPath is not { } iso) return;
             iso = iso.Trim();
             if (!PathRegex.IsMatch(iso)) { Warn("Path contains invalid characters."); return; }
@@ -352,21 +356,21 @@ namespace VirtDeck.Forms
             RebuildDiskList();
         }
 
-        // Stream a local ISO over the SSH tunnel (like the console). The saved config points at the
+        // Stream a local image over the SSH tunnel (like the console). The saved config points at the
         // tunnelled URL, so it's only reachable while VirtDeck stays open — fine to install during this
-        // session; copy the ISO to the server for a permanent attachment.
+        // session; copy the image to the server for a permanent attachment.
         private void DiskChangeIsoLocal_Click(object? sender, EventArgs e)
         {
-            if (SelectedCdrom() is not { } d) { Warn("Select a CD-ROM drive."); return; }
+            if (SelectedRemovable() is not { } d) { Warn("Select a CD-ROM or floppy drive."); return; }
             using var ofd = new OpenFileDialog
             {
-                Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*",
-                Title = "Select an ISO on this PC",
+                Filter = MediaFilter(d),
+                Title = d.IsFloppy ? "Select a floppy image on this PC" : "Select an ISO on this PC",
                 CheckFileExists = true,
             };
             if (ofd.ShowDialog(this) != DialogResult.OK) return;
             var local = ofd.FileName;
-            string bus = string.IsNullOrEmpty(d.Bus) ? "sata" : d.Bus;
+            string bus = string.IsNullOrEmpty(d.Bus) ? (d.IsFloppy ? "fdc" : "sata") : d.Bus;
 
             IsoHttpServer server;
             try
@@ -376,7 +380,7 @@ namespace VirtDeck.Forms
             }
             catch (Exception ex)
             {
-                Warn($"Could not start ISO streaming:\n{ex.Message}");
+                Warn($"Could not start streaming:\n{ex.Message}");
                 return;
             }
 
@@ -386,6 +390,7 @@ namespace VirtDeck.Forms
             {
                 Server = server,
                 Bus = bus,
+                IsFloppy = d.IsFloppy,
                 Display = $"(streaming) {System.IO.Path.GetFileName(local)}",
             };
             RebuildDiskList();
@@ -393,23 +398,27 @@ namespace VirtDeck.Forms
 
         private void DiskEject_Click(object? sender, EventArgs e)
         {
-            if (SelectedCdrom() is not { } d) { Warn("Select a CD-ROM drive."); return; }
+            if (SelectedRemovable() is not { } d) { Warn("Select a CD-ROM or floppy drive."); return; }
             ClearStream(d.Target);
             _mediaChanges[d.Target] = null;
             RebuildDiskList();
         }
 
-        /// <summary>Disposes and forgets any pending local-ISO stream for a cdrom target.</summary>
+        private static string MediaFilter(DiskInfo d) => d.IsFloppy
+            ? "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*"
+            : "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
+
+        /// <summary>Disposes and forgets any pending local-media stream for a target.</summary>
         private void ClearStream(string target)
         {
             if (_mediaStreams.Remove(target, out var sm))
                 try { sm.Server.Dispose(); } catch { /* ignore */ }
         }
 
-        private DiskInfo? SelectedCdrom()
+        private DiskInfo? SelectedRemovable()
         {
             var tag = lvDisks.SelectedItems.Count > 0 ? lvDisks.SelectedItems[0].Tag : null;
-            return tag is DiskInfo d && d.IsCdrom ? d : null;
+            return tag is DiskInfo d && d.IsRemovableMedia ? d : null;
         }
 
         // ---- Network tab ---------------------------------------------------
@@ -566,7 +575,10 @@ namespace VirtDeck.Forms
             {
                 var target = kv.Key;
                 var sm = kv.Value;
-                Try($"Stream media {target}", () => _virsh.UpdateCdromNetwork(_vmName, target, sm.Bus, sm.Server.RemoteUrl, live: false));
+                Try($"Stream media {target}", () => {
+                    if (sm.IsFloppy) _virsh.UpdateFloppyNetwork(_vmName, target, sm.Server.RemoteUrl, live: false);
+                    else _virsh.UpdateCdromNetwork(_vmName, target, sm.Bus, sm.Server.RemoteUrl, live: false);
+                });
             }
             foreach (var kv in _diskEdits)
                 Try($"Edit disk {kv.Key}", () => _virsh.UpdateDiskDriver(_vmName, kv.Value));
@@ -613,6 +625,9 @@ namespace VirtDeck.Forms
                     break;
                 case "cdrom":
                     _virsh.AttachCdrom(_vmName, op.Source, op.Target, op.Bus);
+                    break;
+                case "floppy":
+                    _virsh.AttachFloppyFile(_vmName, op.Source, op.Target);
                     break;
             }
         }

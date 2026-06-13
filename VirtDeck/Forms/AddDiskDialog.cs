@@ -65,15 +65,20 @@ namespace VirtDeck.Forms
 
         private void UpdateMode()
         {
-            bool qcow2 = rdoQcow2.Checked, zvol = rdoZvol.Checked, cdrom = rdoCdrom.Checked;
+            bool qcow2 = rdoQcow2.Checked, zvol = rdoZvol.Checked, cdrom = rdoCdrom.Checked, floppy = rdoFloppy.Checked;
             bool createZvol = zvol && cboZvol.SelectedItem is string; // the sentinel item
 
-            lblPath.Visible = pathPicker.Visible = qcow2 || cdrom;
-            lblPath.Text = cdrom ? "ISO path:" : "Path:";
+            lblPath.Visible = pathPicker.Visible = qcow2 || cdrom || floppy;
+            lblPath.Text = cdrom ? "ISO path:" : floppy ? "VFD path:" : "Path:";
             if (cdrom)
             {
                 pathPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
                 pathPicker.DialogTitle = "Select ISO image";
+            }
+            else if (floppy)
+            {
+                pathPicker.Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*";
+                pathPicker.DialogTitle = "Select floppy image";
             }
             else
             {
@@ -87,22 +92,34 @@ namespace VirtDeck.Forms
             lblNewVol.Visible = txtNewVol.Visible = createZvol;
             lblNewSize.Visible = nudNewSize.Visible = lblNewSizeUnit.Visible = createZvol;
 
-            // A CD-ROM rides an optical bus (ide/sata/scsi/usb, never virtio); data disks pick from the
-            // disk set. Swap the list only when crossing the CD-ROM boundary so toggling qcow2<->zvol
-            // doesn't reset the user's pick.
+            // A CD-ROM rides an optical bus (ide/sata/scsi/usb, never virtio); a floppy is fixed to the
+            // fdc bus; data disks pick from the disk set. Swap the list only when the available set
+            // changes so toggling qcow2<->zvol doesn't reset the user's pick.
             lblBus.Visible = cboBus.Visible = true;
-            bool opticalList = !cboBus.Items.Contains("virtio");
-            if (cdrom && !opticalList)
+            if (floppy)
             {
-                cboBus.Items.Clear();
-                cboBus.Items.AddRange(new object[] { "ide", "sata", "scsi", "usb" });
-                cboBus.SelectedItem = "sata";
+                if (!(cboBus.Items.Count == 1 && cboBus.Items.Contains("fdc")))
+                {
+                    cboBus.Items.Clear();
+                    cboBus.Items.Add("fdc");
+                    cboBus.SelectedItem = "fdc";
+                }
             }
-            else if (!cdrom && opticalList)
+            else
             {
-                cboBus.Items.Clear();
-                cboBus.Items.AddRange(new object[] { "virtio", "sata", "scsi", "ide" });
-                cboBus.SelectedItem = "virtio";
+                bool opticalList = cboBus.Items.Contains("usb"); // optical set has usb; floppy set is only fdc
+                if (cdrom && !opticalList)
+                {
+                    cboBus.Items.Clear();
+                    cboBus.Items.AddRange(new object[] { "ide", "sata", "scsi", "usb" });
+                    cboBus.SelectedItem = "sata";
+                }
+                else if (!cdrom && (opticalList || !cboBus.Items.Contains("virtio")))
+                {
+                    cboBus.Items.Clear();
+                    cboBus.Items.AddRange(new object[] { "virtio", "sata", "scsi", "ide" });
+                    cboBus.SelectedItem = "virtio";
+                }
             }
         }
 
@@ -150,6 +167,13 @@ namespace VirtDeck.Forms
                     op.Format = "qcow2";
                     op.Source = path;
                     op.SizeGiB = (int)nudSize.Value;
+                }
+                else if (rdoFloppy.Checked) // floppy — op.Bus already holds "fdc"
+                {
+                    op.Kind = "floppy";
+                    op.SourceType = "file";
+                    op.Format = "raw";
+                    op.Source = path;
                 }
                 else // cdrom — op.Bus already holds the optical bus chosen above
                 {

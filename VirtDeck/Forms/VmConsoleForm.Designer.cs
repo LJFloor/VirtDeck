@@ -11,6 +11,7 @@ namespace VirtDeck.Forms
         private ToolStripDropDownButton btnDisplay;
         private ToolStripDropDownButton btnAudio;
         private ToolStripDropDownButton btnCdDvd;
+        private ToolStripDropDownButton btnFloppy;
         private ToolStripButton btnUsb;
         private ToolStripButton btnLog;
         private ToolStripMenuItem menuStart;
@@ -18,6 +19,7 @@ namespace VirtDeck.Forms
         private ToolStripMenuItem menuForceStop;
         private ToolStripMenuItem menuReboot;
         private ToolStripMenuItem cdSelectLocalItem;
+        private ToolStripMenuItem floppySelectLocalItem;
         private ToolStripMenuItem showHostCursorItem;
         private ToolStripMenuItem useLzCompressionItem;
         private ToolStripMenuItem useRawBitmapsItem;
@@ -46,6 +48,7 @@ namespace VirtDeck.Forms
             btnDisplay = new ToolStripDropDownButton();
             btnAudio = new ToolStripDropDownButton();
             btnCdDvd = new ToolStripDropDownButton();
+            btnFloppy = new ToolStripDropDownButton();
             menuStart = new ToolStripMenuItem();
             menuShutdown = new ToolStripMenuItem();
             menuForceStop = new ToolStripMenuItem();
@@ -167,6 +170,23 @@ namespace VirtDeck.Forms
             cdGuestIsoItem.Click += cdGuestIso_Click;
             btnCdDvd.DropDownItems.AddRange(new ToolStripItem[] { cdEjectItem, cdSelectItem, cdGuestIsoItem });
 
+            // Floppy — only shown when the VM has a floppy drive (set in code after connect)
+            btnFloppy.Text = "Floppy";
+            btnFloppy.ShowDropDownArrow = true;
+            btnFloppy.AutoToolTip = false;
+            btnFloppy.Image = AppIcons.Get("drive");
+            btnFloppy.Enabled = false;
+            btnFloppy.ToolTipText = "This VM has no floppy drive — add one in the editor while the VM is shut off.";
+            var floppyEjectItem = new ToolStripMenuItem("Eject") { Image = AppIcons.Get("control_stop") };
+            floppyEjectItem.Click += floppyEject_Click;
+            var floppySelectItem = new ToolStripMenuItem("Select file") { Image = AppIcons.Get("drive") };
+            var floppySelectServerItem = new ToolStripMenuItem("On the server…");
+            floppySelectServerItem.Click += floppySelectServer_Click;
+            floppySelectLocalItem = new ToolStripMenuItem("Local machine…");
+            floppySelectLocalItem.Click += floppySelectLocal_Click;
+            floppySelectItem.DropDownItems.AddRange(new ToolStripItem[] { floppySelectServerItem, floppySelectLocalItem });
+            btnFloppy.DropDownItems.AddRange(new ToolStripItem[] { floppyEjectItem, floppySelectItem });
+
             // USB — always shown; enabled while connected. Ensures the VM has redirect channels
             // on first use, then opens the device picker.
             btnUsb = new ToolStripButton();
@@ -186,7 +206,7 @@ namespace VirtDeck.Forms
             btnLog.Click += (_, _) => LogForm.ShowLog();
 
             toolStrip.Items.AddRange(new ToolStripItem[]
-                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnAudio, btnCdDvd, btnUsb, btnLog });
+                { btnPower, btnKeyboard, btnMouse, btnDisplay, btnAudio, btnCdDvd, btnFloppy, btnUsb, btnLog });
 
             // displayControl
             displayControl.Dock = DockStyle.Fill;

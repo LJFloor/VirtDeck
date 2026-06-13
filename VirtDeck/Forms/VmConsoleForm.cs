@@ -26,6 +26,8 @@ namespace VirtDeck.Forms
         // CD/DVD media (set after connect when the VM has an optical drive)
         private string? _cdromTarget;
         private string? _cdromBus;
+        // Floppy media (set after connect when the VM has a floppy drive; bus is always fdc)
+        private string? _floppyTarget;
         private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers an audio channel
         private readonly List<IsoHttpServer> _isoServers = new(); // streamed "Local machine" media; alive while open
         private const string GuestVirtioUrl =
@@ -35,6 +37,8 @@ namespace VirtDeck.Forms
             "/var/lib/libvirt/images/" + GuestVirtioUrl[(GuestVirtioUrl.LastIndexOf('/') + 1)..];
         private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
         private const string CdromTip = "Eject or change the VM's CD/DVD media.";
+        private const string NoFloppyTip = "This VM has no floppy drive — add one in the editor while the VM is shut off.";
+        private const string FloppyTip = "Eject or change the VM's floppy media.";
         private bool _settingsLoaded;
         private Size? _lastResolution;
         private bool _autoFitted;
@@ -185,8 +189,11 @@ namespace VirtDeck.Forms
         private void ApplyCurlAvailability()
         {
             if (_virsh.QemuCurlAvailable) return;
+            const string note = "Local machine… (QEMU curl driver not loaded — install qemu-block-extra)";
             cdSelectLocalItem.Enabled = false;
-            cdSelectLocalItem.Text = "Local machine… (QEMU curl driver not loaded — install qemu-block-extra)";
+            cdSelectLocalItem.Text = note;
+            floppySelectLocalItem.Enabled = false;
+            floppySelectLocalItem.Text = note;
         }
 
         private async Task TryConnectOrShowStatus()
@@ -619,6 +626,22 @@ namespace VirtDeck.Forms
                 btnCdDvd.Enabled = true;
                 btnCdDvd.ToolTipText = CdromTip;
             }
+
+            if (!live)
+            {
+                btnFloppy.Enabled = false;
+                btnFloppy.ToolTipText = "Start the VM to manage floppy media.";
+            }
+            else if (_floppyTarget == null)
+            {
+                btnFloppy.Enabled = false;
+                btnFloppy.ToolTipText = NoFloppyTip;
+            }
+            else
+            {
+                btnFloppy.Enabled = true;
+                btnFloppy.ToolTipText = FloppyTip;
+            }
         }
 
         private async Task DetectCdromAsync()
@@ -627,11 +650,13 @@ namespace VirtDeck.Forms
             {
                 var cfg = await Task.Run(() => _virsh.GetVmConfig(_vmName));
                 var cd = cfg.Disks.FirstOrDefault(d => d.IsCdrom);
+                var fd = cfg.Disks.FirstOrDefault(d => d.IsFloppy);
                 RunUi(() =>
                 {
                     if (_closing) return;
                     _cdromTarget = cd?.Target;
                     _cdromBus = cd == null ? null : (string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus);
+                    _floppyTarget = fd?.Target;
                     _hasSoundDevice = cfg.HasSoundDevice;
                     UpdateToolbarState();
                 });
@@ -676,6 +701,47 @@ namespace VirtDeck.Forms
                 server.Start(local, _ssh.Client);
                 lock (_isoServers) _isoServers.Add(server);
                 _virsh.UpdateCdromNetwork(_vmName, t, bus, server.RemoteUrl, live: true);
+            });
+        }
+
+        // ---- Floppy media (mirrors CD/DVD, fdc bus) ------------------------
+
+        private void floppyEject_Click(object? sender, EventArgs e)
+        {
+            if (_floppyTarget is not { } t) return;
+            RunMediaAction("Eject floppy",
+                () => _virsh.EjectMedia(_vmName, t, live: true),
+                () => _virsh.EjectMedia(_vmName, t, live: false));
+        }
+
+        private void floppySelectServer_Click(object? sender, EventArgs e)
+        {
+            if (_floppyTarget is not { } t) return;
+            using var dlg = new RemoteFileBrowserDialog(_virsh, "/var/lib/libvirt/images",
+                "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*", false, "Select floppy on the server");
+            if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedPath is not { } vfd) return;
+            RunMediaAction("Insert floppy",
+                () => _virsh.ChangeMedia(_vmName, t, vfd, live: true),
+                () => _virsh.ChangeMedia(_vmName, t, vfd, live: false));
+        }
+
+        private void floppySelectLocal_Click(object? sender, EventArgs e)
+        {
+            if (_floppyTarget is not { } t) return;
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
+                Title = "Select a floppy image on this PC",
+                CheckFileExists = true,
+            };
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+            var local = ofd.FileName;
+            RunMediaAction("Insert floppy (streamed)", () =>
+            {
+                var server = new IsoHttpServer();
+                server.Start(local, _ssh.Client);
+                lock (_isoServers) _isoServers.Add(server);
+                _virsh.UpdateFloppyNetwork(_vmName, t, server.RemoteUrl, live: true);
             });
         }
 

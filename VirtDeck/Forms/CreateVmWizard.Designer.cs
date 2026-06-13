@@ -32,6 +32,15 @@ namespace VirtDeck.Forms
         private TextBox txtIsoUrl;
         private TextBox txtLocalIso;
         private Button btnBrowseLocal;
+        private Label lblFloppy;
+        private Panel pnlFloppyTypeRadios;
+        private RadioButton rdoFloppyServer;
+        private RadioButton rdoFloppyUrl;
+        private RadioButton rdoFloppyStream;
+        private VirtDeck.Controls.RemotePathTextBox floppyPicker;
+        private TextBox txtFloppyUrl;
+        private TextBox txtLocalFloppy;
+        private Button btnBrowseLocalFloppy;
         private Label lblHint;
 
         private Panel pnlNetwork;
@@ -87,6 +96,15 @@ namespace VirtDeck.Forms
             txtIsoUrl = new TextBox();
             txtLocalIso = new TextBox();
             btnBrowseLocal = new Button();
+            lblFloppy = new Label();
+            pnlFloppyTypeRadios = new Panel();
+            rdoFloppyServer = new RadioButton();
+            rdoFloppyUrl = new RadioButton();
+            rdoFloppyStream = new RadioButton();
+            floppyPicker = new VirtDeck.Controls.RemotePathTextBox();
+            txtFloppyUrl = new TextBox();
+            txtLocalFloppy = new TextBox();
+            btnBrowseLocalFloppy = new Button();
             lblHint = new Label();
             pnlNetwork = new Panel();
             btnAddNic = new Button();
@@ -120,7 +138,7 @@ namespace VirtDeck.Forms
 
             // ---- Page 1: General ----
             pnlGeneral.Location = new Point(12, 44);
-            pnlGeneral.Size = new Size(676, 384);
+            pnlGeneral.Size = new Size(676, 480);
             lblName.Text = "Name:";
             lblName.Location = new Point(4, 12);
             lblName.AutoSize = true;
@@ -200,8 +218,45 @@ namespace VirtDeck.Forms
             btnBrowseLocal.Size = new Size(82, 25);
             btnBrowseLocal.Visible = false;
             btnBrowseLocal.Click += btnBrowseLocal_Click;
-            lblHint.Text = "Leave the media empty to set it up later. The ISO appears as a CD-ROM on the Storage page.";
-            lblHint.Location = new Point(4, 280);
+
+            // Install floppy (optional) — a parallel block to the ISO above, e.g. a Windows XP F6 driver .vfd.
+            lblFloppy.Text = "Install floppy (optional):";
+            lblFloppy.Location = new Point(4, 284);
+            lblFloppy.AutoSize = true;
+            pnlFloppyTypeRadios.Location = new Point(0, 303);
+            pnlFloppyTypeRadios.Size = new Size(676, 28);
+            rdoFloppyServer.Text = "File on server";
+            rdoFloppyServer.Location = new Point(8, 5);
+            rdoFloppyServer.AutoSize = true;
+            rdoFloppyServer.Checked = true;
+            rdoFloppyServer.CheckedChanged += FloppyMode_Changed;
+            rdoFloppyUrl.Text = "Network URL";
+            rdoFloppyUrl.Location = new Point(140, 5);
+            rdoFloppyUrl.AutoSize = true;
+            rdoFloppyUrl.CheckedChanged += FloppyMode_Changed;
+            rdoFloppyStream.Text = "Stream from this PC";
+            rdoFloppyStream.Location = new Point(268, 5);
+            rdoFloppyStream.AutoSize = true;
+            rdoFloppyStream.CheckedChanged += FloppyMode_Changed;
+            pnlFloppyTypeRadios.Controls.AddRange(new Control[] { rdoFloppyServer, rdoFloppyUrl, rdoFloppyStream });
+            // The three inputs share the same row; only one is visible at a time.
+            floppyPicker.Location = new Point(8, 336);
+            floppyPicker.Size = new Size(640, 23);
+            txtFloppyUrl.Location = new Point(8, 336);
+            txtFloppyUrl.Size = new Size(640, 23);
+            txtFloppyUrl.Visible = false;
+            txtLocalFloppy.Location = new Point(8, 336);
+            txtLocalFloppy.Size = new Size(548, 23);
+            txtLocalFloppy.ReadOnly = true;
+            txtLocalFloppy.Visible = false;
+            btnBrowseLocalFloppy.Text = "Browse…";
+            btnBrowseLocalFloppy.Location = new Point(560, 335);
+            btnBrowseLocalFloppy.Size = new Size(82, 25);
+            btnBrowseLocalFloppy.Visible = false;
+            btnBrowseLocalFloppy.Click += btnBrowseLocalFloppy_Click;
+
+            lblHint.Text = "Leave the media empty to set it up later. The ISO appears as a CD-ROM and the floppy as an fdc drive on the Storage page.";
+            lblHint.Location = new Point(4, 372);
             lblHint.Size = new Size(660, 40);
             lblHint.ForeColor = SystemColors.GrayText;
             pnlGeneral.Controls.AddRange(new Control[]
@@ -210,12 +265,14 @@ namespace VirtDeck.Forms
                 lblOs, cboOs,
                 lblFirmware, pnlFirmwareRadios,
                 lblIso, pnlIsoTypeRadios,
-                isoPicker, txtIsoUrl, txtLocalIso, btnBrowseLocal, lblHint
+                isoPicker, txtIsoUrl, txtLocalIso, btnBrowseLocal,
+                lblFloppy, pnlFloppyTypeRadios,
+                floppyPicker, txtFloppyUrl, txtLocalFloppy, btnBrowseLocalFloppy, lblHint
             });
 
             // ---- Page 2: Network ----
             pnlNetwork.Location = new Point(12, 44);
-            pnlNetwork.Size = new Size(676, 384);
+            pnlNetwork.Size = new Size(676, 480);
             pnlNetwork.Visible = false;
             btnAddNic.Text = "Add…";
             btnAddNic.Image = AppIcons.Get("add");
@@ -232,7 +289,7 @@ namespace VirtDeck.Forms
             btnRemoveNic.Location = new Point(98, 6);
             btnRemoveNic.Click += btnRemoveNic_Click;
             lvNics.Location = new Point(4, 40);
-            lvNics.Size = new Size(668, 340);
+            lvNics.Size = new Size(668, 436);
             lvNics.View = View.Details;
             lvNics.FullRowSelect = true;
             lvNics.MultiSelect = false;
@@ -244,7 +301,7 @@ namespace VirtDeck.Forms
 
             // ---- Page 3: Storage ----
             pnlStorage.Location = new Point(12, 44);
-            pnlStorage.Size = new Size(676, 384);
+            pnlStorage.Size = new Size(676, 480);
             pnlStorage.Visible = false;
             btnAddDisk.Text = "Add…";
             btnAddDisk.Image = AppIcons.Get("add");
@@ -268,7 +325,7 @@ namespace VirtDeck.Forms
             btnRemoveDisk.Location = new Point(148, 6);
             btnRemoveDisk.Click += btnRemoveDisk_Click;
             lvDisks.Location = new Point(4, 40);
-            lvDisks.Size = new Size(668, 340);
+            lvDisks.Size = new Size(668, 436);
             lvDisks.View = View.Details;
             lvDisks.FullRowSelect = true;
             lvDisks.MultiSelect = false;
@@ -312,7 +369,7 @@ namespace VirtDeck.Forms
             pnlFooter.Controls.Add(pnlFooterLine);
 
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(700, 480);
+            ClientSize = new Size(700, 576);
             Text = "New Virtual Machine";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;

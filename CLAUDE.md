@@ -46,7 +46,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 
 | Property | Check | Used by |
 |---|---|---|
-| `QemuCurlAvailable` | `find /usr/lib* -name block-curl.so` + qemu help | Create wizard + console — disables HTTP/stream ISO |
+| `QemuCurlAvailable` | `find /usr/lib* -name block-curl.so` + qemu help | Create wizard + editor + console — disables HTTP/stream ISO **and** floppy |
 | `VirtSparseAvailable` | `which virt-sparsify` | Export dialog — disables sparse checkbox |
 | `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VmListForm` |
 
@@ -89,6 +89,19 @@ QUIC/GLZ at runtime: `DisplayChannel` advertises `DISPLAY_CAP_PREF_COMPRESSION` 
 `<image compression>` change or restart**. The console's **Display ▸ Low bandwidth (LZ) / Raw** items send this
 message live (`SpiceSession.SetPreferredCompression`). Porting QUIC/GLZ is only needed to ride the server's
 native `auto_glz` for better bandwidth — not required for correctness.
+
+## Removable media (ISO / floppy)
+
+Optical (`.iso`, `device='cdrom'`) and floppy (`.vfd`, `device='floppy'` on the `fdc` bus, target `fda`) media
+share one pipeline. Each can be a **file on the server**, a **network URL**, or **streamed from this PC**: the
+local file is served by `Services/IsoHttpServer` (file-agnostic — reused as-is for `.vfd`) over an SSH
+reverse-forward, and QEMU pulls it via its curl block driver from a `<disk type='network'>` element
+(`VirshService.BuildNetworkMediaXml`, emitted `<readonly/>`). Streaming is gated by `QemuCurlAvailable`.
+Change/eject reuse `virsh change-media`/`--eject` (generic by target). The Create-VM wizard (install ISO +
+install floppy), the editor's disk context menu (Change ISO/floppy ▸ server/local, Eject), and the console's
+**CD/DVD** and **Floppy** toolbar dropdowns are the four parity surfaces. Caveat: the `fdc` controller is
+native on `i440fx` (the BIOS-only XP F6-driver-floppy case) but may be unavailable on `q35`/UEFI; a streamed
+floppy is read-only.
 
 ## USB redirection
 
