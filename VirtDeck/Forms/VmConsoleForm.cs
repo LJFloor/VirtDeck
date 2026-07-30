@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Microsoft.Win32;
 using SpiceClient;
 using SpiceClient.Channels;
 using SpiceClient.Protocol;
 using SpiceClient.Usb;
 using VirtDeck.Controls;
 using VirtDeck.Diagnostics;
+using VirtDeck.Imaging;
 using VirtDeck.Input;
 using VirtDeck.Services;
 
@@ -79,8 +79,6 @@ namespace VirtDeck.Forms
         private bool _clipboardListening;
         private volatile bool _suppressClipboardGrab; // ignore the WM_CLIPBOARDUPDATE from our own SetText
 
-        private const string RegistryKey = @"SOFTWARE\VirtDeck";
-
         public VmConsoleForm(SshConnectionManager ssh, VirshService virsh, string vmName)
         {
             _ssh = ssh;
@@ -147,20 +145,20 @@ namespace VirtDeck.Forms
             var uuid = GetVmUuid();
             if (uuid == null) return;
             _settingsLoaded = true;
-            using var key = Registry.CurrentUser.OpenSubKey($@"{RegistryKey}\VMs\{uuid}");
-            if (key == null) return;
-            if (key.GetValue("ShowHostCursor") is int h && h == 1)
+
+            if (!AppSettings.Current.Vms.TryGetValue(uuid, out var s)) return;
+            if (s.ShowHostCursor)
             {
                 showHostCursorItem.Checked = true;
                 displayControl.Policy = SpiceDisplayControl.CursorPolicy.HostCursor;
             }
-            if (key.GetValue("Maximized") is int m && m == 1)
+            if (s.Maximized)
             {
                 _lastWindowState = FormWindowState.Maximized;
                 WindowState = FormWindowState.Maximized;   // restore maximized for this VM
             }
-            // Audio is on by default; only a saved value of 1 starts muted.
-            btnAudio.Checked = key.GetValue("AudioMute") is int am && am == 1;
+            // Audio is on by default; only a saved mute starts silent.
+            btnAudio.Checked = s.AudioMute;
             UpdateAudioButton();
         }
 
@@ -168,10 +166,12 @@ namespace VirtDeck.Forms
         {
             var uuid = GetVmUuid();
             if (uuid == null) return;
-            using var key = Registry.CurrentUser.CreateSubKey($@"{RegistryKey}\VMs\{uuid}");
-            key.SetValue("ShowHostCursor", showHostCursorItem.Checked ? 1 : 0, RegistryValueKind.DWord);
-            key.SetValue("Maximized", _lastWindowState == FormWindowState.Maximized ? 1 : 0, RegistryValueKind.DWord);
-            key.SetValue("AudioMute", btnAudio.Checked ? 1 : 0, RegistryValueKind.DWord);
+            var settings = AppSettings.Current;
+            var s = settings.ForVm(uuid);
+            s.ShowHostCursor = showHostCursorItem.Checked;
+            s.Maximized = _lastWindowState == FormWindowState.Maximized;
+            s.AudioMute = btnAudio.Checked;
+            settings.Save();
         }
 
         // ---- Lifecycle -----------------------------------------------------
@@ -569,7 +569,7 @@ namespace VirtDeck.Forms
             while (sw.ElapsedMilliseconds < timeoutMs && !_closing)
             {
                 var u = _session?.Usb;
-                if (u != null && (u.ReadySlots > 0 || !u.Available || !u.UsbDkAvailable))
+                if (u != null && (u.ReadySlots > 0 || !u.Available || !u.CaptureAvailable))
                     return u;
                 await Task.Delay(150);
             }
@@ -940,7 +940,13 @@ namespace VirtDeck.Forms
 
         private void Screenshot_Click(object? sender, EventArgs e)
         {
-            var bmp = _session?.Framebuffer?.Snapshot();
+            // Take the pixels and their dimensions together — a resolution change between the two
+            // would otherwise reinterpret the buffer at the wrong size.
+            byte[]? pixels = null;
+            int shotW = 0, shotH = 0;
+            if (_session?.Framebuffer is { } fb) pixels = fb.SnapshotBgra(out shotW, out shotH);
+
+            var bmp = GdiBgra.ToBitmap(pixels, shotW, shotH);
             if (bmp == null)
             {
                 toolStripStatus.Text = "Screenshot: nothing to capture yet.";

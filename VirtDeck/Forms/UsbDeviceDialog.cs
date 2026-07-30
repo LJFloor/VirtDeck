@@ -90,7 +90,7 @@ namespace VirtDeck.Forms
 
         private void UpdateStatus()
         {
-            if (!_usb.Available || !_usb.UsbDkAvailable)
+            if (!_usb.Available || !_usb.CaptureAvailable)
             {
                 lblStatus.Text = _usb.UnavailableReason ?? "USB redirection is unavailable.";
                 return;
@@ -109,7 +109,7 @@ namespace VirtDeck.Forms
         {
             btnRefresh.Enabled = true;
             var d = SelectedDevice();
-            bool redirectable = _usb.Available && _usb.UsbDkAvailable;
+            bool redirectable = _usb.Available && _usb.CaptureAvailable;
             btnRedirect.Enabled = redirectable && d is { IsRedirected: false } && _usb.FreeSlots > 0;
             btnRelease.Enabled = redirectable && d is { IsRedirected: true };
         }

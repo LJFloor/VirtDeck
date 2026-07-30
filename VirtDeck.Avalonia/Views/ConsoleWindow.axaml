@@ -1,0 +1,73 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.ConsoleWindow"
+        Title="Console"
+        Width="1024" Height="768"
+        WindowStartupLocation="CenterScreen"
+        Background="#FF1E1F22">
+  <DockPanel>
+
+    <Border DockPanel.Dock="Top" Padding="6" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+
+        <Button Name="PowerButton" Content="Power ▾">
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem Name="ShutdownItem" Header="Shut down (ACPI)" />
+              <MenuItem Name="RebootItem" Header="Reboot" />
+              <Separator />
+              <MenuItem Name="ForceOffItem" Header="Force off" />
+              <MenuItem Name="ResetItem" Header="Reset" />
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+
+        <Button Name="KeyboardButton" Content="Keyboard ▾">
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem Name="CtrlAltDelItem" Header="Ctrl+Alt+Del" />
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+
+        <Button Name="DisplayButton" Content="Display ▾">
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem Name="LzItem" Header="Low bandwidth (LZ)" ToggleType="Radio" GroupName="compression" />
+              <MenuItem Name="RawItem" Header="Raw (uncompressed)" ToggleType="Radio" GroupName="compression" />
+              <Separator />
+              <MenuItem Name="FitWindowItem" Header="Fit window to guest" />
+              <MenuItem Name="ShowHostCursorItem" Header="Show host cursor" ToggleType="CheckBox" />
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+
+        <Border Width="1" Margin="4,2" Background="#33808080" />
+        <Button Name="ReconnectButton" Content="Reconnect" />
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="10,4"
+            Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+      <DockPanel>
+        <TextBlock Name="GrabText" DockPanel.Dock="Right" Opacity="0.7" />
+        <TextBlock Name="StatusText" />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <controls:SpiceDisplay Name="Display" />
+
+      <!-- Shown instead of the framebuffer when the guest is powered off. -->
+      <Border Name="OffOverlay" IsVisible="False" Background="#FF2B2D31">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+          <TextBlock Name="OffText" Text="This VM is powered off."
+                     Foreground="#FFDBDEE1" FontSize="18" HorizontalAlignment="Center" />
+          <Button Name="OverlayStartButton" Content="Start VM" HorizontalAlignment="Center" Classes="accent" />
+        </StackPanel>
+      </Border>
+    </Panel>
+
+  </DockPanel>
+</Window>

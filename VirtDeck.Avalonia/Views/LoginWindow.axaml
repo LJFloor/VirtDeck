@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.LoginWindow"
+        Title="VirtDeck — Connect"
+        Width="400" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen" CanResize="False">
+  <StackPanel Margin="24" Spacing="6">
+    <TextBlock Text="Connect to a libvirt host over SSH" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+    <TextBlock Text="Host" />
+    <TextBox Name="HostBox" PlaceholderText="hostname or IP" />
+
+    <TextBlock Text="Username" Margin="0,8,0,0" />
+    <TextBox Name="UserBox" />
+
+    <TextBlock Text="Password" Margin="0,8,0,0" />
+    <TextBox Name="PasswordBox" PasswordChar="•" />
+
+    <TextBlock Name="StatusText" Foreground="#c0392b" TextWrapping="Wrap" Margin="0,12,0,0" />
+
+    <Button Name="ConnectButton" Content="Connect" IsDefault="True"
+            HorizontalAlignment="Right" MinWidth="110" Margin="0,12,0,0" Classes="accent" />
+  </StackPanel>
+</Window>

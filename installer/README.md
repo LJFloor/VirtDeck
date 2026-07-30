@@ -24,9 +24,8 @@ dotnet publish VmManager.App\VmManager.App.csproj -c Release -r win-x64 --self-c
 ```
 
 ## Notes
-- The app is framework-dependent: the installer checks for the **.NET 8 Desktop Runtime (x64)**
-  and points the user to the download if it is missing. To remove that prerequisite, publish
-  with `--self-contained true` instead (larger output).
+- The app is published **self-contained** (`--self-contained true`), so the .NET 10 runtime is
+  bundled and the installer has no runtime prerequisite to check.
 - The installer requires admin (it installs a kernel driver) and is x64-only.
 - On uninstall, UsbDk is intentionally left installed — it is a shared machine-wide driver that
   other SPICE clients (virt-viewer/remote-viewer) may rely on.

@@ -1,14 +1,12 @@
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
+using SkiaSharp;
 using SpiceClient.Protocol;
 
 namespace SpiceClient.Imaging;
 
 /// <summary>
 /// SPICE image decoders. All produce top-down BGRA (<see cref="DecodedImage"/>).
-/// BITMAP (bitmap.js), JPEG (System.Drawing), and LZ_RGB (lz.js) are supported;
+/// BITMAP (bitmap.js), JPEG (Skia), and LZ_RGB (lz.js) are supported;
 /// QUIC / GLZ are deferred (return null → caller surfaces the compression-off hint).
 ///
 /// Note: spice-html5 swaps BGRA→RGBA for the HTML canvas; we target a BGRA
@@ -39,24 +37,34 @@ public static class ImageDecoders
         return new DecodedImage(x, y, outBuf);
     }
 
-    /// <summary>SPICE_IMAGE_TYPE_JPEG via System.Drawing.</summary>
-    public static DecodedImage DecodeJpeg(byte[] jpeg)
+    /// <summary>
+    /// SPICE_IMAGE_TYPE_JPEG (and MJPEG stream frames) via Skia. Decodes straight into a
+    /// top-down BGRA buffer — no intermediate bitmap and no channel swap.
+    /// Returns null on a corrupt or unreadable frame; callers skip it.
+    /// </summary>
+    public static DecodedImage? DecodeJpeg(byte[] jpeg)
     {
-        using var ms = new MemoryStream(jpeg);
-        using var src = new Bitmap(ms);
-        int w = src.Width, h = src.Height;
-        using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp))
-            g.DrawImageUnscaled(src, 0, 0);
+        using var data = SKData.CreateCopy(jpeg);
+        using var codec = SKCodec.Create(data);
+        if (codec == null) return null;
 
+        int w = codec.Info.Width, h = codec.Info.Height;
+        if (w <= 0 || h <= 0) return null;
+
+        // Opaque BGRA, rowBytes = w*4 (the SKImageInfo default) — exactly the framebuffer layout.
+        var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Opaque);
         var outBuf = new byte[w * h * 4];
-        var bd = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        var handle = GCHandle.Alloc(outBuf, GCHandleType.Pinned);
         try
         {
-            for (int row = 0; row < h; row++)
-                Marshal.Copy(bd.Scan0 + row * bd.Stride, outBuf, row * w * 4, w * 4);
+            var result = codec.GetPixels(info, handle.AddrOfPinnedObject());
+            // IncompleteInput still leaves the decoded prefix in the buffer — better a partial
+            // frame than a dropped one, matching the old GDI+ behaviour on truncated data.
+            if (result != SKCodecResult.Success && result != SKCodecResult.IncompleteInput)
+                return null;
         }
-        finally { bmp.UnlockBits(bd); }
+        finally { handle.Free(); }
+
         return new DecodedImage(w, h, outBuf);
     }
 

@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Threading;
 using SpiceClient.Audio;
 using SpiceClient.Channels;
@@ -28,7 +27,7 @@ public sealed class SpiceSession : IDisposable
     public InputsChannel? Inputs { get; private set; }
     public DisplayChannel? Display { get; private set; }
 
-    private WaveOutPlayer? _audio;
+    private IAudioSink? _audio;
     private bool _audioMutedPref;
 
     /// <summary>
@@ -44,7 +43,7 @@ public sealed class SpiceSession : IDisposable
     /// <summary>
     /// USB redirection manager — non-null once the host advertises at least one usbredir
     /// channel (i.e. the VM has &lt;redirdev&gt; devices). Null means the VM has no redirect
-    /// channels. Check <see cref="UsbDeviceManager.UsbDkAvailable"/> for client-side readiness.
+    /// channels. Check <see cref="UsbDeviceManager.CaptureAvailable"/> for client-side readiness.
     /// </summary>
     public UsbDeviceManager? Usb => _usb;
 
@@ -234,7 +233,7 @@ public sealed class SpiceSession : IDisposable
     internal void AudioStart(int frequency, int channels)
     {
         if (Volatile.Read(ref _disposed) == 1) return;
-        var audio = _audio ??= new WaveOutPlayer(Log);
+        var audio = _audio ??= AudioSinks.Create(Log);
         audio.Configure(frequency, channels);
         audio.Muted = _audioMutedPref;
         AudioStarted?.Invoke();

@@ -1,4 +1,5 @@
 using System.IO;
+using VirtDeck.Services;
 
 namespace VirtDeck
 {
@@ -19,6 +20,10 @@ namespace VirtDeck
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => LogCrash("UI thread", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash("background thread", e.ExceptionObject as Exception);
+
+            // Settings moved from HKCU\SOFTWARE\VirtDeck to a JSON file (shared with the Avalonia
+            // front-end). Bring an existing registry configuration forward on first run.
+            AppSettings.LegacyImporter = LegacyRegistryImport.Apply;
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);

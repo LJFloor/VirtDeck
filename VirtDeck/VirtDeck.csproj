@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -16,11 +16,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- System.IO.Pipelines (ExportVmDialog's streaming tar) is in the net10.0 shared framework. -->
     <PackageReference Include="SSH.NET" Version="2024.2.0" />
-    <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Services, models and the SPICE engine are shared with the Avalonia front-end; only the
+         WinForms UI and its Win32 interop live in this project. -->
+    <ProjectReference Include="..\VirtDeck.Core\VirtDeck.Core.csproj" />
     <ProjectReference Include="..\SpiceClient\SpiceClient.csproj" />
   </ItemGroup>
 
@@ -29,9 +32,6 @@
     <!-- The window icon, loaded at runtime via AppIcons.App and set on every AppForm. The
          same .ico is also baked into the exe as the shell icon by <ApplicationIcon> above. -->
     <EmbeddedResource Include="Icons\appicon.ico" />
-    <!-- Fallback osinfo short-id → label map, read by OsLabelCatalog when the host has no
-         live osinfo-query to enrich the Create-VM OS dropdown. -->
-    <EmbeddedResource Include="Data\*.json" />
   </ItemGroup>
 
   <!-- Native USB redirection libraries (x64), hand-staged outside the project (see

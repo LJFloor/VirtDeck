@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.VmListWindow"
+        x:DataType="vm:VmRow"
+        Title="VirtDeck"
+        Width="840" Height="520"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.Resources>
+    <!-- One column layout shared by the header and every row, so they stay aligned. -->
+    <x:Double x:Key="ColName">260</x:Double>
+    <x:Double x:Key="ColState">110</x:Double>
+    <x:Double x:Key="ColCpu">70</x:Double>
+    <x:Double x:Key="ColMem">110</x:Double>
+  </Window.Resources>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Name="ConsoleButton" Content="Console" Classes="accent" />
+        <Border Width="1" Margin="4,2" Background="#33808080" />
+        <Button Name="StartButton" Content="Start" />
+        <Button Name="StopButton" Content="Shut down" />
+        <Button Name="ForceStopButton" Content="Force off" />
+        <Button Name="RebootButton" Content="Reboot" />
+        <Border Width="1" Margin="4,2" Background="#33808080" />
+        <Button Name="RefreshButton" Content="Refresh" />
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="10,5" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel>
+        <TextBlock Name="HostCapsText" DockPanel.Dock="Right" Opacity="0.7" />
+        <TextBlock Name="StatusText" />
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Top" Padding="12,6" Background="#11808080">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="Name"   Width="{StaticResource ColName}"  FontWeight="SemiBold" />
+        <TextBlock Text="State"  Width="{StaticResource ColState}" FontWeight="SemiBold" />
+        <TextBlock Text="vCPUs"  Width="{StaticResource ColCpu}"   FontWeight="SemiBold" />
+        <TextBlock Text="Memory" Width="{StaticResource ColMem}"   FontWeight="SemiBold" />
+        <TextBlock Text="Uptime" FontWeight="SemiBold" />
+      </StackPanel>
+    </Border>
+
+    <ListBox Name="VmList" SelectionMode="Single" Background="Transparent">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="vm:VmRow">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="{Binding Name}"   Width="{StaticResource ColName}"  TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}" />
+            <TextBlock Text="{Binding VCpus}"  Width="{StaticResource ColCpu}" />
+            <TextBlock Text="{Binding Memory}" Width="{StaticResource ColMem}" />
+            <TextBlock Text="{Binding Uptime}" Opacity="0.75" />
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+  </DockPanel>
+</Window>

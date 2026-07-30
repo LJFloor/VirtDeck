@@ -354,8 +354,11 @@ public sealed class MainChannel : SpiceChannel
             if (UseSelection) r.U32();
             if (r.Remaining >= 4 && r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT)
             {
-                var text = Encoding.UTF8.GetString(r.Rest());
-                Session.ClipboardTextFromGuestRaise(text.Replace("\r\n", "\n").Replace("\n", "\r\n"));
+                // The agent sends LF; normalise to the host's own line ending so pasted text
+                // isn't single-line on Windows or full of stray CRs on Linux.
+                var text = Encoding.UTF8.GetString(r.Rest()).Replace("\r\n", "\n");
+                if (Environment.NewLine != "\n") text = text.Replace("\n", Environment.NewLine);
+                Session.ClipboardTextFromGuestRaise(text);
             }
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST)

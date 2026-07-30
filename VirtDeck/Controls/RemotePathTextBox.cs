@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using VirtDeck.Forms;
 using VirtDeck.Services;
 
@@ -6,6 +7,10 @@ namespace VirtDeck.Controls
     /// <summary>
     /// A remote-path textbox with a trailing "…" button that opens the remote file browser.
     /// Typing in the box works without the dialog. Reused anywhere a host filesystem path is chosen.
+    ///
+    /// Every public property is marked <see cref="DesignerSerializationVisibility.Hidden"/>: the forms
+    /// in this app are laid out by hand (no VS designer, no .resx), so nothing is ever code-serialized
+    /// and the WinForms designer analyzer would otherwise flag each one.
     /// </summary>
     public sealed class RemotePathTextBox : UserControl
     {
@@ -24,16 +29,21 @@ namespace VirtDeck.Controls
         }
 
         /// <summary>Required for the "…" button to function; set after construction.</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public VirshService? Virsh { get; set; }
 
         /// <summary>Windows-style filter passed to the browser, e.g. "ISO images (*.iso)|*.iso|All files (*.*)|*.*".</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string Filter { get; set; } = "All files (*.*)|*.*";
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string DialogTitle { get; set; } = "Select File";
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool SelectMultiple { get; set; }
 
         /// <summary>The current path text.</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string Path
         {
             get => _text.Text;

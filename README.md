@@ -11,7 +11,7 @@ A Windows desktop app to manage libvirt/KVM virtual machines on a remote Linux h
 
 ### Client (Windows)
 - Windows 10/11 x64
-- .NET 8 runtime (or use the self-contained publish)
+- .NET 10 runtime (or use the self-contained publish)
 - Optional: **UsbDk** kernel driver for USB redirection (installed by the provided Inno Setup installer)
 
 ## Features

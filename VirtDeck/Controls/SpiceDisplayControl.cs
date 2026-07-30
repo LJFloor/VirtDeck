@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Windows.Forms;
 using SpiceClient;
 using SpiceClient.Imaging;
@@ -19,6 +20,9 @@ namespace VirtDeck.Controls
 
         private SpiceSession? _session;
         private SpiceFramebuffer? _fb;
+        // GDI+ view over _fb's pinned BGRA buffer — no copy, so compositing on the channel thread is
+        // visible to OnPaint directly. Must be disposed before the framebuffer, which owns the pin.
+        private Bitmap? _fbBitmap;
         private readonly System.Windows.Forms.Timer _repaintTimer;
         private volatile bool _frameDirty;
 
@@ -60,6 +64,10 @@ namespace VirtDeck.Controls
             session.CursorReset += OnCursorReset;
         }
 
+        // Hidden from designer serialization: this app lays its forms out by hand, so no property
+        // here is ever code-serialized.
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public CursorPolicy Policy
         {
             get => _policy;
@@ -100,17 +108,37 @@ namespace VirtDeck.Controls
             RunUI(() =>
             {
                 var prev = _fb;
+                var prevBitmap = _fbBitmap;
                 _fb = _session?.Framebuffer;
+                _fbBitmap = CreateView(_fb);
                 if (prev != null && !ReferenceEquals(prev, _fb))
+                {
+                    // Order matters: the bitmap points into the framebuffer's pinned buffer.
+                    prevBitmap?.Dispose();
                     prev.Dispose(); // safe: we're on the UI thread, no paint in flight
+                }
                 ResolutionChanged?.Invoke(w, h);
                 Invalidate();
             });
         }
 
+        /// <summary>
+        /// Builds a GDI+ bitmap aliasing the framebuffer's pinned buffer. Format32bppRgb (opaque)
+        /// so blits are a straight byte copy and GDI paints without alpha-blending — the desktop
+        /// surface has no meaningful alpha.
+        /// </summary>
+        private static Bitmap? CreateView(SpiceFramebuffer? fb)
+        {
+            if (fb == null || fb.Scan0 == IntPtr.Zero) return null;
+            try { return new Bitmap(fb.Width, fb.Height, fb.Stride, PixelFormat.Format32bppRgb, fb.Scan0); }
+            catch { return null; }
+        }
+
         /// <summary>Stops referencing the framebuffer (UI thread) before the session disposes it.</summary>
         public void ClearFramebuffer()
         {
+            _fbBitmap?.Dispose();
+            _fbBitmap = null;
             _fb = null;
             // Connection's gone: forget the guest's cursor state so the host arrow returns. Otherwise a
             // guest that had hidden its cursor leaves the blank (invisible) cursor stuck over the display.
@@ -126,7 +154,8 @@ namespace VirtDeck.Controls
             e.Graphics.Clear(Color.Black);
 
             var fb = _fb;
-            if (fb == null) return;
+            var view = _fbBitmap;
+            if (fb == null || view == null) return;
             try
             {
                 var origin = ImageOrigin(fb);
@@ -139,7 +168,7 @@ namespace VirtDeck.Controls
                 lock (fb.SyncRoot)
                 {
                     // Explicit pixel rect → 1:1 blit independent of the bitmap's DPI metadata.
-                    e.Graphics.DrawImage(fb.Bitmap, dst, src, GraphicsUnit.Pixel);
+                    e.Graphics.DrawImage(view, dst, src, GraphicsUnit.Pixel);
                 }
             }
             catch (Exception)
@@ -354,6 +383,8 @@ namespace VirtDeck.Controls
                     _session.CursorHidden -= OnCursorHidden;
                     _session.CursorReset -= OnCursorReset;
                 }
+                _fbBitmap?.Dispose();
+                _fbBitmap = null;
                 ClearSpiceCursor();
                 if (_blankCursor != null && _blankCursor != Cursors.Default)
                     _blankCursor.Dispose();

@@ -1,0 +1,192 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    Buttons and text fields in the JetBrains "Classic UI" register: flat fills, 1px hairline
+    borders, 3px corners and tight padding. Dark values are Darcula's own ramp (#4C5052 button
+    face, #45494A field face, #BBBBBB text, #365880 default button, #466D94 focus); Light follows
+    classic IntelliJ Light.
+
+    Merged into Application.Resources rather than Application.Styles: resource lookup reaches
+    Application.Resources before the FluentTheme's own dictionaries, so the TextControl* overrides
+    below deterministically win over Fluent's without needing /template/ selectors for every state.
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <ResourceDictionary x:Key="Dark">
+      <!-- Buttons -->
+      <SolidColorBrush x:Key="JbButtonBackground" Color="#FF4C5052" />
+      <SolidColorBrush x:Key="JbButtonBackgroundHover" Color="#FF55595B" />
+      <SolidColorBrush x:Key="JbButtonBackgroundPressed" Color="#FF43474A" />
+      <SolidColorBrush x:Key="JbButtonBackgroundDisabled" Color="#FF3C3F41" />
+      <SolidColorBrush x:Key="JbButtonBorder" Color="#FF5E6060" />
+      <SolidColorBrush x:Key="JbButtonBorderHover" Color="#FF6B6E6F" />
+      <SolidColorBrush x:Key="JbButtonBorderDisabled" Color="#FF4E5052" />
+      <SolidColorBrush x:Key="JbButtonForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="JbButtonForegroundDisabled" Color="#FF777777" />
+      <SolidColorBrush x:Key="JbButtonFocusBorder" Color="#FF466D94" />
+
+      <SolidColorBrush x:Key="JbDefaultButtonBackground" Color="#FF365880" />
+      <SolidColorBrush x:Key="JbDefaultButtonBackgroundHover" Color="#FF3D6493" />
+      <SolidColorBrush x:Key="JbDefaultButtonBackgroundPressed" Color="#FF2E4C70" />
+      <SolidColorBrush x:Key="JbDefaultButtonBorder" Color="#FF4C708C" />
+      <SolidColorBrush x:Key="JbDefaultButtonForeground" Color="#FFBBBBBB" />
+
+      <!-- Text fields: Fluent's own keys, repainted. The face does not change on hover or focus
+           (JetBrains only moves the border), so all three background keys are the same value. -->
+      <SolidColorBrush x:Key="TextControlBackground" Color="#FF45494A" />
+      <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FF45494A" />
+      <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FF45494A" />
+      <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#FF3C3F41" />
+
+      <SolidColorBrush x:Key="TextControlBorderBrush" Color="#FF646464" />
+      <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#FF7A7A7A" />
+      <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF466D94" />
+      <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#FF4E5052" />
+
+      <SolidColorBrush x:Key="TextControlForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#FF777777" />
+
+      <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF808080" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#FF808080" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#FF808080" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#FF5E6060" />
+
+      <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FF214283" />
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <!-- Buttons -->
+      <SolidColorBrush x:Key="JbButtonBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbButtonBackgroundHover" Color="#FFF0F0F0" />
+      <SolidColorBrush x:Key="JbButtonBackgroundPressed" Color="#FFE1E1E1" />
+      <SolidColorBrush x:Key="JbButtonBackgroundDisabled" Color="#FFF5F5F5" />
+      <SolidColorBrush x:Key="JbButtonBorder" Color="#FFC4C4C4" />
+      <SolidColorBrush x:Key="JbButtonBorderHover" Color="#FFADADAD" />
+      <SolidColorBrush x:Key="JbButtonBorderDisabled" Color="#FFDDDDDD" />
+      <SolidColorBrush x:Key="JbButtonForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="JbButtonForegroundDisabled" Color="#FF8C8C8C" />
+      <SolidColorBrush x:Key="JbButtonFocusBorder" Color="#FF4A88C7" />
+
+      <SolidColorBrush x:Key="JbDefaultButtonBackground" Color="#FF4A88C7" />
+      <SolidColorBrush x:Key="JbDefaultButtonBackgroundHover" Color="#FF5591CE" />
+      <SolidColorBrush x:Key="JbDefaultButtonBackgroundPressed" Color="#FF3F79B4" />
+      <SolidColorBrush x:Key="JbDefaultButtonBorder" Color="#FF3D77B0" />
+      <SolidColorBrush x:Key="JbDefaultButtonForeground" Color="#FFFFFFFF" />
+
+      <!-- Text fields -->
+      <SolidColorBrush x:Key="TextControlBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#FFF5F5F5" />
+
+      <SolidColorBrush x:Key="TextControlBorderBrush" Color="#FFC4C4C4" />
+      <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#FFADADAD" />
+      <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF4A88C7" />
+      <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#FFDDDDDD" />
+
+      <SolidColorBrush x:Key="TextControlForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FF000000" />
+      <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FF000000" />
+      <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#FF8C8C8C" />
+
+      <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF999999" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#FF999999" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#FF999999" />
+      <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#FFC4C4C4" />
+
+      <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FFA6D2FF" />
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- Shared metrics. The border stays 1px on focus — Fluent thickens it to an accent underline,
+       JetBrains just recolours it. -->
+  <CornerRadius x:Key="ControlCornerRadius">3</CornerRadius>
+  <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
+  <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
+  <Thickness x:Key="TextControlThemePadding">6,3</Thickness>
+  <x:Double x:Key="TextControlThemeMinHeight">26</x:Double>
+
+  <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+    <Setter Property="Background" Value="{DynamicResource JbButtonBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorder}" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Padding" Value="14,3" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="MinWidth" Value="72" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <!-- The border itself carries the focus colour, so Fluent's dashed adorner is redundant. -->
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Root"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            RecognizesAccessKey="True" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover">
+      <Setter Property="Background" Value="{DynamicResource JbButtonBackgroundHover}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorderHover}" />
+    </Style>
+
+    <Style Selector="^:pressed">
+      <Setter Property="Background" Value="{DynamicResource JbButtonBackgroundPressed}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorderHover}" />
+    </Style>
+
+    <Style Selector="^:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource JbButtonFocusBorder}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Background" Value="{DynamicResource JbButtonBackgroundDisabled}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorderDisabled}" />
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+    </Style>
+
+    <!-- Default button (Classes="accent"). Last so it wins over the neutral states above. -->
+    <Style Selector="^.accent">
+      <Setter Property="Background" Value="{DynamicResource JbDefaultButtonBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbDefaultButtonBorder}" />
+      <Setter Property="Foreground" Value="{DynamicResource JbDefaultButtonForeground}" />
+
+      <Style Selector="^:pointerover">
+        <Setter Property="Background" Value="{DynamicResource JbDefaultButtonBackgroundHover}" />
+      </Style>
+
+      <Style Selector="^:pressed">
+        <Setter Property="Background" Value="{DynamicResource JbDefaultButtonBackgroundPressed}" />
+      </Style>
+
+      <Style Selector="^:focus-visible">
+        <Setter Property="BorderBrush" Value="{DynamicResource JbButtonFocusBorder}" />
+      </Style>
+
+      <Style Selector="^:disabled">
+        <Setter Property="Background" Value="{DynamicResource JbButtonBackgroundDisabled}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorderDisabled}" />
+        <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+      </Style>
+    </Style>
+  </ControlTheme>
+
+</ResourceDictionary>

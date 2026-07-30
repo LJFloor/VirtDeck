@@ -5,22 +5,30 @@ Guidance for Claude Code when working in this repository.
 ## Build
 
 ```bash
-dotnet build VirtDeck.sln
+dotnet build VirtDeck.sln                                # on Windows
+dotnet build VirtDeck.sln -p:EnableWindowsTargeting=true # on Linux
 ```
 
-Two-project solution (.NET 8, `net8.0-windows`):
-- **SpiceClient** — a native, dependency-light SPICE protocol client library (no WinForms; uses `System.Drawing` for `Bitmap`/JPEG only).
-- **VirtDeck** — the WinForms desktop app (`WinExe`, assembly name `virtdeck`, x64). References SpiceClient + SSH.NET.
+Four projects (.NET 10):
+- **SpiceClient** (`net10.0`) — cross-platform SPICE protocol client library. No UI toolkit: it produces raw BGRA buffers. Uses SkiaSharp for JPEG decode and Concentus for Opus.
+- **VirtDeck.Core** (`net10.0`) — cross-platform services and models (`Services/`, `Models/`, `Diagnostics/`, `Imaging/PpmImage`). SSH.NET + `virsh` over SSH; no UI dependency. Namespaces are `VirtDeck.*` so both front-ends consume it without any `using` changes.
+- **VirtDeck.Avalonia** (`net10.0`) — the cross-platform UI (Windows + Linux). Assembly name `virtdeck`.
+- **VirtDeck** (`net10.0-windows`) — the original WinForms app, Windows-only. Being retired once Avalonia reaches feature parity.
 
-No tests yet.
+`EnableWindowsTargeting=true` lets the **whole** solution, WinForms included, compile-check on Linux — use it as the no-regression gate when changing shared code. It only proves compilation; Windows runtime behaviour (winmm audio, UsbDk) still needs a real Windows run.
+
+No tests yet. `dotnet run --project VirtDeck.Avalonia` is the fastest smoke test.
 
 ## What this is
 
-A WinForms app to manage libvirt/KVM VMs on a remote Linux host over SSH, with a **native C# SPICE console** (no WebView2, no spice-html5, no WebSocket bridge — raw TCP to the SSH-forwarded SPICE port).
+An app to manage libvirt/KVM VMs on a remote Linux host over SSH, with a **native C# SPICE console** (no WebView2, no spice-html5, no WebSocket bridge — raw TCP to the SSH-forwarded SPICE port).
+
+**Cross-platform status:** the engine, services, and the Avalonia console/VM-list run on Linux and Windows. Not yet ported to Avalonia (WinForms only): create/edit wizards, export, removable media, clipboard, USB picker, audio output on Linux. See `Phases 3-7` in the porting plan.
 
 It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via spice-html5 in WebView2 and broke with "Protocol Error" (the WebSocket↔TCP bridge mangled SPICE's binary framing). The native client deletes that failure mode. The SPICE protocol was ported field-for-field from the bundled spice-html5 source at `..\VmManager\VmManager\WebContent\src\*.js` — that JS is the authoritative wire-format reference.
 
-**Flow:** `LoginForm` → SSH connect → `VmListForm` → double-click/right-click VM → `VmConsoleForm` (native SPICE).
+**Flow (Avalonia):** `LoginWindow` → SSH connect → `VmListWindow` → double-click VM → `ConsoleWindow` (native SPICE).
+**Flow (WinForms):** `LoginForm` → SSH connect → `VmListForm` → double-click/right-click VM → `VmConsoleForm`.
 
 ## Architecture
 
@@ -29,12 +37,25 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Crypto/SpiceTicket` — RSA ticket auth: `RSA.ImportSubjectPublicKeyInfo` + `Encrypt(OaepSHA1)` of `password + "\0"` (server pubkey is a 162-byte DER SubjectPublicKeyInfo). Replaces spice-html5's hand-rolled OAEP.
 - `Transport/ChannelSocket` — one blocking `TcpClient` per channel; `ReadExact`; locked `Write`.
 - `Channels/SpiceChannel` (base) — per-channel socket + dedicated read thread; link handshake; common-message loop (SET_ACK→ACK_SYNC + ACK flow control, PING→PONG, NOTIFY). Subclasses: `MainChannel`, `DisplayChannel`, `InputsChannel`, `CursorChannel`.
-- `Imaging/` — `SpiceFramebuffer` (a `Format32bppArgb` Bitmap over a **pinned** BGRA byte buffer; all access under `SyncRoot`), `ImageDecoders` (BITMAP, JPEG, LZ_RGB; **QUIC/GLZ deferred → return null**), `DecodedImage`.
+- `Imaging/` — `SpiceFramebuffer` (a **pinned** top-down BGRA byte buffer exposed as `Pixels`/`Scan0`; all access under `SyncRoot`; toolkit-agnostic — the UI wraps or copies it), `ImageDecoders` (BITMAP, JPEG via Skia, LZ_RGB; **QUIC/GLZ deferred → return null**), `DecodedImage`, `BgraImage.EncodePng`.
+- `Audio/` — `IAudioSink` + `AudioSinks.Create()` picks the backend by platform: `WaveOutPlayer` (winmm) on Windows, `NullAudioSink` elsewhere until the PulseAudio backend lands.
+- `Interop/UsbNativeResolver` — maps the bare DllImport names to real filenames per platform (`libusb-1.0.dll` vs `libusb-1.0.so.0`). `LIBUSB_OPTION_USE_USBDK` is **Windows-only**; setting it elsewhere fails and would silently disable redirection, so `LibUsbContext` gates it (`CaptureAvailable`).
 - `SpiceSession` — facade: orchestrates channel bring-up, owns the framebuffer, raises events (`ResolutionChanged`, `FrameDirty`, `CursorSet/Hidden/Reset`, `Disconnected`, `StatusMessage`). Events fire on channel threads — subscribers must marshal.
 - `CursorShape` — decoded ALPHA cursor (BGRA + hotspot).
 
-### VirtDeck (WinForms)
-- `Services/` — `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker). Image compression is steered at the protocol level (see below), not via `virt-xml`.
+### VirtDeck.Core (shared, cross-platform)
+- `Services/` — `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `NbdServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level (see below), not via `virt-xml`.
+- `Services/AppSettings` — JSON settings at `%APPDATA%`/`~/.config` + `VirtDeck/settings.json`. **Replaces the old `HKCU\SOFTWARE\VirtDeck` registry storage**; `LegacyRegistryImport` migrates it once on Windows.
+- `Imaging/PpmImage` — `virsh screenshot` P6 decoder → raw BGRA.
+
+### VirtDeck.Avalonia (cross-platform UI)
+- `Controls/SpiceDisplay` — Avalonia `Control`. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; `Render` does a 1:1 `DrawImage` with interpolation `None`. Owns the exactly-one-cursor state machine. Avalonia's `Cursor(Bitmap, PixelPoint)` and `StandardCursorType.None` replace the WinForms `CursorInterop` HICON juggling entirely.
+- `Styles/JetBrainsClassic.axaml` — JetBrains Classic UI (Darcula / IntelliJ Light) trim for buttons and text fields: a replacement `Button` `ControlTheme` plus overrides of Fluent's `TextControl*` keys. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries — that is what makes the `TextControl*` overrides win without `/template/` selectors per state.
+- `Input/PhysicalKeyMap` — Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent — more correct than the WinForms VK table, which reads through the host layout.
+- `Input/IKeyboardGrab` — `X11KeyboardGrab` (`XGrabKeyboard`) on Linux so Alt+Tab/Super reach the guest; no-op elsewhere. **Best-effort by design** — the console must work without it. The grab **must** be issued on Avalonia's own X display connection (dug out of `Window.PlatformImpl` by reflection): X reports key events during an active grab only to the grabbing *client*, and a client is a connection — a grab on a private `XOpenDisplay` takes every key away from Avalonia and the console goes deaf while grabbed. If the display can't be resolved, report unsupported (no grab) rather than falling back to a private connection.
+
+### VirtDeck (WinForms, Windows-only, being retired)
+- `Imaging/GdiBgra` — wraps the shared BGRA buffers back into GDI+ bitmaps. The only place this front-end knows about pixel layout.
 - `Controls/SpiceDisplayControl` — custom `Control`: paints the framebuffer (1:1 `DrawImage`, double-buffered, ~60 Hz dirty-rect repaint timer), forwards mouse, and **owns all cursor assignment** (the exactly-one-cursor state machine).
 - `Input/WinFormsKeyMap` — VK → AT set-1 scancode. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js — NOT `0xE0XX`. Key-up high bit applied in `InputsChannel.SendKey`.
 - `Interop/CursorInterop` — builds a native `Cursor` (alpha + hotspot) via `CreateIconIndirect`; caller must `DestroyIcon` the HICON on replace/dispose.

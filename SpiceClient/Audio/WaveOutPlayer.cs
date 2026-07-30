@@ -1,9 +1,10 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace SpiceClient.Audio;
 
 /// <summary>
-/// Minimal streaming PCM sink over the Windows multimedia <c>waveOut</c> API (winmm.dll —
+/// Windows <see cref="IAudioSink"/>. Minimal streaming PCM sink over the multimedia <c>waveOut</c> API (winmm.dll —
 /// a built-in OS component, nothing to ship). Plays the raw signed-16-bit PCM that the SPICE
 /// playback channel delivers when no codec is negotiated.
 ///
@@ -13,7 +14,8 @@ namespace SpiceClient.Audio;
 /// blocking the channel read thread. <see cref="Write"/> runs on that read thread; mute/volume/
 /// dispose come from the UI thread, so every handle operation is serialized under a lock.
 /// </summary>
-public sealed class WaveOutPlayer : IDisposable
+[SupportedOSPlatform("windows")]
+public sealed class WaveOutPlayer : IAudioSink
 {
     private const int BufferCount = 24;
     private const int BufferBytes = 16 * 1024; // far larger than a SPICE PCM frame (~2 KB)

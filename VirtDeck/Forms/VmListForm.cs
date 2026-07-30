@@ -212,7 +212,7 @@ namespace VirtDeck.Forms
                         if (img != null)
                         {
                             // QXL/SPICE returns PPM; fall back to GDI for the odd device that emits PNG.
-                            shot = PpmImage.Decode(img);
+                            shot = GdiBgra.ToBitmap(PpmImage.Decode(img));
                             if (shot == null)
                             {
                                 try

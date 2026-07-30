@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Threading;
 using SpiceClient.Interop;
 
@@ -7,11 +8,16 @@ namespace SpiceClient.Usb;
 /// Owns the single libusb_context shared by all usbredir channels of a session and
 /// the one dedicated event thread that drives async transfer completions
 /// (usbredirhost submits async transfers; their callbacks only fire while some thread
-/// calls libusb_handle_events). UsbDk is requested as the Windows backend at init.
+/// calls libusb_handle_events).
 ///
-/// Construction never throws: if the native DLLs are missing/wrong-arch or UsbDk is
-/// not installed, the context reports itself unavailable and the rest of the SPICE
-/// session keeps working. <see cref="UnavailableReason"/> explains why redirection is off.
+/// Capturing a device away from the OS needs a platform backend. On Windows that is the UsbDk
+/// kernel driver, requested via LIBUSB_OPTION_USE_USBDK at init. On Linux libusb's native backend
+/// does it directly — there is nothing extra to install, so capture is available whenever libusb
+/// initialises (per-device permissions on /dev/bus/usb are enforced later, at open time).
+///
+/// Construction never throws: if the native libraries are missing/wrong-arch or the capture backend
+/// is unavailable, the context reports itself unavailable and the rest of the SPICE session keeps
+/// working. <see cref="UnavailableReason"/> explains why redirection is off.
 /// </summary>
 internal sealed class LibUsbContext : IDisposable
 {
@@ -21,8 +27,11 @@ internal sealed class LibUsbContext : IDisposable
     /// <summary>True when libusb initialised and the event thread is running.</summary>
     public bool Available { get; private set; }
 
-    /// <summary>True when the UsbDk backend was selected (required to capture devices for redirect).</summary>
-    public bool UsbDkAvailable { get; private set; }
+    /// <summary>
+    /// True when a backend able to capture devices for redirection is in place: UsbDk on Windows,
+    /// libusb's native backend everywhere else.
+    /// </summary>
+    public bool CaptureAvailable { get; private set; }
 
     /// <summary>Why USB redirection is unavailable (null when fully available).</summary>
     public string? UnavailableReason { get; private set; }
@@ -74,17 +83,28 @@ internal sealed class LibUsbContext : IDisposable
             Handle = ctx;
             Available = true;
 
-            int opt = LibUsb.libusb_set_option(ctx, LibUsb.LIBUSB_OPTION_USE_USBDK);
-            UsbDkAvailable = opt == LibUsb.LIBUSB_SUCCESS;
-            if (!UsbDkAvailable)
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                UnavailableReason =
-                    "UsbDk driver not found — install UsbDk to redirect USB devices to the guest.";
-                _log($"[usb] {UnavailableReason} (libusb_set_option={LibUsb.ErrorName(opt)})");
+                // Windows needs the UsbDk kernel driver to take a device away from its normal driver.
+                int opt = LibUsb.libusb_set_option(ctx, LibUsb.LIBUSB_OPTION_USE_USBDK);
+                CaptureAvailable = opt == LibUsb.LIBUSB_SUCCESS;
+                if (!CaptureAvailable)
+                {
+                    UnavailableReason =
+                        "UsbDk driver not found — install UsbDk to redirect USB devices to the guest.";
+                    _log($"[usb] {UnavailableReason} (libusb_set_option={LibUsb.ErrorName(opt)})");
+                }
+                else
+                {
+                    _log("[usb] libusb initialised with UsbDk backend");
+                }
             }
             else
             {
-                _log("[usb] libusb initialised with UsbDk backend");
+                // libusb's native backend captures devices directly; LIBUSB_OPTION_USE_USBDK is a
+                // Windows-only option and setting it here would fail and disable redirection.
+                CaptureAvailable = true;
+                _log("[usb] libusb initialised with the native backend");
             }
 
             _completed = 0;
@@ -93,12 +113,14 @@ internal sealed class LibUsbContext : IDisposable
         }
         catch (DllNotFoundException)
         {
-            UnavailableReason = "USB libraries (libusb-1.0.dll / usbredirhost.dll) are not installed.";
+            UnavailableReason = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? "USB libraries (libusb-1.0.dll / usbredirhost.dll) are not installed."
+                : "USB libraries are not installed — install the libusb-1.0 and usbredir packages.";
             _log($"[usb] {UnavailableReason}");
         }
         catch (BadImageFormatException)
         {
-            UnavailableReason = "USB libraries have the wrong architecture (the app must run as x64).";
+            UnavailableReason = "USB libraries have the wrong architecture (they must match the app's bitness).";
             _log($"[usb] {UnavailableReason}");
         }
         catch (Exception ex)

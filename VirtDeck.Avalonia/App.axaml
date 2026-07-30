@@ -1,0 +1,56 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fluent="clr-namespace:Avalonia.Themes.Fluent;assembly=Avalonia.Themes.Fluent"
+             x:Class="VirtDeck.Avalonia.App"
+             RequestedThemeVariant="Default">
+  <!-- Buttons and text fields in JetBrains Classic UI trim. Merged here, not into
+       Application.Styles, so its TextControl* keys resolve ahead of FluentTheme's. -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://virtdeck/Styles/JetBrainsClassic.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <!-- Fluent's stock dark variant is near-black (#000 chrome on a #000 window). Repaint it with a
+         neutral dark-gray ramp in the Discord/JetBrains register: #313338 surface, #2B2D31 chrome,
+         #1E1F22 as the darkest step. Only the Dark palette is overridden; Light keeps its defaults. -->
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <fluent:ColorPaletteResources x:Key="Dark"
+                                      RegionColor="#FF313338"
+
+                                      AltHigh="#FF2B2D31"
+                                      AltMediumHigh="#CC2B2D31"
+                                      AltMedium="#992B2D31"
+                                      AltMediumLow="#662B2D31"
+                                      AltLow="#332B2D31"
+
+                                      BaseHigh="#FFF2F3F5"
+                                      BaseMediumHigh="#FFDBDEE1"
+                                      BaseMedium="#FFB5BAC1"
+                                      BaseMediumLow="#FF949BA4"
+                                      BaseLow="#FF4E5058"
+
+                                      ChromeWhite="#FFFFFFFF"
+                                      ChromeAltLow="#FFDBDEE1"
+                                      ChromeHigh="#FF80848E"
+                                      ChromeGray="#FF80848E"
+                                      ChromeMediumLow="#FF35373C"
+                                      ChromeMedium="#FF2B2D31"
+                                      ChromeLow="#FF1E1F22"
+                                      ChromeDisabledHigh="#FF4E5058"
+                                      ChromeDisabledLow="#FF80848E"
+                                      ChromeBlackHigh="#FF1E1F22"
+                                      ChromeBlackMedium="#FF1E1F22"
+                                      ChromeBlackMediumLow="#FF1E1F22"
+                                      ChromeBlackLow="#FFB5BAC1"
+
+                                      ListLow="#FF383A40"
+                                      ListMedium="#FF404249" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+  </Application.Styles>
+</Application>

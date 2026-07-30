@@ -35,8 +35,11 @@ public sealed class UsbDeviceManager
     /// <summary>True when libusb is available (redirection plumbing can run).</summary>
     public bool Available => _ctx.Available;
 
-    /// <summary>True when the UsbDk backend is present (required to actually capture devices).</summary>
-    public bool UsbDkAvailable => _ctx.UsbDkAvailable;
+    /// <summary>
+    /// True when a backend able to capture devices is present — UsbDk on Windows, libusb's
+    /// native backend elsewhere.
+    /// </summary>
+    public bool CaptureAvailable => _ctx.CaptureAvailable;
 
     /// <summary>Why redirection is unavailable, or null when fully available.</summary>
     public string? UnavailableReason => _ctx.UnavailableReason;
@@ -132,8 +135,8 @@ public sealed class UsbDeviceManager
     {
         if (!_ctx.Available)
             return (false, _ctx.UnavailableReason ?? "USB support is unavailable.");
-        if (!_ctx.UsbDkAvailable)
-            return (false, _ctx.UnavailableReason ?? "The UsbDk driver is not installed.");
+        if (!_ctx.CaptureAvailable)
+            return (false, _ctx.UnavailableReason ?? "No USB capture backend is available.");
 
         UsbredirChannel slot;
         lock (_lock)
@@ -155,11 +158,11 @@ public sealed class UsbDeviceManager
 
         try
         {
-            IntPtr handle = OpenDevice(info);
+            IntPtr handle = OpenDevice(info, out int openRc);
             if (handle == IntPtr.Zero)
             {
                 lock (_lock) _bindings.Remove(slot);
-                return (false, "Could not open the device — it may have been unplugged, or UsbDk could not capture it.");
+                return (false, DescribeOpenFailure(openRc));
             }
 
             int rc = slot.AttachDevice(handle); // usbredirhost takes ownership of handle on success
@@ -204,8 +207,25 @@ public sealed class UsbDeviceManager
         RaiseChanged();
     }
 
-    private IntPtr OpenDevice(UsbDeviceInfo info)
+    /// <summary>
+    /// Turns a failed <c>libusb_open</c> into something the user can act on. The interesting case is
+    /// LIBUSB_ERROR_ACCESS, which on Linux means the udev rule granting access to /dev/bus/usb is
+    /// missing — a fixable setup problem rather than a broken device.
+    /// </summary>
+    private static string DescribeOpenFailure(int rc)
     {
+        if (rc == LibUsb.LIBUSB_ERROR_ACCESS && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return "Permission denied opening the device. Your user needs read/write access to it " +
+                   "under /dev/bus/usb — install the VirtDeck udev rule, then unplug and replug the device.";
+
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "Could not open the device — it may have been unplugged, or UsbDk could not capture it."
+            : "Could not open the device — it may have been unplugged, or another program is using it.";
+    }
+
+    private IntPtr OpenDevice(UsbDeviceInfo info, out int rcOut)
+    {
+        rcOut = 0;
         var count = LibUsb.libusb_get_device_list(_ctx.Handle, out var list);
         long n = count.ToInt64();
         if (n < 0 || list == IntPtr.Zero) return IntPtr.Zero;
@@ -223,6 +243,7 @@ public sealed class UsbDeviceManager
                 if (LibUsb.libusb_get_device_address(dev) != info.DeviceAddress) continue;
 
                 int rc = LibUsb.libusb_open(dev, out handle);
+                rcOut = rc;
                 if (rc != LibUsb.LIBUSB_SUCCESS)
                 {
                     _log($"[usb] libusb_open failed: {LibUsb.ErrorName(rc)}");

@@ -1,12 +1,9 @@
-using Microsoft.Win32;
 using VirtDeck.Services;
 
 namespace VirtDeck.Forms
 {
     public partial class LoginForm : AppForm
     {
-        private const string RegistryKey = @"SOFTWARE\VirtDeck";
-
         public LoginForm()
         {
             InitializeComponent();
@@ -15,11 +12,9 @@ namespace VirtDeck.Forms
 
         private void LoadSettings()
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RegistryKey);
-            if (key == null) return;
-
-            txtHost.Text = key.GetValue("Host") as string ?? "";
-            txtUsername.Text = key.GetValue("Username") as string ?? "";
+            var settings = AppSettings.Current;
+            txtHost.Text = settings.Host;
+            txtUsername.Text = settings.Username;
 
             if (!string.IsNullOrEmpty(txtHost.Text) && !string.IsNullOrEmpty(txtUsername.Text))
                 ActiveControl = txtPassword;
@@ -27,9 +22,10 @@ namespace VirtDeck.Forms
 
         private void SaveSettings()
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RegistryKey);
-            key.SetValue("Host", txtHost.Text.Trim());
-            key.SetValue("Username", txtUsername.Text.Trim());
+            var settings = AppSettings.Current;
+            settings.Host = txtHost.Text.Trim();
+            settings.Username = txtUsername.Text.Trim();
+            settings.Save();
         }
 
         private async void btnConnect_Click(object sender, EventArgs e)
