@@ -56,6 +56,85 @@
       <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#FF5E6060" />
 
       <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FF214283" />
+
+      <!-- Dropdowns: the closed ComboBox is a text field with a chevron, so every background/border
+           key tracks the TextControl* values above. Fluent swaps in a second "HighlightBackground"
+           layer while focused or open (ComboBoxBackground*Unfocused/*BorderBrushFocused) — those are
+           painted to the same face so only the border colour moves, as on a text field. -->
+      <SolidColorBrush x:Key="ComboBoxBackground" Color="#FF45494A" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#FF45494A" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#FF45494A" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="#FF45494A" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#FF3C3F41" />
+
+      <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#FF646464" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#FF7A7A7A" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#FF466D94" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushDisabled" Color="#FF4E5052" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="#FF466D94" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushUnfocused" Color="#FF646464" />
+
+      <SolidColorBrush x:Key="ComboBoxForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxForegroundFocused" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxForegroundFocusedPressed" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxForegroundDisabled" Color="#FF777777" />
+
+      <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="#FF808080" />
+      <SolidColorBrush x:Key="ComboBoxPlaceHolderForegroundFocusedPressed" Color="#FF808080" />
+
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocused" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocusedPressed" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundDisabled" Color="#FF777777" />
+
+      <!-- The open list is a popup panel, not a field: window face, hairline frame, and the same
+           row colours the tables use. -->
+      <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FF3C3F41" />
+      <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#FF646464" />
+
+      <SolidColorBrush x:Key="ComboBoxItemBackground" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#FF3E4245" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#FF4B6EAF" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#FF4B6EAF" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedDisabled" Color="#FF3E4245" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#FF4B6EAF" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#FF4B6EAF" />
+
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushPressed" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelected" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPressed" Color="Transparent" />
+
+      <SolidColorBrush x:Key="ComboBoxItemForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundPointerOver" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundPressed" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundDisabled" Color="#FF777777" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedDisabled" Color="#FF777777" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPointerOver" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="#FFFFFFFF" />
+
+      <!-- Toolbars: the strip sits a shade above the window face, items are borderless until hovered. -->
+      <SolidColorBrush x:Key="JbToolBarBackground" Color="#FF3C3F41" />
+      <SolidColorBrush x:Key="JbToolBarBorder" Color="#FF323232" />
+      <SolidColorBrush x:Key="JbToolBarItemHover" Color="#FF4C5052" />
+      <SolidColorBrush x:Key="JbToolBarItemPressed" Color="#FF2F3133" />
+
+      <!-- Tabs: flat cells on a strip a shade off the window face; the selected one is marked by a
+           2px underline, not by a raised card. -->
+      <SolidColorBrush x:Key="JbTabStripBackground" Color="#FF3C3F41" />
+      <SolidColorBrush x:Key="JbTabHoverBackground" Color="#FF4C5052" />
+      <SolidColorBrush x:Key="JbTabSelectedBackground" Color="#FF4E5254" />
+      <SolidColorBrush x:Key="JbTabSelectedUnderline" Color="#FF4A88C7" />
+
+      <!-- Table rows -->
+      <SolidColorBrush x:Key="JbListItemHover" Color="#FF3E4245" />
+      <SolidColorBrush x:Key="JbListItemSelected" Color="#FF4B6EAF" />
+      <SolidColorBrush x:Key="JbListItemSelectedForeground" Color="#FFFFFFFF" />
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Light">
@@ -99,9 +178,93 @@
       <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#FFC4C4C4" />
 
       <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FFA6D2FF" />
+
+      <!-- Dropdowns -->
+      <SolidColorBrush x:Key="ComboBoxBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#FFF5F5F5" />
+
+      <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#FFC4C4C4" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#FFADADAD" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#FF4A88C7" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushDisabled" Color="#FFDDDDDD" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="#FF4A88C7" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushUnfocused" Color="#FFC4C4C4" />
+
+      <SolidColorBrush x:Key="ComboBoxForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxForegroundFocused" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxForegroundFocusedPressed" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxForegroundDisabled" Color="#FF8C8C8C" />
+
+      <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="#FF999999" />
+      <SolidColorBrush x:Key="ComboBoxPlaceHolderForegroundFocusedPressed" Color="#FF999999" />
+
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocused" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocusedPressed" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundDisabled" Color="#FF8C8C8C" />
+
+      <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#FFC4C4C4" />
+
+      <SolidColorBrush x:Key="ComboBoxItemBackground" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#FFEDF3FE" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#FF3875D6" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#FF3875D6" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedDisabled" Color="#FFEDF3FE" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#FF3875D6" />
+      <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#FF3875D6" />
+
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushPressed" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelected" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedDisabled" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPressed" Color="Transparent" />
+
+      <SolidColorBrush x:Key="ComboBoxItemForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundPointerOver" Color="#FF000000" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundPressed" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundDisabled" Color="#FF8C8C8C" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedDisabled" Color="#FF8C8C8C" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPointerOver" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="#FFFFFFFF" />
+
+      <!-- Toolbars -->
+      <SolidColorBrush x:Key="JbToolBarBackground" Color="#FFF2F2F2" />
+      <SolidColorBrush x:Key="JbToolBarBorder" Color="#FFCDCDCD" />
+      <SolidColorBrush x:Key="JbToolBarItemHover" Color="#FFDFDFDF" />
+      <SolidColorBrush x:Key="JbToolBarItemPressed" Color="#FFCFCFCF" />
+
+      <!-- Tabs -->
+      <SolidColorBrush x:Key="JbTabStripBackground" Color="#FFF2F2F2" />
+      <SolidColorBrush x:Key="JbTabHoverBackground" Color="#FFE3E3E3" />
+      <SolidColorBrush x:Key="JbTabSelectedBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbTabSelectedUnderline" Color="#FF4083C9" />
+
+      <!-- Table rows -->
+      <SolidColorBrush x:Key="JbListItemHover" Color="#FFEDF3FE" />
+      <SolidColorBrush x:Key="JbListItemSelected" Color="#FF3875D6" />
+      <SolidColorBrush x:Key="JbListItemSelectedForeground" Color="#FFFFFFFF" />
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>
+
+  <!--
+    THE font size for the whole app. Avalonia gives a bare TextBlock 12, while every Fluent
+    ControlTheme sets its own FontSize from this key (14) — so labels and the controls they label
+    were rendering two points apart, and each retemplated control here (which drops that setter and
+    falls back to the inherited 12) widened the gap. Pulling the key down to 12 puts the controls we
+    have NOT retemplated — text fields, dropdowns, spinners, list items, menus, tooltips — on the
+    same baseline as the labels, so views never need a local FontSize to line things up.
+    Control metrics below are all sized for this 12: 24px fields and buttons, a 14px check box.
+  -->
+  <x:Double x:Key="ControlContentThemeFontSize">12</x:Double>
 
   <!-- Shared metrics. The border stays 1px on focus — Fluent thickens it to an accent underline,
        JetBrains just recolours it. -->
@@ -109,7 +272,38 @@
   <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
   <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
   <Thickness x:Key="TextControlThemePadding">6,3</Thickness>
-  <x:Double x:Key="TextControlThemeMinHeight">26</x:Double>
+  <!-- 24, the same box the Button theme below draws: a field and the button beside it have the same
+       1px border and the same 3px vertical inset around a 12pt line, so one shared height lines the
+       two up exactly. Fluent's own 32 (and the 26 this used to carry) left fields standing proud of
+       every button they sat next to. Anything that has to match a field by hand — the "…" button in
+       RemotePathBox — is sized off this number, not off its own guess. -->
+  <x:Double x:Key="TextControlThemeMinHeight">24</x:Double>
+
+  <!-- Dropdown metrics, matched to the text field above: same 1px hairline, same 24px box, same
+       6,3 inset. The right inset is 0 because the chevron sits in its own column and brings its
+       own margin. Fluent's roomy popup padding is dropped so the list rows read as a JetBrains
+       pick-list rather than a WinUI flyout. -->
+  <Thickness x:Key="ComboBoxBorderThemeThickness">1</Thickness>
+  <Thickness x:Key="ComboBoxPadding">6,3,0,3</Thickness>
+  <x:Double x:Key="ComboBoxMinHeight">24</x:Double>
+  <Thickness x:Key="ComboBoxItemThemePadding">6,3</Thickness>
+  <Thickness x:Key="ComboBoxDropdownBorderThickness">1</Thickness>
+  <Thickness x:Key="ComboBoxDropdownBorderPadding">0,2</Thickness>
+  <Thickness x:Key="ComboBoxDropdownContentMargin">0</Thickness>
+
+  <!-- The rest of Fluent's touch-sized metrics, brought down to the same scale. These are the
+       surfaces with no JetBrains template of their own: ordinary pick-lists (the remote file
+       browser, the dialog disk lists), context menus and tooltips. Fluent sizes them for a 14pt
+       font and a fingertip; at 12pt they read as bloated next to the tables and toolbars. -->
+  <Thickness x:Key="ListBoxItemPadding">8,4</Thickness>
+  <x:Double x:Key="MenuFlyoutThemeMinHeight">24</x:Double>
+  <Thickness x:Key="MenuFlyoutItemThemePaddingNarrow">11,3,11,4</Thickness>
+  <Thickness x:Key="MenuFlyoutSeparatorThemePadding">8,2,8,2</Thickness>
+  <Thickness x:Key="ToolTipBorderThemePadding">6,3,6,4</Thickness>
+  <x:Double x:Key="TreeViewItemMinHeight">24</x:Double>
+
+  <!-- The tick is white on the accent fill in both themes, so it is not a per-theme brush. -->
+  <SolidColorBrush x:Key="JbCheckBoxGlyph" Color="#FFFFFFFF" />
 
   <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
     <Setter Property="Background" Value="{DynamicResource JbButtonBackground}" />
@@ -118,7 +312,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="3" />
     <Setter Property="Padding" Value="14,3" />
-    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="MinHeight" Value="24" />
     <Setter Property="MinWidth" Value="72" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -186,6 +380,331 @@
         <Setter Property="BorderBrush" Value="{DynamicResource JbButtonBorderDisabled}" />
         <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
       </Style>
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Toolbar button: the same flat cell a top-level MenuItem draws, so a plain command can sit next
+    to the dropdowns in one strip without looking like a dialog button. Keyed rather than implicit —
+    the bordered Button above stays the default everywhere else.
+  -->
+  <ControlTheme x:Key="JbToolButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Root"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            RecognizesAccessKey="True" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover">
+      <Setter Property="Background" Value="{DynamicResource JbToolBarItemHover}" />
+    </Style>
+
+    <Style Selector="^:pressed">
+      <Setter Property="Background" Value="{DynamicResource JbToolBarItemPressed}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Check box. Fluent's is a 20px box inside a 32px row — a touch target, not a desktop control.
+    JetBrains draws a 14px square that sits on the text baseline. The box size is hard-coded in
+    Fluent's template (not a resource), so shrinking it means replacing the template outright.
+    The tick is a stroked Path rather than a filled glyph: at 14px a stroke stays crisp where a
+    scaled-down filled outline turns to mush.
+  -->
+  <ControlTheme x:Key="{x:Type CheckBox}" TargetType="CheckBox">
+    <Setter Property="Background" Value="{DynamicResource TextControlBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="Padding" Value="6,0,0,0" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Grid ColumnDefinitions="Auto,*" Background="Transparent">
+          <Border Name="Box" Grid.Column="0"
+                  Width="14" Height="14" CornerRadius="2"
+                  VerticalAlignment="Center"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="1">
+            <Panel>
+              <Path Name="Check" IsVisible="False"
+                    Stroke="{DynamicResource JbCheckBoxGlyph}" StrokeThickness="1.6"
+                    StrokeLineCap="Round" StrokeJoin="Round"
+                    Data="M 2.5,6.25 L 4.75,8.75 L 9.5,3.25" />
+              <Rectangle Name="Dash" IsVisible="False"
+                         Width="8" Height="2" RadiusX="1" RadiusY="1"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Fill="{DynamicResource JbCheckBoxGlyph}" />
+            </Panel>
+          </Border>
+          <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Foreground="{TemplateBinding Foreground}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#Box">
+      <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushPointerOver}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#Box">
+      <Setter Property="BorderBrush" Value="{DynamicResource JbButtonFocusBorder}" />
+    </Style>
+
+    <Style Selector="^:checked, ^:indeterminate">
+      <Style Selector="^ /template/ Border#Box">
+        <Setter Property="Background" Value="{DynamicResource JbDefaultButtonBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource JbDefaultButtonBorder}" />
+      </Style>
+      <Style Selector="^:pointerover /template/ Border#Box">
+        <Setter Property="Background" Value="{DynamicResource JbDefaultButtonBackgroundHover}" />
+      </Style>
+    </Style>
+
+    <Style Selector="^:checked /template/ Path#Check">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:indeterminate /template/ Rectangle#Dash">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+      <Style Selector="^ /template/ Border#Box">
+        <Setter Property="Background" Value="{DynamicResource TextControlBackgroundDisabled}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushDisabled}" />
+      </Style>
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Radio button — the check box above, rounded. Same 14px box, same accent fill, same states, so a
+    dialog that mixes the two (the create wizard does) keeps one control height throughout.
+  -->
+  <ControlTheme x:Key="{x:Type RadioButton}" TargetType="RadioButton">
+    <Setter Property="Background" Value="{DynamicResource TextControlBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="Padding" Value="6,0,0,0" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Grid ColumnDefinitions="Auto,*" Background="Transparent">
+          <Panel Grid.Column="0" Width="14" Height="14" VerticalAlignment="Center">
+            <Ellipse Name="Box"
+                     Fill="{TemplateBinding Background}"
+                     Stroke="{TemplateBinding BorderBrush}"
+                     StrokeThickness="1" />
+            <Ellipse Name="Dot" IsVisible="False"
+                     Width="5" Height="5"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Fill="{DynamicResource JbCheckBoxGlyph}" />
+          </Panel>
+          <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Foreground="{TemplateBinding Foreground}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Ellipse#Box">
+      <Setter Property="Stroke" Value="{DynamicResource TextControlBorderBrushPointerOver}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Ellipse#Box">
+      <Setter Property="Stroke" Value="{DynamicResource JbButtonFocusBorder}" />
+    </Style>
+
+    <Style Selector="^:checked">
+      <Style Selector="^ /template/ Ellipse#Box">
+        <Setter Property="Fill" Value="{DynamicResource JbDefaultButtonBackground}" />
+        <Setter Property="Stroke" Value="{DynamicResource JbDefaultButtonBorder}" />
+      </Style>
+      <Style Selector="^ /template/ Ellipse#Dot">
+        <Setter Property="IsVisible" Value="True" />
+      </Style>
+      <Style Selector="^:pointerover /template/ Ellipse#Box">
+        <Setter Property="Fill" Value="{DynamicResource JbDefaultButtonBackgroundHover}" />
+      </Style>
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+      <Style Selector="^ /template/ Ellipse#Box">
+        <Setter Property="Fill" Value="{DynamicResource TextControlBackgroundDisabled}" />
+        <Setter Property="Stroke" Value="{DynamicResource TextControlBorderBrushDisabled}" />
+      </Style>
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Tabs. Fluent draws big rounded cards with an accent pill — the Windows 8 look. JetBrains draws a
+    flat strip of square cells, ruled off from the content by a hairline, with the selected cell
+    marked by a 2px underline. The underline border is always present (transparent when unselected)
+    so selecting a tab does not shift its label by two pixels.
+    Both TabControls in the app are top-placed, so the template does not handle TabStripPlacement.
+  -->
+  <ControlTheme x:Key="{x:Type TabControl}" TargetType="TabControl">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <StackPanel Orientation="Horizontal" />
+      </ItemsPanelTemplate>
+    </Setter>
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}">
+          <DockPanel>
+            <Border DockPanel.Dock="Top"
+                    Background="{DynamicResource JbTabStripBackground}"
+                    BorderBrush="{DynamicResource JbToolBarBorder}"
+                    BorderThickness="0,0,0,1">
+              <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+            </Border>
+            <ContentPresenter Name="PART_SelectedContentHost"
+                              Content="{TemplateBinding SelectedContent}"
+                              ContentTemplate="{TemplateBinding SelectedContentTemplate}"
+                              Margin="{TemplateBinding Padding}" />
+          </DockPanel>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <ControlTheme x:Key="{x:Type TabItem}" TargetType="TabItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Padding" Value="12,4" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Root"
+                Background="{TemplateBinding Background}"
+                BorderBrush="Transparent"
+                BorderThickness="0,0,0,2">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Header}"
+                            ContentTemplate="{TemplateBinding HeaderTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbTabHoverBackground}" />
+    </Style>
+
+    <Style Selector="^:selected /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbTabSelectedBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbTabSelectedUnderline}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Table row: the tight, square, full-width row a DataGrip/Rider grid draws — ~20px, no corner
+    radius, no inset selection pill. Keyed rather than implicit so ordinary pick-lists elsewhere
+    (dialogs, the file browser) keep Fluent's roomier item.
+  -->
+  <ControlTheme x:Key="JbTableRow" TargetType="ListBoxItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="Padding" Value="12,4" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Root"
+                Background="{TemplateBinding Background}"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbListItemHover}" />
+    </Style>
+
+    <Style Selector="^:selected /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbListItemSelected}" />
+    </Style>
+
+    <Style Selector="^:selected">
+      <Setter Property="Foreground" Value="{DynamicResource JbListItemSelectedForeground}" />
     </Style>
   </ControlTheme>
 

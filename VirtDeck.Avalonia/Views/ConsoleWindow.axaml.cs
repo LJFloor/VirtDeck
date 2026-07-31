@@ -1,11 +1,15 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using SpiceClient;
+using SpiceClient.Channels;
+using SpiceClient.Imaging;
 using SpiceClient.Protocol;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Input;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Diagnostics;
 using VirtDeck.Services;
 
@@ -13,6 +17,16 @@ namespace VirtDeck.Avalonia.Views;
 
 public partial class ConsoleWindow : Window
 {
+    private const string GuestVirtioUrl =
+        "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso";
+    // Keep the URL's versioned filename; download into /var/lib/libvirt/images (AppArmor-allowed for live change-media).
+    private static string GuestVirtioServerPath =>
+        "/var/lib/libvirt/images/" + GuestVirtioUrl[(GuestVirtioUrl.LastIndexOf('/') + 1)..];
+
+    private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
+    private const string CdromTip = "Eject or change the VM's CD/DVD media.";
+    private const string FloppyTip = "Eject or change the VM's floppy media.";
+
     private readonly SshConnectionManager _ssh;
     private readonly VirshService _virsh;
     private readonly IKeyboardGrab _grab = KeyboardGrab.Create();
@@ -25,6 +39,17 @@ public partial class ConsoleWindow : Window
     private bool _autoFitted;
     private bool _windowActive;
     private long _lastGrabAttempt;
+
+    // Removable media, discovered after connect (bus is always fdc for a floppy).
+    private string? _cdromTarget;
+    private string? _cdromBus;
+    private string? _floppyTarget;
+    private readonly List<NbdServer> _mediaServers = new(); // streamed "this PC" media; alive while open
+
+    // Clipboard sharing. Avalonia has no clipboard-change notification, so the host side is polled
+    // while this window is focused; _lastHostClipboard is what suppresses the self-triggered round trip.
+    private readonly DispatcherTimer _clipboardPoll;
+    private string? _lastHostClipboard;
 
     public string VmName { get; }
 
@@ -57,12 +82,17 @@ public partial class ConsoleWindow : Window
         _virsh.VmsChanged += OnVmsChanged;
 
         // Keys go to the guest, not to Avalonia's focus/accelerator handling. Tunnelled so the
-        // toolbar buttons can't steal Tab, Space or the arrow keys from the guest.
+        // toolbar can't steal Tab, Space or the arrow keys from the guest.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyUpEvent, OnKeyUpTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
 
-        Activated += (_, _) => { _windowActive = true; UpdateGrab(); };
-        Deactivated += (_, _) => { _windowActive = false; UpdateGrab(); };
+        // Polling only while focused: an unfocused console has no business grabbing the SPICE
+        // clipboard away from whatever the user is actually working in.
+        _clipboardPoll = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background,
+            async (_, _) => await PollHostClipboardAsync());
+
+        Activated += (_, _) => { _windowActive = true; UpdateGrab(); _clipboardPoll.Start(); };
+        Deactivated += (_, _) => { _windowActive = false; UpdateGrab(); _clipboardPoll.Stop(); };
 
         // The grab follows the pointer, not just focus — see UpdateGrab. PointerMoved is the
         // re-arm: IsPointerOver can already be true when the window is activated (alt-tabbed back
@@ -83,9 +113,13 @@ public partial class ConsoleWindow : Window
             _closing = true;
             SaveVmSettings();
             _virsh.VmsChanged -= OnVmsChanged;
+            _clipboardPoll.Stop();
             UpdateGrab();
             _grab.Dispose();
             CleanupConnection();
+
+            foreach (var s in _mediaServers) { try { s.Dispose(); } catch { /* ignore */ } }
+            _mediaServers.Clear();
         };
     }
 
@@ -107,10 +141,21 @@ public partial class ConsoleWindow : Window
         };
 
         CtrlAltDelItem.Click += (_, _) => _session?.Inputs?.SendCtrlAltDel();
+        TypeClipboardItem.Click += async (_, _) => await TypeClipboardAsync();
 
         LzItem.Click += (_, _) => SetCompression(lz: true);
         RawItem.Click += (_, _) => SetCompression(lz: false);
         FitWindowItem.Click += (_, _) => FitToResolution();
+        ScreenshotItem.Click += async (_, _) => await SaveScreenshotAsync();
+
+        CdServerItem.Click += async (_, _) => await InsertMediaFromServerAsync(cdrom: true);
+        CdLocalItem.Click += async (_, _) => await InsertMediaFromLocalAsync(cdrom: true);
+        CdGuestIsoItem.Click += async (_, _) => await InsertGuestIsoAsync();
+        CdEjectItem.Click += async (_, _) => await EjectAsync(cdrom: true);
+
+        FloppyServerItem.Click += async (_, _) => await InsertMediaFromServerAsync(cdrom: false);
+        FloppyLocalItem.Click += async (_, _) => await InsertMediaFromLocalAsync(cdrom: false);
+        FloppyEjectItem.Click += async (_, _) => await EjectAsync(cdrom: false);
 
         ShowHostCursorItem.Click += (_, _) =>
         {
@@ -190,6 +235,8 @@ public partial class ConsoleWindow : Window
             _session.LogMessage += SpiceLog.Log;
             _session.Disconnected += OnSessionDisconnected;
             _session.StatusMessage += OnSessionStatus;
+            _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
+            _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
 
             Display.Attach(_session);
             Display.Policy = ShowHostCursorItem.IsChecked
@@ -206,6 +253,9 @@ public partial class ConsoleWindow : Window
             UpdateToolbarState();
             _windowActive = IsActive;
             UpdateGrab();
+            if (_windowActive) _clipboardPoll.Start();
+
+            _ = DetectRemovableMediaAsync(); // enables the CD/DVD and Floppy menus for this VM
         }
         catch (Exception ex)
         {
@@ -221,6 +271,9 @@ public partial class ConsoleWindow : Window
     private void CleanupConnection()
     {
         _connected = false;
+        _cdromTarget = null;
+        _cdromBus = null;
+        _floppyTarget = null;
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
         LzItem.IsChecked = true;   // neutral default; the channel re-requests LZ on reconnect
@@ -280,9 +333,274 @@ public partial class ConsoleWindow : Window
 
     private void UpdateToolbarState()
     {
-        KeyboardButton.IsEnabled = _connected;
-        DisplayButton.IsEnabled = _connected;
+        KeyboardMenu.IsEnabled = _connected;
+        DisplayMenu.IsEnabled = _connected;
         ReconnectButton.IsEnabled = !_connecting;
+
+        CdDvdMenu.IsEnabled = _connected && _cdromTarget != null;
+        ToolTip.SetTip(CdDvdMenu, !_connected ? "Start the VM to manage CD/DVD."
+                                : _cdromTarget == null ? NoCdromTip : CdromTip);
+
+        // Floppy is rare — show the menu only when this VM actually has a floppy drive,
+        // hiding it entirely rather than showing a dead, disabled one.
+        FloppyMenu.IsVisible = _floppyTarget != null;
+        FloppyMenu.IsEnabled = _connected && _floppyTarget != null;
+        ToolTip.SetTip(FloppyMenu, _connected ? FloppyTip : "Start the VM to manage floppy media.");
+    }
+
+    // ---- Removable media ----------------------------------------------
+
+    private async Task DetectRemovableMediaAsync()
+    {
+        try
+        {
+            var cfg = await Task.Run(() => _virsh.GetVmConfig(VmName));
+            if (_closing) return;
+            var cd = cfg.Disks.FirstOrDefault(d => d.IsCdrom);
+            var fd = cfg.Disks.FirstOrDefault(d => d.IsFloppy);
+            _cdromTarget = cd?.Target;
+            _cdromBus = cd == null ? null : (string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus);
+            _floppyTarget = fd?.Target;
+            UpdateToolbarState();
+        }
+        catch { /* leave the menus disabled */ }
+    }
+
+    private async Task InsertMediaFromServerAsync(bool cdrom)
+    {
+        if (Target(cdrom) is not { } t) return;
+        var dlg = new RemoteFileBrowserDialog(_virsh, "/var/lib/libvirt/images",
+            cdrom ? "ISO images (*.iso)|*.iso|All files (*.*)|*.*"
+                  : "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
+            false, cdrom ? "Select ISO on the server" : "Select floppy on the server");
+        if (await dlg.ShowDialog<bool?>(this) is not true || dlg.SelectedPath is not { } path) return;
+
+        await RunMediaActionAsync(cdrom ? "Insert media" : "Insert floppy",
+            () => _virsh.ChangeMedia(VmName, t, path, live: true),
+            () => _virsh.ChangeMedia(VmName, t, path, live: false));
+    }
+
+    private async Task InsertMediaFromLocalAsync(bool cdrom)
+    {
+        if (Target(cdrom) is not { } t) return;
+        var local = await FileDialogs.OpenFileAsync(this,
+            cdrom ? "Select an ISO on this PC" : "Select a floppy image on this PC",
+            cdrom ? "ISO images (*.iso)|*.iso|All files (*.*)|*.*"
+                  : "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*");
+        if (local == null) return;
+
+        string bus = _cdromBus ?? "sata";
+        await RunMediaActionAsync(cdrom ? "Insert (streamed)" : "Insert floppy (streamed)", () =>
+        {
+            var server = new NbdServer();
+            // A floppy is exported read-write so guest writes persist back to the local file;
+            // an ISO is read-only.
+            server.Start(local, _ssh.Client, writable: !cdrom);
+            lock (_mediaServers) _mediaServers.Add(server);
+            if (cdrom) _virsh.UpdateCdromNetwork(VmName, t, bus, server.RemoteUrl, live: true);
+            else _virsh.UpdateFloppyNetwork(VmName, t, server.RemoteUrl, live: true);
+        });
+    }
+
+    private async Task EjectAsync(bool cdrom)
+    {
+        if (Target(cdrom) is not { } t) return;
+        await RunMediaActionAsync(cdrom ? "Eject" : "Eject floppy",
+            () => _virsh.EjectMedia(VmName, t, live: true),
+            () => _virsh.EjectMedia(VmName, t, live: false));
+    }
+
+    private async Task InsertGuestIsoAsync()
+    {
+        if (_cdromTarget is not { } t) return;
+
+        bool exists;
+        try { exists = await Task.Run(() => _virsh.FileExistsOnHost(GuestVirtioServerPath)); }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(this, "CD/DVD", ex.Message);
+            return;
+        }
+
+        if (!exists)
+        {
+            if (!await MessageDialog.Confirm(this, "Insert Guest Agent ISO",
+                    $"Guest ISO not found on the server. Download it to {GuestVirtioServerPath}?"))
+                return;
+            var dl = new DownloadProgressDialog(_virsh, GuestVirtioUrl, GuestVirtioServerPath);
+            if (await dl.ShowDialog<bool?>(this) is not true) return; // cancelled or failed
+        }
+
+        await RunMediaActionAsync("Insert guest agent ISO",
+            () => _virsh.ChangeMedia(VmName, t, GuestVirtioServerPath, live: true),
+            () => _virsh.ChangeMedia(VmName, t, GuestVirtioServerPath, live: false));
+    }
+
+    private string? Target(bool cdrom) => cdrom ? _cdromTarget : _floppyTarget;
+
+    private async Task RunMediaActionAsync(string label, Action liveOp, Action? configOp = null)
+    {
+        StatusText.Text = $"Media: {label}…";
+        try
+        {
+            await Task.Run(liveOp);
+            if (!_closing) StatusText.Text = $"Media: {label} — done";
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Changing media on a running VM can be blocked by the host (e.g. an AppArmor profile
+            // reload). Offer to apply it to the saved config instead — no live relabel, effective
+            // after a restart.
+            if (configOp == null || _closing)
+            {
+                if (!_closing)
+                {
+                    await MessageDialog.Info(this, "Media", $"{label} failed:\n{ex.Message}");
+                    StatusText.Text = "Ready";
+                }
+                return;
+            }
+            if (!await MessageDialog.Confirm(this, "Media",
+                    $"{label} on the running VM failed:\n{ex.Message}\n\nApply it to the saved configuration " +
+                    "instead? It will take effect the next time the VM starts."))
+            {
+                StatusText.Text = "Ready";
+                return;
+            }
+        }
+
+        try
+        {
+            await Task.Run(configOp);
+            if (!_closing) StatusText.Text = $"Media: {label} — saved (restart the VM to apply)";
+        }
+        catch (Exception ex2)
+        {
+            await MessageDialog.Info(this, "Media", $"{label} failed:\n{ex2.Message}");
+            if (!_closing) StatusText.Text = "Ready";
+        }
+    }
+
+    // ---- Clipboard sharing ---------------------------------------------
+
+    /// <summary>
+    /// Host → guest. Avalonia has no equivalent of <c>WM_CLIPBOARDUPDATE</c>, so the text is polled
+    /// while the console has focus and a SPICE grab is announced only when it actually changed —
+    /// that comparison is also what stops the guest→host mirror below from looping back.
+    /// </summary>
+    private async Task PollHostClipboardAsync()
+    {
+        if (_closing || Clipboard is not { } cb) return;
+        if (_session is not { AgentConnected: true } session) return;
+        try
+        {
+            var text = await cb.TryGetTextAsync();
+            if (string.IsNullOrEmpty(text) || text == _lastHostClipboard) return;
+            _lastHostClipboard = text;
+            session.GrabClipboardText();
+        }
+        catch { /* clipboard busy or owned by a dying app */ }
+    }
+
+    /// <summary>Guest copied → mirror onto the host clipboard.</summary>
+    private void OnClipboardTextFromGuest(string text) => Dispatcher.UIThread.Post(async () =>
+    {
+        if (_closing || Clipboard is not { } cb) return;
+        try
+        {
+            _lastHostClipboard = text; // pre-seed so the poll doesn't grab our own write straight back
+            if (string.IsNullOrEmpty(text)) await cb.ClearAsync();
+            else await cb.SetTextAsync(text);
+        }
+        catch { /* clipboard busy */ }
+    });
+
+    /// <summary>Guest is pasting → hand it the current host clipboard text.</summary>
+    private void OnClipboardRequestedByGuest() => Dispatcher.UIThread.Post(async () =>
+    {
+        if (_closing || _session is not { } session) return;
+        try { session.SendClipboardText(Clipboard is { } cb ? await cb.TryGetTextAsync() ?? "" : ""); }
+        catch { /* clipboard busy */ }
+    });
+
+    /// <summary>
+    /// Synthesizes the clipboard text as keystrokes. For guests without the agent, where the real
+    /// clipboard channel is unavailable — best-effort ASCII on a US layout.
+    /// </summary>
+    private async Task TypeClipboardAsync()
+    {
+        var inputs = _session?.Inputs;
+        if (inputs == null || Clipboard is not { } cb) return;
+
+        string text;
+        try { text = await cb.TryGetTextAsync() ?? ""; }
+        catch { return; }
+        if (string.IsNullOrEmpty(text)) return;
+
+        // A newline is typed as Enter — warn it may run a command / submit a form in the guest.
+        if (text.Contains('\n') &&
+            !await MessageDialog.Confirm(this, "Type Clipboard",
+                "The clipboard contains line breaks.\n\n" +
+                "Typing them presses Enter, which may run a command or submit a form in the guest."))
+            return;
+
+        // Off the UI thread: the paced sends below would otherwise stall the framebuffer pump.
+        _ = Task.Run(() => TypeOutText(inputs, text));
+    }
+
+    private static void TypeOutText(InputsChannel inputs, string text)
+    {
+        foreach (char ch in text)
+        {
+            if (ch == '\r') continue; // CRLF handled on the '\n'
+            if (!AsciiScancodes.TryMap(ch, out uint sc, out bool shift)) continue;
+            try
+            {
+                if (shift) inputs.SendKey(AsciiScancodes.LeftShift, true);
+                inputs.SendKey(sc, true);
+                inputs.SendKey(sc, false);
+                if (shift) inputs.SendKey(AsciiScancodes.LeftShift, false);
+            }
+            catch { return; } // channel gone
+            Thread.Sleep(3);  // pace so the guest doesn't drop keys
+        }
+    }
+
+    // ---- Screenshot -----------------------------------------------------
+
+    /// <summary>
+    /// Saves the framebuffer as a PNG. The WinForms build put the image straight on the clipboard;
+    /// image clipboard transfer isn't reliable through Avalonia on X11, so this writes a file instead.
+    /// </summary>
+    private async Task SaveScreenshotAsync()
+    {
+        // Take the pixels and their dimensions together — a resolution change between the two
+        // would otherwise reinterpret the buffer at the wrong size.
+        byte[]? pixels = null;
+        int w = 0, h = 0;
+        if (_session?.Framebuffer is { } fb) pixels = fb.SnapshotBgra(out w, out h);
+
+        var png = pixels == null ? null : BgraImage.EncodePng(pixels, w, h);
+        if (png == null)
+        {
+            StatusText.Text = "Screenshot: nothing to capture yet.";
+            return;
+        }
+
+        var path = await FileDialogs.SaveFileAsync(this, "Save screenshot", "PNG image (*.png)|*.png",
+            suggestedName: $"{VmName}-{DateTime.Now:yyyyMMdd-HHmmss}.png", defaultExtension: "png");
+        if (path == null) return;
+
+        try
+        {
+            await File.WriteAllBytesAsync(path, png);
+            StatusText.Text = $"Screenshot saved — {w}×{h}";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Screenshot failed: {ex.Message}";
+        }
     }
 
     // ---- Display ------------------------------------------------------
@@ -375,7 +693,8 @@ public partial class ConsoleWindow : Window
     {
         var inputs = _session?.Inputs;
         if (inputs == null) return;
-        // Let the toolbar flyouts keep the keyboard while one is open.
+        // Let an open toolbar menu keep the keyboard — that is what makes its arrow-key
+        // navigation work; the guest only gets keys while it has focus or the pointer.
         if (!Display.IsFocused && !IsPointerOverDisplay()) return;
 
         if (!PhysicalKeyMap.TryMap(e.PhysicalKey, out uint scancode)) return;

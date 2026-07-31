@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.DownloadProgressDialog"
+        Title="Downloading"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Name="InfoText" TextWrapping="Wrap" />
+    <ProgressBar Name="Progress" Height="6" IsIndeterminate="True" Minimum="0" Maximum="1000" />
+    <DockPanel>
+      <Button Name="CancelButton" DockPanel.Dock="Right" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <TextBlock Name="BytesText" VerticalAlignment="Center" Opacity="0.75" />
+    </DockPanel>
+  </StackPanel>
+</Window>

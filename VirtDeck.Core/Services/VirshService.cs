@@ -136,19 +136,48 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Captures a screenshot of a running VM via <c>virsh screenshot</c> and returns the raw
-        /// PPM bytes (the QXL/SPICE screenshot format), or null when the VM is off, has no
-        /// graphics, or the capture fails. The name is base64'd (cf. <see cref="DeleteFile"/>) so
-        /// quoting is safe; the host temp file is removed afterwards.
+        /// image bytes, or null when the VM is off, has no graphics, or the capture fails. The
+        /// format is whatever libvirt produced — PPM on older hosts, PNG on newer ones — so decode
+        /// with <see cref="Imaging.ScreenshotImage"/>, not the PPM decoder directly. The name is
+        /// base64'd (cf. <see cref="DeleteFile"/>) so quoting is safe; the host temp file is
+        /// removed afterwards.
         /// </summary>
         public byte[]? CaptureScreenshotPpm(string vmName)
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(vmName));
+            // virsh's own stdout chatter is dropped and its stderr captured, so stdout carries
+            // either the base64 payload or the ERR marker — a failure leaves a reason in the log
+            // instead of silently becoming a "No preview available" placeholder.
             var cmd = $"n=$(echo {b64} | base64 -d); f=$(mktemp); " +
-                      $"if virsh screenshot \"$n\" \"$f\" >/dev/null 2>&1; then base64 -w0 \"$f\"; fi; rm -f \"$f\"";
-            var outp = _ssh.RunSudoCommand(cmd).Trim();
-            if (outp.Length == 0) return null;
+                      "if err=$(virsh screenshot \"$n\" \"$f\" 2>&1 >/dev/null); " +
+                      "then base64 -w0 \"$f\"; else printf 'ERR %s' \"$err\"; fi; rm -f \"$f\"";
+
+            string outp;
+            try { outp = _ssh.RunSudoCommand(cmd).Trim(); }
+            catch (Exception ex)
+            {
+                Diagnostics.SpiceLog.Log($"screenshot {vmName}: {ex.Message}");
+                return null;
+            }
+
+            if (outp.StartsWith("ERR", StringComparison.Ordinal))
+            {
+                Diagnostics.SpiceLog.Log($"screenshot {vmName}: virsh failed: {outp[3..].Trim()}");
+                return null;
+            }
+            if (outp.Length == 0)
+            {
+                Diagnostics.SpiceLog.Log($"screenshot {vmName}: no output from virsh");
+                return null;
+            }
+
             try { return Convert.FromBase64String(outp); }
-            catch { return null; }
+            catch
+            {
+                Diagnostics.SpiceLog.Log($"screenshot {vmName}: unexpected non-base64 output: " +
+                                         outp[..Math.Min(120, outp.Length)]);
+                return null;
+            }
         }
 
         public async Task StartVmAsync(string name)

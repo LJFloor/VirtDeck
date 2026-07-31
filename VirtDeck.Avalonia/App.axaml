@@ -52,5 +52,13 @@
                                       ListMedium="#FF404249" />
       </FluentTheme.Palettes>
     </FluentTheme>
+
+    <!-- NumericUpDown draws itself inside a ButtonSpinner, whose height Fluent sets in its own
+         ControlTheme rather than from the TextControl* keys the resource dictionary retunes. Pinned
+         to the field height here so a spinner never stands proud of the text boxes beside it; a
+         Style is the right lever because it outranks the ControlTheme setter it is correcting. -->
+    <Style Selector="ButtonSpinner, NumericUpDown">
+      <Setter Property="MinHeight" Value="{DynamicResource TextControlThemeMinHeight}" />
+    </Style>
   </Application.Styles>
 </Application>

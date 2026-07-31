@@ -1,0 +1,68 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.RemoteFileBrowserDialog"
+        x:DataType="vm:RemoteFileRow"
+        Title="Select File"
+        Width="640" Height="460"
+        WindowStartupLocation="CenterOwner">
+
+  <Window.Resources>
+    <x:Double x:Key="ColSize">90</x:Double>
+    <x:Double x:Key="ColModified">150</x:Double>
+  </Window.Resources>
+
+  <DockPanel Margin="12">
+
+    <!-- Path bar -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <Button Name="UpButton" DockPanel.Dock="Right" Content="Up" MinWidth="52" Margin="6,0,0,0"
+              ToolTip.Tip="Go to the parent directory" />
+      <TextBox Name="DirBox" />
+    </DockPanel>
+
+    <!-- File name + filter -->
+    <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto"
+          Margin="0,10,0,0">
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <TextBox  Grid.Row="0" Grid.Column="1" Name="NameBox" />
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Type:" VerticalAlignment="Center" Margin="0,8,8,0" />
+      <ComboBox Grid.Row="1" Grid.Column="1" Name="FilterBox" HorizontalAlignment="Stretch" Margin="0,8,0,0" />
+
+      <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Orientation="Vertical"
+                  Spacing="6" Margin="10,0,0,0">
+        <Button Name="OpenButton" Content="Open" MinWidth="88" IsDefault="True" Classes="accent" />
+        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      </StackPanel>
+    </Grid>
+
+    <!-- Column header -->
+    <Border DockPanel.Dock="Top" Padding="10,5" Background="#11808080">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Right" Text="Modified" Width="{StaticResource ColModified}" FontWeight="SemiBold" />
+        <TextBlock DockPanel.Dock="Right" Text="Size" Width="{StaticResource ColSize}" FontWeight="SemiBold" />
+        <TextBlock Text="Name" FontWeight="SemiBold" />
+      </DockPanel>
+    </Border>
+
+    <ListBox Name="FileList" Background="Transparent">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="vm:RemoteFileRow">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Modified}" Width="{StaticResource ColModified}"
+                       Opacity="0.7" VerticalAlignment="Center" />
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Size}" Width="{StaticResource ColSize}"
+                       Opacity="0.7" VerticalAlignment="Center" />
+            <Border DockPanel.Dock="Left" Background="{Binding BadgeBrush}" CornerRadius="3"
+                    Width="34" Height="18" Margin="0,0,8,0" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="White"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          </DockPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+  </DockPanel>
+</Window>
