@@ -77,6 +77,9 @@
             <MenuItem Name="FloppyEjectItem" Header="Eject" />
           </MenuItem>
 
+          <!-- A leaf MenuItem in the strip: one click opens the picker, like the WinForms button. -->
+          <MenuItem Name="UsbMenu" Header="USB" />
+
           <MenuItem Name="DisplayMenu" Header="Display">
             <MenuItem Name="LzItem" Header="Low bandwidth (LZ)" ToggleType="Radio" GroupName="compression" />
             <MenuItem Name="RawItem" Header="Raw (uncompressed)" ToggleType="Radio" GroupName="compression" />

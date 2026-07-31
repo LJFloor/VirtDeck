@@ -507,6 +507,15 @@ namespace VirtDeck.Forms
         {
             if (!_connected || _session == null) return;
 
+            // Checked before touching the domain: provisioning redirdevs for a client that cannot
+            // drive them would leave <redirdev> elements behind for nothing.
+            if (!UsbSupport.IsAvailable(out var unsupported))
+            {
+                MessageBox.Show(this, unsupported!, "USB Redirection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             // Make sure the guest has a USB controller + redirdev channels. When a controller has
             // to be added (none present) this is persistent-only and needs a power-cycle; otherwise
             // the redirdev channels hot-plug live and we reconnect to negotiate them.

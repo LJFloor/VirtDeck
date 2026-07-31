@@ -1,6 +1,5 @@
 using SpiceClient.Usb;
 using VirtDeck.Diagnostics;
-using VirtDeck.Interop;
 
 namespace VirtDeck.Forms
 {
@@ -12,7 +11,6 @@ namespace VirtDeck.Forms
     public partial class UsbDeviceDialog : AppForm
     {
         private readonly UsbDeviceManager _usb;
-        private Dictionary<string, string> _names = new();
         private bool _busy;
 
         public UsbDeviceDialog(UsbDeviceManager usb)
@@ -41,9 +39,8 @@ namespace VirtDeck.Forms
             SetButtonsEnabled(false);
             try
             {
+                // Enumerate resolves the friendly names itself (non-invasive — no device capture).
                 var devices = await Task.Run(() => _usb.Enumerate());
-                // Friendly names from Windows (non-invasive — no device capture).
-                _names = await Task.Run(UsbNames.BuildVidPidNameMap);
                 PopulateList(devices);
                 UpdateStatus();
                 UpdateButtons();
@@ -65,7 +62,7 @@ namespace VirtDeck.Forms
             lvDevices.Items.Clear();
             foreach (var d in devices)
             {
-                var item = new ListViewItem(Label(d)) { Tag = d };
+                var item = new ListViewItem(d.Description) { Tag = d };
                 item.SubItems.Add(d.IsRedirected ? "Redirected" : "");
                 if (d.IsRedirected) item.ForeColor = SystemColors.Highlight;
                 lvDevices.Items.Add(item);
@@ -74,15 +71,6 @@ namespace VirtDeck.Forms
             lvDevices.EndUpdate();
             if (devices.Count == 0)
                 lvDevices.Items.Add(new ListViewItem("(no redirectable USB devices found)") { ForeColor = SystemColors.GrayText });
-        }
-
-        // Prefer the Windows friendly name (by VID:PID); fall back to the VID:PID description.
-        private string Label(UsbDeviceInfo d)
-        {
-            string key = $"{d.VendorId:X4}:{d.ProductId:X4}";
-            if (_names.TryGetValue(key, out var n) && !string.IsNullOrWhiteSpace(n))
-                return $"{n}  [{key}]  (bus {d.BusNumber}, addr {d.DeviceAddress})";
-            return d.Description;
         }
 
         private UsbDeviceInfo? SelectedDevice() =>
@@ -146,17 +134,14 @@ namespace VirtDeck.Forms
             // A mass-storage device must have its Windows volume(s) taken offline first: UsbDk captures
             // the device with a USB reset, which blocks/fails while the filesystem is mounted and in use.
             // This also flushes the volume so there's no surprise-removal corruption. No-op for non-storage.
-            UsbStorageDismount.Session dismount;
-            try { dismount = await Task.Run(() => UsbStorageDismount.Prepare(d.VendorId, d.ProductId, SpiceLog.Log)); }
-            catch { dismount = new UsbStorageDismount.Session(); }
+            var prep = await Task.Run(() => UsbStoragePrep.Prepare(d, SpiceLog.Log));
 
-            if (dismount.AnyBlocked)
+            if (prep.AnyBlocked)
             {
-                dismount.Dispose();
+                prep.Dispose();
                 _busy = false;
-                string drives = string.Join(", ", dismount.Blocked.Select(c => c + ":"));
                 MessageBox.Show(this,
-                    $"The drive ({drives}) is still in use, so it can't be handed to the VM yet.\n\n" +
+                    $"The drive ({string.Join(", ", prep.Blocked)}) is still in use, so it can't be handed to the VM yet.\n\n" +
                     "Close any Explorer windows or programs using it (and save/close open files), then try again.\n" +
                     "If it still fails, run SpiceVirtDeck as administrator.",
                     "USB Redirection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -168,12 +153,11 @@ namespace VirtDeck.Forms
             (bool ok, string? error) result;
             try { result = await Task.Run(() => _usb.Bind(d)); }
             catch (Exception ex) { result = (false, ex.Message); }
-            finally
-            {
-                // Once redirected, the device has left Windows so releasing the lock is a no-op; if Bind
-                // failed, releasing remounts the drive so the user gets it back.
-                dismount.Dispose();
-            }
+
+            // On success the device has left Windows, so the lock is simply dropped; if Bind failed,
+            // disposing without Complete() puts the volume back so the user gets the drive again.
+            if (result.ok) prep.Complete();
+            prep.Dispose();
             _busy = false;
 
             if (!result.ok)

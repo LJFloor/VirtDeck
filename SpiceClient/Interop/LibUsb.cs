@@ -88,6 +88,11 @@ internal static class LibUsb
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void libusb_close(IntPtr devHandle);
 
+    // Linux/macOS: lets libusb kick the in-kernel driver (usb-storage, usbhid, …) off an interface
+    // as it claims it, and hand it back on release. Returns LIBUSB_ERROR_NOT_SUPPORTED on Windows.
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int libusb_set_auto_detach_kernel_driver(IntPtr devHandle, int enable);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr libusb_ref_device(IntPtr dev);
 

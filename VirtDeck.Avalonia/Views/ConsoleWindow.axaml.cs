@@ -8,6 +8,7 @@ using SpiceClient;
 using SpiceClient.Channels;
 using SpiceClient.Imaging;
 using SpiceClient.Protocol;
+using SpiceClient.Usb;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Input;
 using VirtDeck.Avalonia.Services;
@@ -182,6 +183,8 @@ public partial class ConsoleWindow : Window
         FloppyServerItem.Click += async (_, _) => await InsertMediaFromServerAsync(cdrom: false);
         FloppyLocalItem.Click += async (_, _) => await InsertMediaFromLocalAsync(cdrom: false);
         FloppyEjectItem.Click += async (_, _) => await EjectAsync(cdrom: false);
+
+        UsbMenu.Click += async (_, _) => await OpenUsbPickerAsync();
 
         ShowHostCursorItem.Click += (_, _) =>
         {
@@ -455,6 +458,13 @@ public partial class ConsoleWindow : Window
         KeyboardMenu.IsEnabled = _connected;
         DisplayMenu.IsEnabled = _connected;
 
+        // Redirection needs a live guest to hand the device to; the picker itself provisions the
+        // domain, so it stays available even on a VM that has no usbredir channels yet.
+        UsbMenu.IsEnabled = _connected;
+        ToolTip.SetTip(UsbMenu, _connected
+            ? "Redirect a USB device from this PC to the VM."
+            : "Start the VM to redirect USB devices.");
+
         CdDvdMenu.IsEnabled = _connected && _cdromTarget != null;
         ToolTip.SetTip(CdDvdMenu, !_connected ? "Start the VM to manage CD/DVD."
                                 : _cdromTarget == null ? NoCdromTip : CdromTip);
@@ -603,6 +613,91 @@ public partial class ConsoleWindow : Window
             await MessageDialog.Info(this, "Media", $"{label} failed:\n{ex2.Message}");
             if (!_closing) StatusText.Text = "Ready";
         }
+    }
+
+    // ---- USB redirection ------------------------------------------------
+
+    /// <summary>
+    /// Opens the USB picker, provisioning the domain first. A VM created without USB has neither a
+    /// controller nor any <c>&lt;redirdev&gt;</c> channels: redirdevs hot-plug (and the console then
+    /// reconnects, because usbredir channels are only advertised at link time), but adding the
+    /// controller itself is persistent-only and needs a power cycle.
+    /// </summary>
+    private async Task OpenUsbPickerAsync()
+    {
+        if (!_connected || _session == null) return;
+
+        // Checked before touching the domain: provisioning redirdevs for a client that cannot drive
+        // them would leave <redirdev> elements behind for nothing.
+        if (!UsbSupport.IsAvailable(out var unsupported))
+        {
+            await MessageDialog.Info(this, "USB Redirection", unsupported!);
+            return;
+        }
+
+        int added;
+        bool needsPowerCycle;
+        try
+        {
+            StatusText.Text = "Configuring USB redirection…";
+            var prov = new UsbProvisioning(_virsh);
+            (added, needsPowerCycle) = await Task.Run(() => prov.EnsureRedirDevices(VmName));
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(this, "USB Redirection", ex.Message);
+            if (!_closing) StatusText.Text = "Ready";
+            return;
+        }
+        if (_closing) return;
+
+        if (needsPowerCycle)
+        {
+            StatusText.Text = "Ready";
+            await MessageDialog.Info(this, "USB Redirection",
+                "A USB controller was added to this VM's configuration.\n\n" +
+                "Power the VM off and start it again (a restart from inside the guest is not enough) " +
+                "to enable USB redirection.");
+            return;
+        }
+
+        if (added > 0)
+        {
+            StatusText.Text = "Enabling USB redirection (reconnecting console)…";
+            await ConnectSpice();
+            if (_closing || !_connected) return;
+        }
+
+        var usb = await WaitForUsbReadyAsync(4000);
+        if (_closing) return;
+        if (usb == null)
+        {
+            StatusText.Text = "Ready";
+            await MessageDialog.Info(this, "USB Redirection",
+                "USB redirection is not available for this VM (no usbredir channels were negotiated).");
+            return;
+        }
+
+        StatusText.Text = "Ready";
+        await new UsbDeviceDialog(usb).ShowDialog(this);
+    }
+
+    /// <summary>
+    /// Waits briefly for the usbredir channels to link after (re)connecting. Returns as soon as a
+    /// slot is ready, or immediately when USB support is known-unavailable (no libusb, or no capture
+    /// backend) — the picker then explains why rather than the user waiting for nothing.
+    /// </summary>
+    private async Task<UsbDeviceManager?> WaitForUsbReadyAsync(int timeoutMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs && !_closing)
+        {
+            var u = _session?.Usb;
+            if (u != null && (u.ReadySlots > 0 || !u.Available || !u.CaptureAvailable))
+                return u;
+            await Task.Delay(150);
+        }
+        return _session?.Usb;
     }
 
     // ---- Clipboard sharing ---------------------------------------------

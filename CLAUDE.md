@@ -23,7 +23,7 @@ No tests yet. `dotnet run --project VirtDeck.Avalonia` is the fastest smoke test
 
 An app to manage libvirt/KVM VMs on a remote Linux host over SSH, with a **native C# SPICE console** (no WebView2, no spice-html5, no WebSocket bridge — raw TCP to the SSH-forwarded SPICE port).
 
-**Cross-platform status:** the engine, services, and the whole management UI (VM list + details sidebar, Networks, create wizard, editor, export, removable media, clipboard, remote file browser, log viewer) run on Linux and Windows, as does guest audio output. Not yet ported to Avalonia (WinForms only): the USB picker. See `Phases 5-7` in the porting plan.
+**Cross-platform status:** the engine, services, and the whole management UI (VM list + details sidebar, Networks, create wizard, editor, export, removable media, clipboard, remote file browser, log viewer) run on Linux and Windows, as do guest audio output and USB redirection. The Avalonia front-end is at feature parity; what remains is packaging/CI and deleting the WinForms project (`Phases 6-7` in the porting plan).
 
 It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via spice-html5 in WebView2 and broke with "Protocol Error" (the WebSocket↔TCP bridge mangled SPICE's binary framing). The native client deletes that failure mode. The SPICE protocol was ported field-for-field from the bundled spice-html5 source at `..\VmManager\VmManager\WebContent\src\*.js` — that JS is the authoritative wire-format reference.
 
@@ -54,7 +54,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Styles/JetBrainsClassic.axaml` — JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` and `JbTableRow`, plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `MenuFlyout*`, `ToolTip*`). Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries — that is what makes those overrides win without `/template/` selectors per state.
   **One font baseline: 12.** A bare `TextBlock` defaults to 12 while every Fluent `ControlTheme` sets its own size from `ControlContentThemeFontSize` (14), so labels and the fields beside them rendered two points apart; each retemplated control here drops that setter and falls back to the inherited 12, which widened the gap further. The dictionary pulls the key down to 12, and every metric in it (24px fields and buttons, 22px tool buttons, a 14px check/radio box, `12,4` table rows) is sized for that. **Fields and buttons share one height (24)** — same 1px border, same 3px vertical inset — so a text box, dropdown or spinner lines up with the button next to it; `App.axaml` pins `ButtonSpinner`/`NumericUpDown` to the same key because Fluent sizes those outside `TextControl*`. Views should not set a local `FontSize` or `Height` to line controls up — fix the baseline instead. Headings (wizard title 15, login 16) are the deliberate exceptions.
 - `Input/PhysicalKeyMap` — Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent — more correct than the WinForms VK table, which reads through the host layout.
-- `Views/` — `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
+- `Views/` — `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
 - `Services/FileDialogs` — the one place the WinForms filter string (`"ISO images (*.iso)|*.iso"`) is translated, into `IStorageProvider` picker types (XDG portal on Linux). Only local paths are accepted — everything downstream needs a real `FileStream`.
 - `Controls/RemotePathBox` — textbox + "…" opening `RemoteFileBrowserDialog`. That browser badges files by extension instead of asking the OS for an icon (`ShellIcons`/`SHGetFileInfo` is deleted): these are the *server's* files, so a client-side association would be misleading anyway.
 - `Input/AsciiScancodes` — char → AT set-1 scancode + shift, for "Type clipboard". Replaces `VkKeyScan`, which read the *host* layout; scancodes are positional, so the guest's layout decides — a fixed US table is exactly as correct and equally approximate elsewhere.
@@ -137,14 +137,22 @@ unavailable on `q35`/UEFI.
 
 ## USB redirection
 
-The console can redirect a physical USB device on the Windows client into the guest (the SPICE
-**usbredir** channel, type 9). It is independent of the guest agent — the guest only needs a USB
-controller + the device's normal driver.
+The console can redirect a physical USB device on the client into the guest (the SPICE
+**usbredir** channel, type 9), on **Windows and Linux**. It is independent of the guest agent — the
+guest only needs a USB controller + the device's normal driver.
 
 - **Native stack (not a C# port):** `SpiceClient` P/Invokes `usbredirhost` + `usbredirparser` +
-  `libusb-1.0` (UsbDk backend). These x64 DLLs are loaded by bare name and must sit next to
-  `VirtDeck.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) — the csproj copies
-  them to output. **The whole process is x64** (`PlatformTarget`) because the DLLs are 64-bit.
+  `libusb-1.0`, loaded by bare name through `Interop/NativeLibraryResolver`. On Windows the x64
+  DLLs must sit next to `VirtDeck.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) —
+  the csproj copies them to output. On Linux they come from the distro (`libusb-1.0.so.0`,
+  `libusbredirhost.so.1`), so there is nothing to stage.
+- **Never link a channel you can't drive.** `Usb/UsbSupport.IsAvailable` gates channel creation in
+  `SpiceSession.CreateUsbChannel`: with libusb or usbredirhost missing, the usbredir channels are
+  **not connected at all**. A channel that links and then never speaks usb_redir gets the *whole*
+  SPICE connection closed by the server about a second later — the console reconnects, links it
+  again, and dies again, which presents as a **flickering console** on every VM that has
+  `<redirdev>` elements. The picker and the console's USB entry check the same helper, so
+  provisioning never adds redirdevs a client can't use.
 - **Channel:** `Channels/UsbredirChannel` is a spicevmc tunnel — it shuttles opaque
   `MSG/MSGC_SPICEVMC_DATA` (101) bytes, which are the raw usbredir wire protocol. On link it creates
   one persistent `Usb/UsbredirHostInstance` (a managed wrapper over `usbredirhost`) with **no device**
@@ -156,23 +164,38 @@ controller + the device's normal driver.
   **before** `libusb_exit` (`Usb/LibUsbContext`, one shared context + one event thread).
 - **Manager/UI:** `Usb/UsbDeviceManager` (on `SpiceSession.Usb`, created when the host advertises a
   usbredir channel) enumerates devices, filters out HID/hubs, and binds a device to a free channel.
-  `Forms/UsbDeviceDialog` is the picker (device names come from Windows via `Interop/UsbNames`,
-  SetupAPI — non-invasive); the console's **USB** toolbar button opens it.
-- **Mass storage:** UsbDk captures a device with a USB *reset*, which blocks/fails (libusb
-  `LIBUSB_ERROR_OTHER`) while a drive's volume is mounted and in use. Before binding, the picker calls
-  `Interop/UsbStorageDismount` to map the device (VID/PID) → its Windows drive letters (SetupAPI +
-  cfgmgr32 parent-walk) and `FSCTL_LOCK_VOLUME`+`FSCTL_DISMOUNT_VOLUME` them (held until capture; flushes
-  the FS so there's no surprise-removal corruption — spice-gtk/virt-viewer skip this). On release UsbDk's
-  reset makes Windows re-enumerate and auto-remount. If a volume can't be locked (open files), the user
-  is told to close them.
+  `Enumerate` labels each device from `Usb/UsbNameTable` — sysfs `manufacturer`/`product` keyed by
+  bus+devnum on Linux, SetupAPI keyed by VID:PID on Windows. Both read what the OS cached at
+  enumeration: the picker must never *open* a device just to name it. The pickers are
+  `VirtDeck.Avalonia/Views/UsbDeviceDialog` and `VirtDeck/Forms/UsbDeviceDialog`, opened from the
+  console's **USB** toolbar entry.
+- **Mass storage** (`Usb/UsbStoragePrep` + the `WindowsUsbStorage`/`LinuxUsbStorage` halves) — the
+  picker takes the device's filesystems offline before binding, for a different reason per platform:
+  UsbDk captures with a USB *reset* that blocks/fails (libusb `LIBUSB_ERROR_OTHER`) while a volume is
+  mounted, and libusb on Linux detaches `usb-storage` out from under a mounted filesystem. Windows
+  maps VID/PID → drive letters (SetupAPI + cfgmgr32 parent-walk) and `FSCTL_LOCK_VOLUME` +
+  `FSCTL_DISMOUNT_VOLUME`, holding the lock until capture; Linux walks the device's own sysfs subtree
+  to `…/block/sdX`, matches `/proc/self/mounts`, and unmounts via `udisksctl` (same service as the
+  udisks2 D-Bus API, so desktop-mounted media needs no polkit prompt) falling back to `umount`.
+  `Complete()` on a successful bind means "the device left this PC, don't restore"; disposing without
+  it puts the volumes back. spice-gtk/virt-viewer skip this step entirely. A volume that can't be
+  taken offline (open files) is reported and the redirect is not attempted.
+- **Device permissions (Linux):** libusb needs rw on `/dev/bus/usb/…`. `packaging/70-virtdeck-usb.rules`
+  (`TAG+="uaccess"`) grants it to the seat user; without it `libusb_open` returns
+  `LIBUSB_ERROR_ACCESS` and `UsbDeviceManager.DescribeOpenFailure` tells the user to install the rule
+  and replug.
 - **Host provisioning:** `Services/UsbProvisioning` auto-ensures the domain has a USB controller +
   4 `<redirdev type='spicevmc'>` channels. redirdevs hot-plug (`attach-device --live --config`) when a
   controller exists (then the console reconnects to see them); adding a controller is persistent-only
   and needs a power-cycle.
-- **Client driver:** the **UsbDk** kernel driver is required (installed by `installer\` — Inno Setup).
-  Without it (or the DLLs), channels still link but redirection is dormant and the picker says why.
-  Reliability: bulk/HID/mass-storage solid over the tunnel; isochronous (webcams/audio) is a known
-  weak spot. Pin a known-good `libusb-1.0.dll` (virt-viewer 10.x; v11's regressed redirection).
+- **Capture backend:** on Windows the **UsbDk** kernel driver is required (installed by `installer\` —
+  Inno Setup) and requested via `LIBUSB_OPTION_USE_USBDK`; on Linux libusb's native backend captures
+  directly, so the option is **not** set there (it would fail and silently disable redirection) and
+  `libusb_set_auto_detach_kernel_driver` kicks the in-kernel driver off the interface instead.
+  Without the backend (or the libraries), channels still link but redirection is dormant and the
+  picker says why. Reliability: bulk/HID/mass-storage solid over the tunnel; isochronous
+  (webcams/audio) is a known weak spot on both platforms. Pin a known-good `libusb-1.0.dll`
+  (virt-viewer 10.x; v11's regressed redirection).
 
 ## Conventions
 

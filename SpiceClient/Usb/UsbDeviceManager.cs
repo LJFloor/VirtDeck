@@ -83,8 +83,9 @@ public sealed class UsbDeviceManager
 
     /// <summary>
     /// Lists redirectable host USB devices. HID (keyboard/mouse) and hubs are excluded so
-    /// the local machine stays usable. Device names are best-effort (the descriptor strings
-    /// require opening the device, which is intentionally avoided here to stay non-invasive).
+    /// the local machine stays usable. Names come from what the OS cached at enumeration
+    /// (<see cref="UsbNameTable"/>) rather than from the device's own string descriptors, which
+    /// would mean opening it — deliberately avoided here to stay non-invasive.
     /// </summary>
     public List<UsbDeviceInfo> Enumerate()
     {
@@ -93,6 +94,8 @@ public sealed class UsbDeviceManager
 
         HashSet<string> bound;
         lock (_lock) bound = _bindings.Values.Select(d => d.Key).ToHashSet();
+
+        var names = UsbNameTable.Build();
 
         var count = LibUsb.libusb_get_device_list(_ctx.Handle, out var list);
         long n = count.ToInt64();
@@ -106,13 +109,19 @@ public sealed class UsbDeviceManager
                 if (LibUsb.libusb_get_device_descriptor(dev, out var d) != LibUsb.LIBUSB_SUCCESS) continue;
                 if (d.bDeviceClass == LibUsb.USB_CLASS_HID || d.bDeviceClass == LibUsb.USB_CLASS_HUB) continue;
 
+                byte bus = LibUsb.libusb_get_bus_number(dev);
+                byte addr = LibUsb.libusb_get_device_address(dev);
+                var (manufacturer, product) = names.Lookup(bus, addr, d.idVendor, d.idProduct);
+
                 var info = new UsbDeviceInfo
                 {
                     VendorId = d.idVendor,
                     ProductId = d.idProduct,
-                    BusNumber = LibUsb.libusb_get_bus_number(dev),
-                    DeviceAddress = LibUsb.libusb_get_device_address(dev),
+                    BusNumber = bus,
+                    DeviceAddress = addr,
                     DeviceClass = d.bDeviceClass,
+                    Manufacturer = manufacturer,
+                    Product = product,
                 };
                 info.IsRedirected = bound.Contains(info.Key);
                 result.Add(info);
@@ -248,6 +257,14 @@ public sealed class UsbDeviceManager
                 {
                     _log($"[usb] libusb_open failed: {LibUsb.ErrorName(rc)}");
                     handle = IntPtr.Zero;
+                }
+                else
+                {
+                    // On Linux the device is still bound to its kernel driver (usb-storage, usbhid…);
+                    // without this, claiming an interface fails with LIBUSB_ERROR_BUSY. Not supported
+                    // on Windows, where UsbDk has already taken the device — ignore the error there.
+                    try { LibUsb.libusb_set_auto_detach_kernel_driver(handle, 1); }
+                    catch (EntryPointNotFoundException) { /* pre-1.0.9 libusb */ }
                 }
                 break;
             }

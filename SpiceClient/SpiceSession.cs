@@ -93,6 +93,7 @@ public sealed class SpiceSession : IDisposable
     private MainChannel? _main;
     private UsbDeviceManager? _usb;
     private LibUsbContext? _usbCtx;
+    private bool _usbChannelsSkipped; // log the "no usbredir stack" reason once, not per channel
     private int _down;
     private int _disposed;
     private bool _codecWarned;
@@ -134,16 +135,31 @@ public sealed class SpiceSession : IDisposable
 
     // ---- USB redirection -----------------------------------------------
 
-    private UsbredirChannel CreateUsbChannel(byte id)
+    private UsbredirChannel? CreateUsbChannel(byte id)
     {
-        // First usbredir channel brings up the shared libusb context (UsbDk backend) + manager.
-        // This never throws: if the native USB libraries or UsbDk are missing, the manager
-        // reports itself unavailable and the channel still links (just stays dormant).
+        // First usbredir channel brings up the shared libusb context (UsbDk backend on Windows) +
+        // manager. This never throws: if the native libraries or the capture backend are missing,
+        // the manager reports itself unavailable and the picker explains why.
         if (_usb == null)
         {
             _usbCtx = new LibUsbContext(Log);
             _usb = new UsbDeviceManager(_usbCtx, Log);
         }
+
+        // Without libusb+usbredirhost the channel could link but never speak usb_redir, and the
+        // server answers that silence by closing the WHOLE connection — taking display and inputs
+        // with it. Leaving the channel unconnected is the safe dormant state (what spice-gtk built
+        // without usbredir does); the manager still exists, so the picker can say what to install.
+        if (!_usbCtx!.Available)
+        {
+            if (!_usbChannelsSkipped)
+            {
+                _usbChannelsSkipped = true;
+                Log($"[usb] not connecting usbredir channels: {_usb.UnavailableReason}");
+            }
+            return null;
+        }
+
         var ch = new UsbredirChannel(this, Host, Port, id, ConnectionId, Password);
         _usb.RegisterChannel(ch);
         return ch;

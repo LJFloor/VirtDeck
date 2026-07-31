@@ -72,6 +72,16 @@ internal sealed class LibUsbContext : IDisposable
             // (MinGW builds use libusbredirhost-1.dll etc.) before the first P/Invoke.
             NativeLibraryResolver.Ensure();
 
+            // Both halves of the stack are needed. libusb alone is not enough: without
+            // usbredirhost a channel would link and then be unable to talk, which costs the whole
+            // SPICE session (see UsbSupport).
+            if (!UsbSupport.IsAvailable(out var missing))
+            {
+                UnavailableReason = missing;
+                _log($"[usb] {UnavailableReason}");
+                return;
+            }
+
             int rc = LibUsb.libusb_init(out var ctx);
             if (rc != LibUsb.LIBUSB_SUCCESS || ctx == IntPtr.Zero)
             {
