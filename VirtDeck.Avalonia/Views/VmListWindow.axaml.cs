@@ -109,8 +109,6 @@ public partial class VmListWindow : Window
     private void WireToolbar()
     {
         NewVmButton.Click += async (_, _) => await NewVmAsync();
-        RefreshButton.Click += async (_, _) => await RefreshAsync();
-        LogButton.Click += (_, _) => LogWindow.ShowLog(this);
     }
 
     private void WireVmMenu()
@@ -349,7 +347,9 @@ public partial class VmListWindow : Window
         bool anyRunning = rows.Any(r => r.IsRunning);
         bool anyStopped = rows.Any(r => r.State == "shut off");
 
-        MenuConsole.IsEnabled = single && rows[0].IsRunning;
+        // Console opens whatever the state: a shut-off VM gets the powered-off overlay with its
+        // Start button, and the console connects itself as soon as the VM comes up.
+        MenuConsole.IsEnabled = single;
         MenuStart.IsEnabled = anyStopped;
         MenuStop.IsEnabled = anyRunning;
         MenuForceStop.IsEnabled = anyRunning;
@@ -538,7 +538,7 @@ public partial class VmListWindow : Window
 
     private void OpenConsole()
     {
-        if (Selected is { IsRunning: true } row) OpenConsoleFor(row.Name);
+        if (Selected is { } row) OpenConsoleFor(row.Name);
     }
 
     /// <summary>Opens the console for a VM, or focuses its existing window if one is already open.</summary>

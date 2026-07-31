@@ -24,9 +24,6 @@
            list's right-click menu. -->
       <StackPanel Orientation="Horizontal" Spacing="6">
         <Button Name="NewVmButton" Content="New VM…" Classes="accent" />
-        <Border Width="1" Margin="4,2" Background="#33808080" />
-        <Button Name="RefreshButton" Content="Refresh" />
-        <Button Name="LogButton" Content="Log" />
       </StackPanel>
     </Border>
 

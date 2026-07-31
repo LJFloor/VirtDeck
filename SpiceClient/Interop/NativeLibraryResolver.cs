@@ -5,8 +5,8 @@ using System.Threading;
 namespace SpiceClient.Interop;
 
 /// <summary>
-/// Maps the logical DllImport names (<c>usbredirhost</c>, <c>usbredirparser</c>, <c>libusb-1.0</c>)
-/// to the actual filenames a given platform and build ships.
+/// Maps the logical DllImport names (<c>usbredirhost</c>, <c>usbredirparser</c>, <c>libusb-1.0</c>,
+/// <c>pulse-simple</c>) to the actual filenames a given platform and build ships.
 ///
 /// On Windows the DLLs are staged next to the exe: MinGW/MSYS2 builds use SONAME-suffixed names
 /// (<c>libusbredirhost-1.dll</c>) while other builds use the plain names. On Linux the libraries
@@ -14,10 +14,12 @@ namespace SpiceClient.Interop;
 /// <c>.so</c> symlink only exists when the <c>-dev</c> package is installed, so the versioned name
 /// must be tried first.
 ///
-/// This resolver tries every candidate so whichever set is present loads.
-/// Register once (idempotent) before the first USB P/Invoke.
+/// This resolver tries every candidate so whichever set is present loads. There can only be **one**
+/// <see cref="NativeLibrary.SetDllImportResolver"/> per assembly (a second call throws), so every
+/// native dependency of SpiceClient — USB and audio alike — is registered here.
+/// Register once (idempotent) before the first P/Invoke.
 /// </summary>
-internal static class UsbNativeResolver
+internal static class NativeLibraryResolver
 {
     private static int _registered;
 
@@ -37,6 +39,8 @@ internal static class UsbNativeResolver
             { "libusbredirparser.so.1", "libusbredirparser.so", "libusbredirparser-1.so" },
         ["usbredirhost"] = new[]
             { "libusbredirhost.so.1", "libusbredirhost.so", "libusbredirhost-1.so" },
+        ["pulse-simple"] = new[] { "libpulse-simple.so.0", "libpulse-simple.so" },
+        ["pulse"] = new[] { "libpulse.so.0", "libpulse.so" },
     };
 
     private static Dictionary<string, string[]> Candidates =>
@@ -45,7 +49,22 @@ internal static class UsbNativeResolver
     public static void Ensure()
     {
         if (Interlocked.Exchange(ref _registered, 1) == 1) return;
-        NativeLibrary.SetDllImportResolver(typeof(UsbNativeResolver).Assembly, Resolve);
+        NativeLibrary.SetDllImportResolver(typeof(NativeLibraryResolver).Assembly, Resolve);
+    }
+
+    /// <summary>
+    /// True if one of the candidates for <paramref name="libraryName"/> is present. Lets a caller
+    /// pick a backend up front instead of discovering the miss as a DllNotFoundException on the
+    /// first P/Invoke. The handle is deliberately not freed — the load is what we want to keep.
+    /// </summary>
+    public static bool CanLoad(string libraryName)
+    {
+        Ensure();
+        if (!Candidates.TryGetValue(libraryName, out var names)) return false;
+        foreach (var n in names)
+            if (NativeLibrary.TryLoad(n, out _))
+                return true;
+        return false;
     }
 
     private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)

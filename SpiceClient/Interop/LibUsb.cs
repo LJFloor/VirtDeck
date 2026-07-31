@@ -7,7 +7,7 @@ namespace SpiceClient.Interop;
 /// bound. All calls use the C calling convention (cdecl on every libusb build).
 ///
 /// The library is loaded by bare name and mapped to a real filename by
-/// <see cref="UsbNativeResolver"/>: on Windows <c>libusb-1.0.dll</c> + its runtime deps ship
+/// <see cref="NativeLibraryResolver"/>: on Windows <c>libusb-1.0.dll</c> + its runtime deps ship
 /// beside the executable (see the native\win-x64 staging); on Linux it comes from the distro
 /// as <c>libusb-1.0.so.0</c>. Callers must tolerate
 /// <see cref="DllNotFoundException"/>/<see cref="BadImageFormatException"/> so the SPICE session

@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -36,20 +37,32 @@ public partial class ConsoleWindow : Window
     private bool _connected;
     private bool _connecting;
     private bool _closing;
-    private bool _autoFitted;
+    private bool _starting; // powered-off overlay: a virsh start is in flight
+    private PixelSize? _fittedSize; // display size the window was last fitted to (null → never fitted)
+
+    /// <summary>Display size for a console with no guest surface — one opened on a shut-off VM.</summary>
+    private static readonly PixelSize OffSize = new(640, 480);
     private bool _windowActive;
     private long _lastGrabAttempt;
 
-    // Removable media, discovered after connect (bus is always fdc for a floppy).
+    // Devices discovered after connect (bus is always fdc for a floppy).
     private string? _cdromTarget;
     private string? _cdromBus;
     private string? _floppyTarget;
+    private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers a playback channel
     private readonly List<NbdServer> _mediaServers = new(); // streamed "this PC" media; alive while open
 
     // Clipboard sharing. Avalonia has no clipboard-change notification, so the host side is polled
     // while this window is focused; _lastHostClipboard is what suppresses the self-triggered round trip.
     private readonly DispatcherTimer _clipboardPoll;
     private string? _lastHostClipboard;
+
+    // Auto-reconnect. There is no Reconnect button: a console whose session drops (or whose connect
+    // fails) while the guest is still running retries itself. The VM-list poll is a 30 s backstop —
+    // far too slow to be the only recovery, which is what made a manual button necessary.
+    private readonly DispatcherTimer _reconnectTimer;
+    private int _reconnectAttempt;
+    private const int MaxReconnectAttempts = 5;
 
     public string VmName { get; }
 
@@ -74,6 +87,7 @@ public partial class ConsoleWindow : Window
                 ? SpiceDisplay.CursorPolicy.HostCursor
                 : SpiceDisplay.CursorPolicy.SpiceCursor;
             if (s.Maximized) WindowState = WindowState.Maximized;
+            MuteItem.IsChecked = s.AudioMute; // audio is on by default; only a saved mute starts silent
         }
 
         WireToolbar();
@@ -90,6 +104,16 @@ public partial class ConsoleWindow : Window
         // clipboard away from whatever the user is actually working in.
         _clipboardPoll = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background,
             async (_, _) => await PollHostClipboardAsync());
+
+        // One-shot: ScheduleReconnect sets the interval and starts it.
+        _reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _reconnectTimer.Tick += async (_, _) =>
+        {
+            _reconnectTimer.Stop();
+            // Not ConnectSpice directly: the guest may have gone down during the back-off, and
+            // then this should raise the powered-off overlay rather than fail a pointless connect.
+            if (!_closing) await TryConnectOrShowStatus();
+        };
 
         Activated += (_, _) => { _windowActive = true; UpdateGrab(); _clipboardPoll.Start(); };
         Deactivated += (_, _) => { _windowActive = false; UpdateGrab(); _clipboardPoll.Stop(); };
@@ -114,6 +138,7 @@ public partial class ConsoleWindow : Window
             SaveVmSettings();
             _virsh.VmsChanged -= OnVmsChanged;
             _clipboardPoll.Stop();
+            _reconnectTimer.Stop();
             UpdateGrab();
             _grab.Dispose();
             CleanupConnection();
@@ -125,6 +150,7 @@ public partial class ConsoleWindow : Window
 
     private void WireToolbar()
     {
+        StartItem.Click += async (_, _) => await StartGuestAsync();
         ShutdownItem.Click += async (_, _) => await PowerAsync("Shut down", () => _virsh.StopVmAsync(VmName));
         RebootItem.Click += async (_, _) => await PowerAsync("Reboot", () => _virsh.RebootVmAsync(VmName));
         ForceOffItem.Click += async (_, _) =>
@@ -145,7 +171,7 @@ public partial class ConsoleWindow : Window
 
         LzItem.Click += (_, _) => SetCompression(lz: true);
         RawItem.Click += (_, _) => SetCompression(lz: false);
-        FitWindowItem.Click += (_, _) => FitToResolution();
+        FitWindowItem.Click += (_, _) => FitToResolution(restoreIfMaximized: true);
         ScreenshotItem.Click += async (_, _) => await SaveScreenshotAsync();
 
         CdServerItem.Click += async (_, _) => await InsertMediaFromServerAsync(cdrom: true);
@@ -164,8 +190,15 @@ public partial class ConsoleWindow : Window
             SaveVmSettings();
         };
 
-        ReconnectButton.Click += async (_, _) => await TryConnectOrShowStatus();
-        OverlayStartButton.Click += async (_, _) => await PowerAsync("Start", () => _virsh.StartVmAsync(VmName));
+        MuteItem.Click += (_, _) =>
+        {
+            bool muted = MuteItem.IsChecked;
+            if (_session != null) _session.AudioMuted = muted;
+            StatusText.Text = muted ? "Audio muted" : "Audio on";
+            SaveVmSettings();
+        };
+
+        OverlayStartButton.Click += async (_, _) => await StartGuestAsync();
     }
 
     // ---- Settings -----------------------------------------------------
@@ -183,6 +216,7 @@ public partial class ConsoleWindow : Window
         var s = settings.ForVm(uuid);
         s.ShowHostCursor = ShowHostCursorItem.IsChecked;
         s.Maximized = WindowState == WindowState.Maximized;
+        s.AudioMute = MuteItem.IsChecked;
         settings.Save();
     }
 
@@ -215,6 +249,7 @@ public partial class ConsoleWindow : Window
         // "SPICE auth error" — link magic read where the auth result should be).
         if (_connecting) return;
         _connecting = true;
+        _reconnectTimer.Stop();   // an actual attempt supersedes any pending retry
         CleanupConnection();
         ShowOffOverlay(false);
 
@@ -237,15 +272,17 @@ public partial class ConsoleWindow : Window
             _session.StatusMessage += OnSessionStatus;
             _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
             _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
+            _session.AudioMuted = MuteItem.IsChecked; // apply the remembered mute pref before audio starts
 
             Display.Attach(_session);
             Display.Policy = ShowHostCursorItem.IsChecked
                 ? SpiceDisplay.CursorPolicy.HostCursor
                 : SpiceDisplay.CursorPolicy.SpiceCursor;
 
-            _autoFitted = false;
+            _fittedSize = null;
             _session.Start();
             _connected = true;
+            _reconnectAttempt = 0;   // this session stands on its own budget
 
             StatusText.Text = "Connected";
             LzItem.IsChecked = true;   // DisplayChannel requests LZ on link
@@ -255,17 +292,46 @@ public partial class ConsoleWindow : Window
             UpdateGrab();
             if (_windowActive) _clipboardPoll.Start();
 
-            _ = DetectRemovableMediaAsync(); // enables the CD/DVD and Floppy menus for this VM
+            _ = DetectVmDevicesAsync(); // enables the CD/DVD, Floppy and Audio menus for this VM
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Error: {ex.Message}";
             CleanupConnection();
+            ScheduleReconnect($"Error: {ex.Message}");
         }
         finally
         {
             _connecting = false;
         }
+    }
+
+    /// <summary>
+    /// Queues another <see cref="ConnectSpice"/> after a failed connect or a dropped session, with a
+    /// linear back-off and a bounded budget. Only ever for a guest that is still running — a powered-off
+    /// VM belongs to the overlay, and exhausting the budget leaves the 30 s VM-list poll as the backstop,
+    /// so no failure state is permanently stuck without a button to press.
+    /// </summary>
+    private void ScheduleReconnect(string reason)
+    {
+        if (_closing) return;
+        _virsh.Vms.TryGetValue(VmName, out var vm);
+        if (vm?.State != "running" || _reconnectAttempt >= MaxReconnectAttempts)
+        {
+            StatusText.Text = reason;
+            return;
+        }
+
+        _reconnectAttempt++;
+        _reconnectTimer.Interval = TimeSpan.FromSeconds(_reconnectAttempt);   // 1s, 2s, … 5s
+        _reconnectTimer.Start();
+        StatusText.Text = $"{reason} — reconnecting ({_reconnectAttempt}/{MaxReconnectAttempts})…";
+    }
+
+    /// <summary>Cancels a pending retry and hands the next boot of this guest a full budget.</summary>
+    private void StopReconnect()
+    {
+        _reconnectTimer.Stop();
+        _reconnectAttempt = 0;
     }
 
     private void CleanupConnection()
@@ -274,6 +340,7 @@ public partial class ConsoleWindow : Window
         _cdromTarget = null;
         _cdromBus = null;
         _floppyTarget = null;
+        _hasSoundDevice = false;
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
         LzItem.IsChecked = true;   // neutral default; the channel re-requests LZ on reconnect
@@ -290,8 +357,8 @@ public partial class ConsoleWindow : Window
     private void OnSessionDisconnected(string reason) => Dispatcher.UIThread.Post(() =>
     {
         if (_closing) return;
-        StatusText.Text = $"Disconnected: {reason}";
         CleanupConnection();
+        ScheduleReconnect($"Disconnected: {reason}");
     });
 
     private void OnSessionStatus(string message) => Dispatcher.UIThread.Post(() =>
@@ -308,16 +375,57 @@ public partial class ConsoleWindow : Window
             await ConnectSpice();
         else if (vm?.State != "running" && _connected)
         {
+            StopReconnect();
             CleanupConnection();
             StatusText.Text = "VM is powered off.";
             ShowOffOverlay(true);
         }
+        else if (vm?.State == "shut off" && !_connected && !_connecting)
+        {
+            StopReconnect();
+            // Off and idle — a console opened on a stopped VM, a failed connect, or a state that
+            // flapped. Make sure the overlay (and its Start button) is up.
+            StatusText.Text = "VM is powered off.";
+            ShowOffOverlay(true);
+        }
+
+        UpdateToolbarState();
     });
 
     private void ShowOffOverlay(bool visible)
     {
         OffOverlay.IsVisible = visible;
         OffText.Text = $"\"{VmName}\" is powered off.";
+        // Fresh overlay → clickable Start, unless a start this window fired is still in flight
+        // (the poll re-asserts the overlay while the guest is still "shut off").
+        if (!visible) return;
+        if (!_starting) OverlayStartButton.Content = "Start VM";
+        FitToOffSize();
+    }
+
+    /// <summary>
+    /// Starts the VM from the powered-off overlay or the Power menu. Re-entry is guarded rather than
+    /// disabling the button: the console is only waiting for <see cref="OnVmsChanged"/> to see
+    /// "running" and connect, which takes a moment, and a double-click meanwhile must not fire a
+    /// second <c>virsh start</c>.
+    /// </summary>
+    private async Task StartGuestAsync()
+    {
+        if (_starting) return;
+        _starting = true;
+        OverlayStartButton.Content = "Starting…";
+        UpdateToolbarState();
+        try
+        {
+            await PowerAsync("Start", () => _virsh.StartVmAsync(VmName));
+        }
+        finally
+        {
+            // On success the overlay is already gone (OnVmsChanged → ConnectSpice); on failure the
+            // label goes back so the user can retry without reopening the console.
+            _starting = false;
+            if (!_closing) { OverlayStartButton.Content = "Start VM"; UpdateToolbarState(); }
+        }
     }
 
     private async Task PowerAsync(string verb, Func<Task> action)
@@ -333,9 +441,19 @@ public partial class ConsoleWindow : Window
 
     private void UpdateToolbarState()
     {
+        // Power acts on the domain, not on the SPICE session: it stays usable in a console opened
+        // on a shut-off VM, which is the whole point of being able to open one.
+        _virsh.Vms.TryGetValue(VmName, out var vm);
+        bool running = vm?.State == "running";
+        bool stopped = vm?.State == "shut off";
+        StartItem.IsEnabled = stopped && !_starting;
+        ShutdownItem.IsEnabled = running;
+        RebootItem.IsEnabled = running;
+        ForceOffItem.IsEnabled = running;
+        ResetItem.IsEnabled = running;
+
         KeyboardMenu.IsEnabled = _connected;
         DisplayMenu.IsEnabled = _connected;
-        ReconnectButton.IsEnabled = !_connecting;
 
         CdDvdMenu.IsEnabled = _connected && _cdromTarget != null;
         ToolTip.SetTip(CdDvdMenu, !_connected ? "Start the VM to manage CD/DVD."
@@ -346,11 +464,15 @@ public partial class ConsoleWindow : Window
         FloppyMenu.IsVisible = _floppyTarget != null;
         FloppyMenu.IsEnabled = _connected && _floppyTarget != null;
         ToolTip.SetTip(FloppyMenu, _connected ? FloppyTip : "Start the VM to manage floppy media.");
+
+        // Same treatment for audio: a VM with no sound device gets no menu at all.
+        AudioMenu.IsVisible = _hasSoundDevice;
+        AudioMenu.IsEnabled = _connected && _hasSoundDevice;
     }
 
     // ---- Removable media ----------------------------------------------
 
-    private async Task DetectRemovableMediaAsync()
+    private async Task DetectVmDevicesAsync()
     {
         try
         {
@@ -361,6 +483,7 @@ public partial class ConsoleWindow : Window
             _cdromTarget = cd?.Target;
             _cdromBus = cd == null ? null : (string.IsNullOrEmpty(cd.Bus) ? "sata" : cd.Bus);
             _floppyTarget = fd?.Target;
+            _hasSoundDevice = cfg.HasSoundDevice;
             UpdateToolbarState();
         }
         catch { /* leave the menus disabled */ }
@@ -617,32 +740,99 @@ public partial class ConsoleWindow : Window
     private void OnResolutionChanged(int w, int h)
     {
         StatusText.Text = $"Connected — {w}×{h}";
-        // Size to the guest once, on the first surface, so the window isn't fighting the user
-        // afterwards. "Fit window" repeats it on demand.
-        if (!_autoFitted)
-        {
-            _autoFitted = true;
-            FitToResolution();
-        }
+
+        // Size to the guest on the first surface, and keep tracking it afterwards (grow or shrink,
+        // in place) while windowed — like VirtualBox/Hyper-V. A guest that switches mode (installer
+        // → desktop, display-settings change, agent-driven resize) should carry the window with it.
+        // Maximized/full-screen deliberately doesn't move: there the guest image re-centres on black.
+        // Only a real change refits, so a surface recreated at the same size leaves a window the
+        // user has resized by hand alone.
+        var res = new PixelSize(w, h);
+        if (_fittedSize == res) return;
+
+        _fittedSize = res;
+        FitToResolution();
     }
 
-    private void FitToResolution()
+    /// <summary>
+    /// Sizes a console that has no guest surface to show — one opened on a shut-off VM. Without this
+    /// it would sit at the XAML's 1024×768 with nothing but the overlay in it. Only ever the *first*
+    /// sizing decision: a window already fitted to a guest keeps that size when the VM shuts down,
+    /// and the user's own resize survives the poll re-asserting the overlay.
+    /// </summary>
+    private void FitToOffSize()
     {
-        if (Display.Resolution is not { } res) return;
-        if (WindowState == WindowState.Maximized || WindowState == WindowState.FullScreen) return;
+        if (_fittedSize != null) return;
+        _fittedSize = OffSize;
+        FitToResolution();
+    }
 
-        // Grow the window by the chrome around the display so the guest lands 1:1.
+    /// <param name="restoreIfMaximized">
+    /// For the explicit "Fit window to guest" command: a resize is ignored while maximized, so the
+    /// window has to be restored first. Automatic fits pass false and skip instead.
+    /// </param>
+    private void FitToResolution(bool restoreIfMaximized = false)
+    {
+        var target = Display.Resolution ?? OffSize;
+
+        if (WindowState is WindowState.Maximized or WindowState.FullScreen)
+        {
+            if (!restoreIfMaximized) return;
+            // Fit once the WM has handed back the normal-state bounds.
+            WindowState = WindowState.Normal;
+            Dispatcher.UIThread.Post(() => ApplyFit(target), DispatcherPriority.Background);
+            return;
+        }
+
+        ApplyFit(target);
+    }
+
+    private void ApplyFit(PixelSize res)
+    {
+        if (_closing) return;
+        if (WindowState is WindowState.Maximized or WindowState.FullScreen) return;
+
+        // Grow the window by the chrome around the display so the guest lands 1:1. The display is
+        // the DockPanel's fill child, so this difference is the toolbar + status bar + borders and
+        // doesn't depend on the guest size — it stays correct even before layout catches up.
         double chromeW = Bounds.Width - Display.Bounds.Width;
         double chromeH = Bounds.Height - Display.Bounds.Height;
         if (chromeW < 0 || chromeH < 0) return;
 
         var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
-        double maxW = screen?.WorkingArea.Width ?? double.MaxValue;
-        double maxH = screen?.WorkingArea.Height ?? double.MaxValue;
+        double scaling = screen?.Scaling ?? 1.0;
+        double maxW = screen == null ? double.MaxValue : screen.WorkingArea.Width / scaling;
+        double maxH = screen == null ? double.MaxValue : screen.WorkingArea.Height / scaling;
 
         Width = Math.Min(res.Width + chromeW, maxW);
         Height = Math.Min(res.Height + chromeH, maxH);
+
+        KeepOnScreen();
     }
+
+    /// <summary>
+    /// Nudges the window back inside the work area after a fit — a guest that jumps to a larger mode
+    /// would otherwise push its own title bar off the bottom/right. Posted because the new bounds
+    /// only exist after the resize has been through layout. Best-effort: positioning is a no-op on
+    /// compositors that don't let a client place its own windows.
+    /// </summary>
+    private void KeepOnScreen() => Dispatcher.UIThread.Post(() =>
+    {
+        if (_closing || WindowState != WindowState.Normal) return;
+        if (Screens.ScreenFromWindow(this) is not { } screen) return;
+
+        var wa = screen.WorkingArea;
+        var size = PixelSize.FromSize(FrameSize ?? ClientSize, screen.Scaling);
+        var pos = Position;
+
+        int x = pos.X, y = pos.Y;
+        if (x + size.Width > wa.Right) x = wa.Right - size.Width;
+        if (y + size.Height > wa.Bottom) y = wa.Bottom - size.Height;
+        if (x < wa.X) x = wa.X;
+        if (y < wa.Y) y = wa.Y;
+
+        if (x != pos.X || y != pos.Y) Position = new PixelPoint(x, y);
+    }, DispatcherPriority.Background);
 
     // ---- Keyboard -----------------------------------------------------
 

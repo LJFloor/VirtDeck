@@ -16,12 +16,6 @@
       <Setter Property="Padding" Value="3,2" />
     </Style>
 
-    <Style Selector="Border.toolsep">
-      <Setter Property="Width" Value="1" />
-      <Setter Property="Margin" Value="5,3" />
-      <Setter Property="Background" Value="{DynamicResource JbToolBarBorder}" />
-    </Style>
-
     <!-- Match the dropdown cells to the plain toolbar buttons beside them. -->
     <Style Selector="Menu.toolbar">
       <Setter Property="Background" Value="Transparent" />
@@ -49,6 +43,8 @@
         <Menu Classes="toolbar">
 
           <MenuItem Name="PowerMenu" Header="Power">
+            <MenuItem Name="StartItem" Header="Start" />
+            <Separator />
             <MenuItem Name="ShutdownItem" Header="Shut down (ACPI)" />
             <MenuItem Name="RebootItem" Header="Reboot" />
             <Separator />
@@ -91,12 +87,14 @@
             <MenuItem Name="ScreenshotItem" Header="Save screenshot…" />
           </MenuItem>
 
+          <!-- Hidden unless the VM has a <sound> device, like Floppy: with no sound device there
+               is no playback channel and the item would be permanently dead. -->
+          <MenuItem Name="AudioMenu" Header="Audio" IsVisible="False">
+            <MenuItem Name="MuteItem" Header="Mute" ToggleType="CheckBox"
+                      ToolTip.Tip="Silences guest audio on this PC only — the guest keeps playing." />
+          </MenuItem>
+
         </Menu>
-
-        <Border Classes="toolsep" />
-
-        <Button Name="ReconnectButton" Content="Reconnect"
-                Theme="{StaticResource JbToolButton}" />
       </StackPanel>
     </Border>
 

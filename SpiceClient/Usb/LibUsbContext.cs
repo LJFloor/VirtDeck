@@ -70,7 +70,7 @@ internal sealed class LibUsbContext : IDisposable
         {
             // Map usbredirhost/usbredirparser/libusb-1.0 to whatever filenames are actually staged
             // (MinGW builds use libusbredirhost-1.dll etc.) before the first P/Invoke.
-            UsbNativeResolver.Ensure();
+            NativeLibraryResolver.Ensure();
 
             int rc = LibUsb.libusb_init(out var ctx);
             if (rc != LibUsb.LIBUSB_SUCCESS || ctx == IntPtr.Zero)
