@@ -8,7 +8,7 @@ namespace VirtDeck.Services
         private SshClient? _client;
         private string _password = string.Empty;
         // One command at a time on the shared SshClient (RefreshAsync, edits, file browsing all race otherwise).
-        private readonly object _ioLock = new();
+        private readonly Lock _ioLock = new();
 
         public bool IsConnected => _client?.IsConnected ?? false;
         public string Host { get; private set; } = string.Empty;
@@ -35,14 +35,12 @@ namespace VirtDeck.Services
         {
             lock (_ioLock)
             {
-                if (_client == null || !_client.IsConnected)
+                if (_client is not { IsConnected: true })
                     throw new InvalidOperationException("SSH is not connected.");
 
                 using var cmd = _client.RunCommand(command);
                 Interlocked.Add(ref _bytesReceived, cmd.Result.Length);
-                if (cmd.ExitStatus != 0)
-                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}");
-                return cmd.Result;
+                return cmd.ExitStatus != 0 ? throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}") : cmd.Result;
             }
         }
 
@@ -50,7 +48,7 @@ namespace VirtDeck.Services
         {
             lock (_ioLock)
             {
-                if (_client == null || !_client.IsConnected)
+                if (_client is not { IsConnected: true })
                     throw new InvalidOperationException("SSH is not connected.");
 
                 var escapedCommand = command.Replace("'", "'\\''");
@@ -70,10 +68,7 @@ namespace VirtDeck.Services
                 if (markerIndex >= 0)
                     output = output[(markerIndex + SudoMarker.Length)..].TrimStart('\n', '\r');
 
-                if (cmd.ExitStatus != 0)
-                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}");
-
-                return output;
+                return cmd.ExitStatus != 0 ? throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}") : output;
             }
         }
 
@@ -108,7 +103,7 @@ namespace VirtDeck.Services
             CancellationToken ct,
             long knownSize = -1)
         {
-            if (_client == null || !_client.IsConnected)
+            if (_client is not { IsConnected: true })
                 throw new InvalidOperationException("SSH is not connected.");
 
             await Task.Run(() =>
@@ -119,7 +114,7 @@ namespace VirtDeck.Services
                 {
                     var pathB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(remotePath));
 
-                    long total = knownSize;
+                    var total = knownSize;
                     if (total < 0)
                     {
                         try
@@ -209,13 +204,12 @@ namespace VirtDeck.Services
                 }
                 ct.ThrowIfCancellationRequested();
                 cmd.EndExecute(ar);
-                if (cmd.ExitStatus != 0)
-                {
-                    // sudo -S always echoes "[sudo] password for user: " to stderr; strip it.
-                    var err = System.Text.RegularExpressions.Regex.Replace(
-                        cmd.Error.Trim(), @"\[sudo\] password for [^:]+:\s*", "").Trim();
-                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {err}");
-                }
+                if (cmd.ExitStatus == 0) return;
+                
+                // sudo -S always echoes "[sudo] password for user: " to stderr; strip it.
+                var err = System.Text.RegularExpressions.Regex.Replace(
+                    cmd.Error.Trim(), @"\[sudo\] password for [^:]+:\s*", "").Trim();
+                throw new Exception($"Command failed (exit {cmd.ExitStatus}): {err}");
             }
             finally
             {

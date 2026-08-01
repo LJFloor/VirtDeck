@@ -73,9 +73,9 @@ namespace VirtDeck.Services
 
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
-            int localPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            var localPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
 
-            uint remotePort = StartRemoteForward(sshClient, (uint)localPort);
+            var remotePort = StartRemoteForward(sshClient, (uint)localPort);
             RemoteUrl = $"nbd://127.0.0.1:{remotePort}/";
 
             _acceptTask = Task.Run(() => AcceptLoop(_cts.Token));
@@ -84,9 +84,9 @@ namespace VirtDeck.Services
         private uint StartRemoteForward(SshClient sshClient, uint localPort)
         {
             var random = new Random();
-            for (int attempt = 0; attempt < 3; attempt++)
+            for (var attempt = 0; attempt < 3; attempt++)
             {
-                uint remotePort = (uint)random.Next(49152, 65536);
+                var remotePort = (uint)random.Next(49152, 65536);
                 try
                 {
                     _forwardedPort = new ForwardedPortRemote("127.0.0.1", remotePort, "127.0.0.1", localPort);
@@ -157,17 +157,17 @@ namespace VirtDeck.Services
             // C: 32-bit client flags.
             var cf = new byte[4];
             if (!ReadFull(s, cf, 0, 4)) return false;
-            uint clientFlags = BinaryPrimitives.ReadUInt32BigEndian(cf);
-            bool noZeroes = (clientFlags & CLIENT_NO_ZEROES) != 0;
+            var clientFlags = BinaryPrimitives.ReadUInt32BigEndian(cf);
+            var noZeroes = (clientFlags & CLIENT_NO_ZEROES) != 0;
 
             // Option haggling: 8-byte IHAVEOPT magic, 4-byte option, 4-byte length, then `length` bytes.
             var hdr = new byte[16];
             while (true)
             {
                 if (!ReadFull(s, hdr, 0, 16)) return false;
-                ulong magic = BinaryPrimitives.ReadUInt64BigEndian(hdr.AsSpan(0));
-                uint option = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(8));
-                uint optLen = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(12));
+                var magic = BinaryPrimitives.ReadUInt64BigEndian(hdr.AsSpan(0));
+                var option = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(8));
+                var optLen = BinaryPrimitives.ReadUInt32BigEndian(hdr.AsSpan(12));
                 if (magic != IHAVEOPT) return false;
 
                 // Always drain the option payload so the stream stays framed, even when we refuse the option.
@@ -246,10 +246,10 @@ namespace VirtDeck.Services
             {
                 if (!ReadFull(s, req, 0, 28)) return;
                 if (BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(0)) != REQUEST_MAGIC) return;
-                ushort type = BinaryPrimitives.ReadUInt16BigEndian(req.AsSpan(6));
-                ulong handle = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(8));
-                ulong offset = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(16));
-                uint length = BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(24));
+                var type = BinaryPrimitives.ReadUInt16BigEndian(req.AsSpan(6));
+                var handle = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(8));
+                var offset = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(16));
+                var length = BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(24));
 
                 switch (type)
                 {
@@ -271,10 +271,10 @@ namespace VirtDeck.Services
             lock (_fileLock)
             {
                 _file!.Seek((long)offset, SeekOrigin.Begin);
-                int total = 0;
+                var total = 0;
                 while (total < (int)length)
                 {
-                    int r = _file.Read(data, total, (int)length - total);
+                    var r = _file.Read(data, total, (int)length - total);
                     if (r == 0) break;
                     total += r;
                 }

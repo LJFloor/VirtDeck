@@ -821,7 +821,7 @@ namespace VirtDeck.Services
         {
             if (string.IsNullOrEmpty(path) || path == "/") return null;
             var trimmed = path.TrimEnd('/');
-            int slash = trimmed.LastIndexOf('/');
+            var slash = trimmed.LastIndexOf('/');
             if (slash <= 0) return "/";
             return trimmed[..slash];
         }
@@ -847,7 +847,7 @@ namespace VirtDeck.Services
         public (bool cpuSupports, bool biosEnabled, string libvirtState) CheckHostCapabilities()
         {
             bool cpu = false, bios = false;
-            string libvirt = "unknown";
+            var libvirt = "unknown";
             try { cpu     = _ssh.RunCommand("grep -qE 'svm|vmx' /proc/cpuinfo && echo 1 || echo 0").Trim() == "1"; } catch { }
             try { bios    = _ssh.RunCommand("test -c /dev/kvm && echo 1 || echo 0").Trim() == "1"; } catch { }
             try { libvirt = _ssh.RunCommand("systemctl is-active libvirtd 2>/dev/null || true").Trim(); } catch { }
@@ -872,7 +872,7 @@ namespace VirtDeck.Services
             {
                 var output = _ssh.RunSudoCommand("virsh net-list --all");
                 var result = new List<NetworkInfo>();
-                bool pastSeparator = false;
+                var pastSeparator = false;
                 foreach (var line in output.Split('\n'))
                 {
                     if (!pastSeparator) { if (line.TrimStart().StartsWith("---")) pastSeparator = true; continue; }

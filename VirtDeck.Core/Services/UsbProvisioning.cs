@@ -12,13 +12,13 @@ namespace VirtDeck.Services
 
     /// <summary>
     /// Ensures a guest domain is configured for USB redirection: a USB controller plus up to
-    /// <see cref="DesiredChannels"/> &lt;redirdev type='spicevmc'&gt; channels (one per simultaneously
+    /// <see cref="DESIRED_CHANNELS"/> &lt;redirdev type='spicevmc'&gt; channels (one per simultaneously
     /// redirected device). redirdev channels hot-plug when a controller already exists; adding a
     /// controller (none present) is persistent-only and needs a power-cycle. Idempotent.
     /// </summary>
     public sealed class UsbProvisioning
     {
-        public const int DesiredChannels = 4;
+        public const int DESIRED_CHANNELS = 4;
 
         private readonly VirshService _virsh;
 
@@ -48,7 +48,7 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
-        /// Brings the VM up to <see cref="DesiredChannels"/> redirdev channels, adding a USB
+        /// Brings the VM up to <see cref="DESIRED_CHANNELS"/> redirdev channels, adding a USB
         /// controller first if none exists. Returns how many redirdev channels were added and
         /// whether a power-cycle is required (true only when a controller had to be added).
         /// </summary>
@@ -69,7 +69,7 @@ namespace VirtDeck.Services
                 _virsh.AttachDeviceXml(vmName, "<controller type='usb' model='qemu-xhci' ports='8'/>", live: false);
             }
 
-            int toAdd = Math.Max(0, DesiredChannels - insp.RedirdevCount);
+            int toAdd = Math.Max(0, DESIRED_CHANNELS - insp.RedirdevCount);
             for (int i = 0; i < toAdd; i++)
                 _virsh.AttachDeviceXml(vmName, "<redirdev bus='usb' type='spicevmc'/>", live: live);
 

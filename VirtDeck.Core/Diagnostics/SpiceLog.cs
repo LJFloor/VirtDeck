@@ -11,28 +11,27 @@ namespace VirtDeck.Diagnostics
     public static class SpiceLog
     {
         private const int MaxLines = 5000;
-        private static readonly object Gate = new();
+        private static readonly Lock Gate = new();
         private static readonly LinkedList<string> Buffer = new();
         private static readonly BlockingCollection<string> WriteQueue = new(new ConcurrentQueue<string>());
 
-        public static readonly string FilePath =
-            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "SpiceVirtDeck.log");
+        private static readonly string FilePath = Path.Combine(Path.GetTempPath(), "SpiceVirtDeck.log");
 
         /// <summary>Raised for every logged line (on the calling thread).</summary>
         public static event Action<string>? LineLogged;
 
-        private static bool _verbose;
         /// <summary>When true, the protocol channels log every received message.</summary>
         public static bool Verbose
         {
-            get => _verbose;
+            get;
             set
             {
-                if (_verbose == value) return;
-                _verbose = value;
+                if (field == value) return;
+                field = value;
                 VerboseChanged?.Invoke(value);
             }
         }
+
         public static event Action<bool>? VerboseChanged;
 
         static SpiceLog()

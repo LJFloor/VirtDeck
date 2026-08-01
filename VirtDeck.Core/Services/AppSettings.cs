@@ -57,7 +57,7 @@ namespace VirtDeck.Services
         };
 
         private static AppSettings? _current;
-        private static readonly object Gate = new();
+        private static readonly Lock Gate = new();
 
         /// <summary>
         /// Optional hook, set by a host that has legacy settings to bring forward (the WinForms app

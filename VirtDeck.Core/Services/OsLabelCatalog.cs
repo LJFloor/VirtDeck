@@ -14,7 +14,7 @@ namespace VirtDeck.Services
     {
         private static readonly Assembly Asm = typeof(OsLabelCatalog).Assembly;
         private static Catalog? _cache;
-        private static readonly object Gate = new();
+        private static readonly Lock Gate = new();
 
         public sealed class Catalog
         {
