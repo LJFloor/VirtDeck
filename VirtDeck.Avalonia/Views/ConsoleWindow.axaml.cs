@@ -7,7 +7,6 @@ using Avalonia.Threading;
 using SpiceClient;
 using SpiceClient.Channels;
 using SpiceClient.Imaging;
-using SpiceClient.Protocol;
 using SpiceClient.Usb;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Input;
@@ -170,8 +169,6 @@ public partial class ConsoleWindow : Window
         CtrlAltDelItem.Click += (_, _) => _session?.Inputs?.SendCtrlAltDel();
         TypeClipboardItem.Click += async (_, _) => await TypeClipboardAsync();
 
-        LzItem.Click += (_, _) => SetCompression(lz: true);
-        RawItem.Click += (_, _) => SetCompression(lz: false);
         FitWindowItem.Click += (_, _) => FitToResolution(restoreIfMaximized: true);
         ScreenshotItem.Click += async (_, _) => await SaveScreenshotAsync();
 
@@ -288,8 +285,6 @@ public partial class ConsoleWindow : Window
             _reconnectAttempt = 0;   // this session stands on its own budget
 
             StatusText.Text = "Connected";
-            LzItem.IsChecked = true;   // DisplayChannel requests LZ on link
-            RawItem.IsChecked = false;
             UpdateToolbarState();
             _windowActive = IsActive;
             UpdateGrab();
@@ -346,8 +341,6 @@ public partial class ConsoleWindow : Window
         _hasSoundDevice = false;
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
-        LzItem.IsChecked = true;   // neutral default; the channel re-requests LZ on reconnect
-        RawItem.IsChecked = false;
 
         try { Display.ClearFramebuffer(); } catch { /* ignore */ }
         try { Display.Detach(); } catch { /* ignore */ }
@@ -822,15 +815,6 @@ public partial class ConsoleWindow : Window
     }
 
     // ---- Display ------------------------------------------------------
-
-    private void SetCompression(bool lz)
-    {
-        if (_session == null) return;
-        _session.SetPreferredCompression(lz ? SpiceConstants.IMAGE_COMPRESSION_LZ : SpiceConstants.IMAGE_COMPRESSION_OFF);
-        LzItem.IsChecked = lz;
-        RawItem.IsChecked = !lz;
-        StatusText.Text = lz ? "Image compression: LZ" : "Image compression: raw";
-    }
 
     private void OnResolutionChanged(int w, int h)
     {
