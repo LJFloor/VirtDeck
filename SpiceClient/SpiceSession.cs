@@ -50,8 +50,19 @@ public sealed class SpiceSession : IDisposable
     /// <summary>When true, channels log every received message (very chatty). Default off.</summary>
     public volatile bool VerboseLogging;
 
+    private volatile bool _agentConnected;
+
     /// <summary>True once the guest agent (vdagent) is connected; required for resize and file transfer.</summary>
-    public bool AgentConnected { get; internal set; }
+    public bool AgentConnected
+    {
+        get => _agentConnected;
+        internal set
+        {
+            if (_agentConnected == value) return;
+            _agentConnected = value;
+            AgentStateChanged?.Invoke(value);
+        }
+    }
 
     // Events (raised from channel threads)
     public event Action<int, int>? ResolutionChanged;
@@ -60,6 +71,9 @@ public sealed class SpiceSession : IDisposable
     public event Action? CursorHidden;
     public event Action? CursorReset;
     public event Action<int>? MouseModeChanged;
+
+    /// <summary>Raised when the guest agent connects (true) or drops (false); resize follows it.</summary>
+    public event Action<bool>? AgentStateChanged;
     public event Action<string>? Disconnected;
     public event Action<string>? LogMessage;
     public event Action<string>? StatusMessage;

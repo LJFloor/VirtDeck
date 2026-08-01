@@ -124,6 +124,16 @@
       <SolidColorBrush x:Key="JbToolBarItemHover" Color="#FF4C5052" />
       <SolidColorBrush x:Key="JbToolBarItemPressed" Color="#FF2F3133" />
 
+      <!-- Menus: window face behind a hairline frame; the highlighted row is the selection blue the
+           tables use, full width, not a gray inset pill. -->
+      <SolidColorBrush x:Key="JbMenuBackground" Color="#FF3C3F41" />
+      <SolidColorBrush x:Key="JbMenuBorder" Color="#FF616161" />
+      <SolidColorBrush x:Key="JbMenuForeground" Color="#FFBBBBBB" />
+      <SolidColorBrush x:Key="JbMenuForegroundDisabled" Color="#FF777777" />
+      <SolidColorBrush x:Key="JbMenuItemSelected" Color="#FF4B6EAF" />
+      <SolidColorBrush x:Key="JbMenuItemSelectedForeground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbMenuSeparator" Color="#FF515151" />
+
       <!-- Tabs: flat cells on a strip a shade off the window face; the selected one is marked by a
            2px underline, not by a raised card. -->
       <SolidColorBrush x:Key="JbTabStripBackground" Color="#FF3C3F41" />
@@ -241,6 +251,15 @@
       <SolidColorBrush x:Key="JbToolBarItemHover" Color="#FFDFDFDF" />
       <SolidColorBrush x:Key="JbToolBarItemPressed" Color="#FFCFCFCF" />
 
+      <!-- Menus -->
+      <SolidColorBrush x:Key="JbMenuBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbMenuBorder" Color="#FFADADAD" />
+      <SolidColorBrush x:Key="JbMenuForeground" Color="#FF000000" />
+      <SolidColorBrush x:Key="JbMenuForegroundDisabled" Color="#FF8C8C8C" />
+      <SolidColorBrush x:Key="JbMenuItemSelected" Color="#FF3875D6" />
+      <SolidColorBrush x:Key="JbMenuItemSelectedForeground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbMenuSeparator" Color="#FFCDCDCD" />
+
       <!-- Tabs -->
       <SolidColorBrush x:Key="JbTabStripBackground" Color="#FFF2F2F2" />
       <SolidColorBrush x:Key="JbTabHoverBackground" Color="#FFE3E3E3" />
@@ -293,12 +312,10 @@
 
   <!-- The rest of Fluent's touch-sized metrics, brought down to the same scale. These are the
        surfaces with no JetBrains template of their own: ordinary pick-lists (the remote file
-       browser, the dialog disk lists), context menus and tooltips. Fluent sizes them for a 14pt
-       font and a fingertip; at 12pt they read as bloated next to the tables and toolbars. -->
+       browser, the dialog disk lists) and tooltips. Fluent sizes them for a 14pt font and a
+       fingertip; at 12pt they read as bloated next to the tables and toolbars. (Menus used to be
+       retuned by key here too; they have their own templates at the bottom of this file now.) -->
   <Thickness x:Key="ListBoxItemPadding">8,4</Thickness>
-  <x:Double x:Key="MenuFlyoutThemeMinHeight">24</x:Double>
-  <Thickness x:Key="MenuFlyoutItemThemePaddingNarrow">11,3,11,4</Thickness>
-  <Thickness x:Key="MenuFlyoutSeparatorThemePadding">8,2,8,2</Thickness>
   <Thickness x:Key="ToolTipBorderThemePadding">6,3,6,4</Thickness>
   <x:Double x:Key="TreeViewItemMinHeight">24</x:Double>
 
@@ -543,8 +560,13 @@
                      Fill="{TemplateBinding Background}"
                      Stroke="{TemplateBinding BorderBrush}"
                      StrokeThickness="1" />
+            <!--
+              The dot must be an even size inside the even 14px box: an odd one leaves a 4.5px
+              margin, which layout rounding snaps to 4 on one side and 5 on the other, so the dot
+              sits visibly off centre.
+            -->
             <Ellipse Name="Dot" IsVisible="False"
-                     Width="5" Height="5"
+                     Width="6" Height="6"
                      HorizontalAlignment="Center" VerticalAlignment="Center"
                      Fill="{DynamicResource JbCheckBoxGlyph}" />
           </Panel>
@@ -706,6 +728,265 @@
     <Style Selector="^:selected">
       <Setter Property="Foreground" Value="{DynamicResource JbListItemSelectedForeground}" />
     </Style>
+  </ControlTheme>
+
+  <!--
+    Menus. Fluent draws a WinUI flyout: a rounded, shadowed card whose highlighted row is an inset
+    gray pill with rounded corners, sized for a fingertip. JetBrains Classic draws a square popup on
+    the window face inside a 1px hairline, ~22px rows, and highlights the row edge-to-edge in the
+    same selection blue the tables use. Retemplated rather than recoloured because the geometry
+    (corner radius, the inset pill, the icon gutter) is baked into Fluent's template.
+
+    Three themes work together: the item below is the popup row (context menus and submenus),
+    JbTopLevelMenuItem is the cell in a menu bar or toolbar strip, and the Menu theme wires the two
+    together through ItemContainerTheme. Items nested inside a top-level item get no explicit
+    container theme, so they fall back to this implicit one, which is what makes a toolbar dropdown
+    look like a context menu.
+  -->
+  <ControlTheme x:Key="{x:Type MenuItem}" TargetType="MenuItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbMenuForeground}" />
+    <!-- Wide right inset: the label must not run up against the popup's frame, and it leaves the
+         submenu triangle a lane of its own. -->
+    <Setter Property="Padding" Value="6,3,20,3" />
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Panel>
+          <Border Name="Root"
+                  Background="{TemplateBinding Background}"
+                  Padding="{TemplateBinding Padding}">
+            <!-- The 18px gutter is reserved whether or not anything is in it, so the labels of a
+                 menu that mixes plain and checkable items still line up (JetBrains does the same). -->
+            <Grid ColumnDefinitions="18,*,Auto">
+              <Panel Grid.Column="0" VerticalAlignment="Center">
+                <ContentPresenter Name="PART_IconPresenter" IsVisible="False"
+                                  Content="{TemplateBinding Icon}"
+                                  Width="14" Height="14"
+                                  HorizontalAlignment="Left" VerticalAlignment="Center" />
+                <!-- Stroked from the row's own Foreground, so the tick turns white with the text
+                     when the row is highlighted instead of vanishing into the blue. -->
+                <Path Name="Check" IsVisible="False"
+                      Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
+                      StrokeLineCap="Round" StrokeJoin="Round"
+                      HorizontalAlignment="Left" VerticalAlignment="Center"
+                      Data="M 1,5.5 L 3.5,8 L 8.5,2" />
+                <Ellipse Name="Dot" IsVisible="False"
+                         Width="6" Height="6"
+                         HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0"
+                         Fill="{TemplateBinding Foreground}" />
+              </Panel>
+
+              <ContentPresenter Name="PART_HeaderPresenter" Grid.Column="1"
+                                Content="{TemplateBinding Header}"
+                                ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                Foreground="{TemplateBinding Foreground}"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+
+              <!-- Filled triangle, the classic submenu marker; hidden on leaf items (:empty). -->
+              <Path Name="Chevron" Grid.Column="2"
+                    Fill="{TemplateBinding Foreground}"
+                    Margin="14,0,0,0" VerticalAlignment="Center"
+                    Data="M 0,0 L 4,3.5 L 0,7 Z" />
+            </Grid>
+          </Border>
+
+          <Popup Name="PART_Popup"
+                 IsLightDismissEnabled="False"
+                 IsOpen="{TemplateBinding IsSubMenuOpen, Mode=TwoWay}"
+                 Placement="RightEdgeAlignedTop"
+                 HorizontalOffset="-1" VerticalOffset="-5">
+            <Border Background="{DynamicResource JbMenuBackground}"
+                    BorderBrush="{DynamicResource JbMenuBorder}"
+                    BorderThickness="1"
+                    Padding="0,4">
+              <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+            </Border>
+          </Popup>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:icon /template/ ContentPresenter#PART_IconPresenter">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:empty /template/ Path#Chevron">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="^:toggle:checked /template/ Path#Check">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:radio:checked /template/ Ellipse#Dot">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <!-- Keyboard walking sets :selected, the pointer sets :pointerover; both paint the same row. -->
+    <Style Selector="^:selected, ^:pointerover">
+      <Setter Property="Foreground" Value="{DynamicResource JbMenuItemSelectedForeground}" />
+      <Style Selector="^ /template/ Border#Root">
+        <Setter Property="Background" Value="{DynamicResource JbMenuItemSelected}" />
+      </Style>
+    </Style>
+
+    <!-- Last, so a disabled row stays gray on its own face even while the pointer is over it. -->
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbMenuForegroundDisabled}" />
+      <Style Selector="^ /template/ Border#Root">
+        <Setter Property="Background" Value="Transparent" />
+      </Style>
+    </Style>
+  </ControlTheme>
+
+  <!--
+    Menu separator: a full-width hairline. JetBrains rules right across the popup rather than
+    insetting the line like Fluent; the app uses Separator only inside menus.
+  -->
+  <ControlTheme x:Key="{x:Type Separator}" TargetType="Separator">
+    <Setter Property="Background" Value="{DynamicResource JbMenuSeparator}" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="0,4" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" />
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <!--
+    Top-level cell of a menu bar / toolbar strip: the flat borderless box JbToolButton draws, so a
+    dropdown and a plain command button sit in one strip at one height. The dropdown marker is the
+    small chevron an old JetBrains toolbar button carries; a leaf item (:empty, the console's USB
+    entry) is a plain button and shows none.
+  -->
+  <ControlTheme x:Key="JbTopLevelMenuItem" TargetType="MenuItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="Padding" Value="9,3" />
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Panel>
+          <Border Name="Root"
+                  Background="{TemplateBinding Background}"
+                  Padding="{TemplateBinding Padding}"
+                  CornerRadius="3">
+            <StackPanel Orientation="Horizontal">
+              <ContentPresenter Name="PART_HeaderPresenter"
+                                Content="{TemplateBinding Header}"
+                                ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                Foreground="{TemplateBinding Foreground}"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+              <Path Name="Chevron"
+                    Fill="{TemplateBinding Foreground}"
+                    Margin="6,1,0,0" VerticalAlignment="Center" Opacity="0.8"
+                    Data="M 0,0 L 7,0 L 3.5,4 Z" />
+            </StackPanel>
+          </Border>
+
+          <Popup Name="PART_Popup"
+                 IsLightDismissEnabled="False"
+                 IsOpen="{TemplateBinding IsSubMenuOpen, Mode=TwoWay}"
+                 Placement="BottomEdgeAlignedLeft"
+                 OverlayInputPassThroughElement="{Binding $parent[Menu]}">
+            <Border Background="{DynamicResource JbMenuBackground}"
+                    BorderBrush="{DynamicResource JbMenuBorder}"
+                    BorderThickness="1"
+                    Padding="0,4">
+              <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+            </Border>
+          </Popup>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:empty /template/ Path#Chevron">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="^:pointerover /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbToolBarItemHover}" />
+    </Style>
+
+    <!-- An open dropdown keeps its cell pressed in, so it is obvious which one is showing. -->
+    <Style Selector="^:open /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbToolBarItemPressed}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+      <Style Selector="^ /template/ Border#Root">
+        <Setter Property="Background" Value="Transparent" />
+      </Style>
+    </Style>
+  </ControlTheme>
+
+  <ControlTheme x:Key="{x:Type Menu}" TargetType="Menu">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="ItemContainerTheme" Value="{StaticResource JbTopLevelMenuItem}" />
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <StackPanel Orientation="Horizontal" />
+      </ItemsPanelTemplate>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="{TemplateBinding Padding}">
+          <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}"
+                          KeyboardNavigation.TabNavigation="Continue" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <ControlTheme x:Key="{x:Type ContextMenu}" TargetType="ContextMenu">
+    <Setter Property="Background" Value="{DynamicResource JbMenuBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource JbMenuBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="0,4" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="{TemplateBinding Padding}">
+          <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}"
+                          KeyboardNavigation.TabNavigation="Continue" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <!-- Not used by a view of ours, but a TextBox brings its own cut/copy/paste flyout: same frame,
+       so that one menu does not arrive in Fluent trim. -->
+  <ControlTheme x:Key="{x:Type MenuFlyoutPresenter}" TargetType="MenuFlyoutPresenter">
+    <Setter Property="Background" Value="{DynamicResource JbMenuBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource JbMenuBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="0,4" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="{TemplateBinding Padding}">
+          <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}"
+                          KeyboardNavigation.TabNavigation="Continue" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </ControlTheme>
 
 </ResourceDictionary>

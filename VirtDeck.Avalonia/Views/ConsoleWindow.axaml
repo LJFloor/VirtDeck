@@ -16,16 +16,6 @@
       <Setter Property="Padding" Value="3,2" />
     </Style>
 
-    <!-- Match the dropdown cells to the plain toolbar buttons beside them. -->
-    <Style Selector="Menu.toolbar">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Padding" Value="0" />
-    </Style>
-    <Style Selector="Menu.toolbar > MenuItem">
-      <Setter Property="Padding" Value="10,3" />
-      <Setter Property="MinHeight" Value="24" />
-      <Setter Property="CornerRadius" Value="3" />
-    </Style>
   </Window.Styles>
 
   <DockPanel>
@@ -40,7 +30,7 @@
     <Border DockPanel.Dock="Top" Classes="toolbar">
       <StackPanel Orientation="Horizontal">
 
-        <Menu Classes="toolbar">
+        <Menu>
 
           <MenuItem Name="PowerMenu" Header="Power">
             <MenuItem Name="StartItem" Header="Start" />

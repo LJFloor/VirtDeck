@@ -39,6 +39,7 @@ public partial class ConsoleWindow : Window
     private bool _closing;
     private bool _starting; // powered-off overlay: a virsh start is in flight
     private PixelSize? _fittedSize; // display size the window was last fitted to (null → never fitted)
+    private PixelSize? _requestedGuestSize; // last size asked of the guest agent (null → none asked)
 
     /// <summary>Display size for a console with no guest surface, one opened on a shut-off VM.</summary>
     private static readonly PixelSize OffSize = new(640, 480);
@@ -63,6 +64,11 @@ public partial class ConsoleWindow : Window
     private readonly DispatcherTimer _reconnectTimer;
     private int _reconnectAttempt;
     private const int MaxReconnectAttempts = 5;
+
+    // Guest resize. A window resize is a drag: SizeChanged fires per frame, and each request costs
+    // the guest a mode set, so only the size the user settled on is asked for.
+    private readonly DispatcherTimer _guestResizeTimer;
+    private const int MinGuestSize = 200;
 
     public string VmName { get; }
 
@@ -105,6 +111,11 @@ public partial class ConsoleWindow : Window
         _clipboardPoll = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background,
             async (_, _) => await PollHostClipboardAsync());
 
+        // One-shot: restarted on every size change, so it fires once the drag stops.
+        _guestResizeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _guestResizeTimer.Tick += (_, _) => { _guestResizeTimer.Stop(); RequestGuestResize(); };
+        Display.SizeChanged += (_, _) => ScheduleGuestResize();
+
         // One-shot: ScheduleReconnect sets the interval and starts it.
         _reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _reconnectTimer.Tick += async (_, _) =>
@@ -139,6 +150,7 @@ public partial class ConsoleWindow : Window
             _virsh.VmsChanged -= OnVmsChanged;
             _clipboardPoll.Stop();
             _reconnectTimer.Stop();
+            _guestResizeTimer.Stop();
             UpdateGrab();
             _grab.Dispose();
             CleanupConnection();
@@ -272,6 +284,7 @@ public partial class ConsoleWindow : Window
             _session.StatusMessage += OnSessionStatus;
             _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
             _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
+            _session.AgentStateChanged += OnAgentStateChanged;
             _session.AudioMuted = MuteItem.IsChecked; // apply the remembered mute pref before audio starts
 
             Display.Attach(_session);
@@ -280,6 +293,7 @@ public partial class ConsoleWindow : Window
                 : SpiceDisplay.CursorPolicy.SpiceCursor;
 
             _fittedSize = null;
+            _requestedGuestSize = null;
             _session.Start();
             _connected = true;
             _reconnectAttempt = 0;   // this session stands on its own budget
@@ -339,6 +353,8 @@ public partial class ConsoleWindow : Window
         _cdromBus = null;
         _floppyTarget = null;
         _hasSoundDevice = false;
+        _guestResizeTimer.Stop();
+        _requestedGuestSize = null;
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
 
@@ -830,7 +846,56 @@ public partial class ConsoleWindow : Window
         if (_fittedSize == res) return;
 
         _fittedSize = res;
+
+        // A mode set we asked for: the window is already this size bar the multiple-of-8 rounding,
+        // so refitting here would only snap it a few pixels back under the user's hands.
+        if (_requestedGuestSize == res) return;
+
         FitToResolution();
+    }
+
+    /// <summary>
+    /// The guest follows the window: a resize of the display area is asked of the guest agent once
+    /// the drag settles, so the desktop reflows instead of being cropped or letterboxed. A guest
+    /// without vdagent keeps its fixed mode, and there <see cref="OnResolutionChanged"/> fits the
+    /// window to the guest instead; the two never fight because a resize this asked for doesn't refit.
+    /// </summary>
+    private void ScheduleGuestResize()
+    {
+        if (_closing || _session is not { AgentConnected: true }) return;
+        _guestResizeTimer.Stop();
+        _guestResizeTimer.Start();
+    }
+
+    /// <summary>
+    /// The agent connects well after the window has its size (a console restored maximized, or
+    /// resized while the guest booted), so the guest is matched to the window once on connect too.
+    /// </summary>
+    private void OnAgentStateChanged(bool connected) => Dispatcher.UIThread.Post(() =>
+    {
+        if (connected) ScheduleGuestResize();
+    });
+
+    private void RequestGuestResize()
+    {
+        if (_closing || _session is not { AgentConnected: true } session) return;
+
+        int w = (int)Math.Round(Display.Bounds.Width);
+        int h = (int)Math.Round(Display.Bounds.Height);
+        if (w < MinGuestSize || h < MinGuestSize) return;
+
+        // The agent rounds down to a multiple of 8, so the guest can never land exactly on an
+        // arbitrary window size: anything inside that grid step already counts as "showing 1:1".
+        // Without the tolerance a window fitted to, say, a 1366-wide guest would ask for 1360 and
+        // shrink it, then fit to that, on and on.
+        if (Display.Resolution is { } cur && Math.Abs(cur.Width - w) < 8 && Math.Abs(cur.Height - h) < 8)
+            return;
+
+        var target = new PixelSize(w & ~7, h & ~7);
+        if (_requestedGuestSize == target) return; // already asked; the guest may still be applying it
+
+        _requestedGuestSize = target;
+        session.RequestResize(target.Width, target.Height);
     }
 
     /// <summary>
