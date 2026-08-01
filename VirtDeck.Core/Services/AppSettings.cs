@@ -19,8 +19,23 @@ namespace VirtDeck.Services
         /// <summary>Last SSH host, pre-filled on the login screen.</summary>
         public string Host { get; set; } = "";
 
+        /// <summary>Last SSH port, pre-filled on the login screen.</summary>
+        public int Port { get; set; } = 22;
+
         /// <summary>Last SSH username, pre-filled on the login screen.</summary>
         public string Username { get; set; } = "";
+
+        /// <summary>
+        /// Last authentication method: <c>"Key"</c>, or anything else (including the empty default that
+        /// existing settings files and the registry import produce) for password. A string rather than an
+        /// enum on purpose: <c>JsonStringEnumConverter</c> throws on an unknown value, which would make
+        /// <see cref="Load"/> discard the whole file, per-VM settings included, over one field.
+        /// </summary>
+        public string AuthMode { get; set; } = "";
+
+        /// <summary>Last private key used, pre-selected on the login screen. Never a secret: the passphrase
+        /// and the sudo password are asked for every time and are not persisted.</summary>
+        public string PrivateKeyPath { get; set; } = "";
 
         /// <summary>Per-VM console preferences, keyed by domain UUID.</summary>
         public Dictionary<string, VmSettings> Vms { get; set; } = new();
