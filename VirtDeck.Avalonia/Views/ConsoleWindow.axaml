@@ -81,9 +81,6 @@
           <MenuItem Name="UsbMenu" Header="USB" />
 
           <MenuItem Name="DisplayMenu" Header="Display">
-            <MenuItem Name="LzItem" Header="Low bandwidth (LZ)" ToggleType="Radio" GroupName="compression" />
-            <MenuItem Name="RawItem" Header="Raw (uncompressed)" ToggleType="Radio" GroupName="compression" />
-            <Separator />
             <MenuItem Name="FitWindowItem" Header="Fit window to guest" />
             <MenuItem Name="ShowHostCursorItem" Header="Show host cursor" ToggleType="CheckBox" />
             <Separator />

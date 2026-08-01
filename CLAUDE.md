@@ -47,7 +47,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Channels/SpiceChannel` (base): per-channel socket + dedicated read thread; link handshake; common-message loop (SET_ACK→ACK_SYNC + ACK flow control, PING→PONG, NOTIFY). Subclasses: `MainChannel`, `DisplayChannel`, `InputsChannel`, `CursorChannel`.
 - `Imaging/`: `SpiceFramebuffer` (a **pinned** top-down BGRA byte buffer exposed as `Pixels`/`Scan0`; all access under `SyncRoot`; toolkit-agnostic; the UI wraps or copies it), `ImageDecoders` (BITMAP, JPEG via Skia, LZ_RGB; **QUIC/GLZ deferred → return null**), `DecodedImage`, `BgraImage.EncodePng`.
 - `Audio/`: `IAudioSink` + `AudioSinks.Create()` picks the backend by platform: `WaveOutPlayer` (winmm) on Windows, `PulseAudioSink` (`libpulse-simple`, which PipeWire also provides) on Linux, `NullAudioSink` elsewhere or when libpulse is missing. The simple API is **synchronous** (`pa_simple_write` blocks once the server buffer is full), so `PulseAudioSink` hands chunks to a writer thread through a bounded queue (dropping when full) rather than blocking the playback channel's read thread. That writer thread is the **sole owner** of the `pa_simple*` handle: configure/flush/dispose are posted to it as pending state, so `pa_simple_free` can never race a write in flight. Mute gates the writes; volume is applied in software (the simple API has none, and touching the app's sink volume would outlive the session in the user's mixer).
-  **`prebuf` is the anti-crackle setting.** The guest produces audio at exactly 1×, so the server-side buffer level never climbs back on its own; whatever cushion exists at the moment playback starts is the entire jitter budget for the rest of the stream. `prebuf=0` starts playback on the first bytes and leaves the buffer hovering at empty, so every scheduling hiccup underruns: measured ~40 ms and falling, and audibly crackly. `prebuf` = 80 ms of a 200 ms `tlength` measures ~90–120 ms steady on PipeWire's Pulse emulation. `MSG_PLAYBACK_STOP` therefore **drains rather than flushes** (spice-gtk corks for the same reason). Flushing would chop up to `tlength` off the tail of every sound; only mute flushes, because there the user wants silence now.
+  **`prebuf` is the anti-crackle setting.** The guest produces audio at exactly 1×, so the server-side buffer level never climbs back on its own; whatever cushion exists at the moment playback starts is the entire jitter budget for the rest of the stream. `prebuf=0` starts playback on the first bytes and leaves the buffer hovering at empty, so every scheduling hiccup underruns: measured ~40 ms and falling, and audibly crackly. `prebuf` = 80 ms of a 200 ms `tlength` measures ~90-120 ms steady on PipeWire's Pulse emulation. `MSG_PLAYBACK_STOP` therefore **drains rather than flushes** (spice-gtk corks for the same reason). Flushing would chop up to `tlength` off the tail of every sound; only mute flushes, because there the user wants silence now.
 - `Interop/NativeLibraryResolver`: maps the bare DllImport names to real filenames per platform (`libusb-1.0.dll` vs `libusb-1.0.so.0`, `libpulse-simple.so.0`). There can be only **one** resolver per assembly, so every native dependency (USB and audio) is registered here. `LIBUSB_OPTION_USE_USBDK` is **Windows-only**; setting it elsewhere fails and would silently disable redirection, so `LibUsbContext` gates it (`CaptureAvailable`).
 - `SpiceSession`: the facade. Orchestrates channel bring-up, owns the framebuffer, raises events (`ResolutionChanged`, `FrameDirty`, `CursorSet/Hidden/Reset`, `Disconnected`, `StatusMessage`). Events fire on channel threads; subscribers must marshal.
 - `CursorShape`: decoded ALPHA cursor (BGRA + hotspot).
@@ -114,8 +114,9 @@ QUIC and GLZ are not decoded. The client decodes BITMAP + LZ_RGB + JPEG, and ste
 QUIC/GLZ at runtime: `DisplayChannel` advertises `DISPLAY_CAP_PREF_COMPRESSION` and sends
 `MSGC_DISPLAY_PREFERRED_COMPRESSION` = **LZ** right after `DISPLAY_INIT` (GLZ is also disabled via
 `glz_dictionary_window_size=0`). So unmodified VMs (even on the `auto_glz` default) render with **no per-VM
-`<image compression>` change or restart**. The console's **Display ▸ Low bandwidth (LZ) / Raw** items send this
-message live (`SpiceSession.SetPreferredCompression`). Porting QUIC/GLZ is only needed to ride the server's
+`<image compression>` change or restart**. `SpiceSession.SetPreferredCompression` can send the message live at
+any time, but nothing in the UI calls it any more: the console's old **Display ▸ Low bandwidth (LZ) / Raw**
+radio pair is gone, so LZ on link is the only setting. Porting QUIC/GLZ is only needed to ride the server's
 native `auto_glz` for better bandwidth, not required for correctness.
 
 ## Removable media (ISO / floppy)
@@ -164,7 +165,8 @@ guest only needs a USB controller + the device's normal driver.
   lifetime (collected-delegate crash otherwise). Disposal order is strict: close hosts (channels)
   **before** `libusb_exit` (`Usb/LibUsbContext`, one shared context + one event thread).
 - **Manager/UI:** `Usb/UsbDeviceManager` (on `SpiceSession.Usb`, created when the host advertises a
-  usbredir channel) enumerates devices, filters out HID/hubs, and binds a device to a free channel.
+  usbredir channel) enumerates devices, filters out hubs only (HID devices are redirectable and
+  are listed), and binds a device to a free channel.
   `Enumerate` labels each device from `Usb/UsbNameTable`: sysfs `manufacturer`/`product` keyed by
   bus+devnum on Linux, SetupAPI keyed by VID:PID on Windows. Both read what the OS cached at
   enumeration: the picker must never *open* a device just to name it. The picker is

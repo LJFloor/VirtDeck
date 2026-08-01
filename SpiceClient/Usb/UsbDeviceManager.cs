@@ -7,7 +7,7 @@ namespace SpiceClient.Usb;
 
 /// <summary>
 /// Coordinates USB redirection for a session: enumerates host USB devices (filtering out
-/// HID and hubs by default), and binds a chosen device to a free usbredir channel. Each
+/// hubs), and binds a chosen device to a free usbredir channel. Each
 /// host-side &lt;redirdev&gt; maps to one <see cref="UsbredirChannel"/> slot that can carry one
 /// device at a time. Created lazily when the first usbredir channel is advertised.
 ///
@@ -82,8 +82,10 @@ public sealed class UsbDeviceManager
     // ---- Enumeration --------------------------------------------------------
 
     /// <summary>
-    /// Lists redirectable host USB devices. HID (keyboard/mouse) and hubs are excluded so
-    /// the local machine stays usable. Names come from what the OS cached at enumeration
+    /// Lists redirectable host USB devices. Only hubs are excluded (they are topology, not
+    /// something a guest can use). HID devices are listed: keyboards and mice are legitimate
+    /// redirect targets, and redirecting the one the user is typing on is their call.
+    /// Names come from what the OS cached at enumeration
     /// (<see cref="UsbNameTable"/>) rather than from the device's own string descriptors, which
     /// would mean opening it, deliberately avoided here to stay non-invasive.
     /// </summary>
@@ -107,7 +109,7 @@ public sealed class UsbDeviceManager
                 IntPtr dev = Marshal.ReadIntPtr(list, (int)(i * IntPtr.Size));
                 if (dev == IntPtr.Zero) continue;
                 if (LibUsb.libusb_get_device_descriptor(dev, out var d) != LibUsb.LIBUSB_SUCCESS) continue;
-                if (d.bDeviceClass == LibUsb.USB_CLASS_HID || d.bDeviceClass == LibUsb.USB_CLASS_HUB) continue;
+                if (d.bDeviceClass == LibUsb.USB_CLASS_HUB) continue;
 
                 byte bus = LibUsb.libusb_get_bus_number(dev);
                 byte addr = LibUsb.libusb_get_device_address(dev);

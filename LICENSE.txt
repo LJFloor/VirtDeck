@@ -67,7 +67,7 @@ Agreement. If you do not agree, do not install or use the Software.
 8. TERMINATION
    This Agreement terminates automatically if you breach it. On termination you
    must stop using the Software and destroy your copies of it. Sections 2 and
-   4–9 survive termination.
+   4-9 survive termination.
 
 9. ENTIRE AGREEMENT; SEVERABILITY
    This Agreement is the entire agreement between you and the Licensor regarding

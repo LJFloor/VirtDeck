@@ -20,7 +20,7 @@ PulseAudio/PipeWire daemon. A sandboxed format has to be punched open for both: 
 | File | Goes to | Why |
 |---|---|---|
 | `virtdeck.desktop` | `/usr/share/applications/` | Menu entry. `StartupWMClass=virtdeck` matches the WM_CLASS Avalonia sets from the assembly name |
-| `icons/hicolor/` | `/usr/share/icons/hicolor/` | App icon, 16–512px plus the scalable SVG |
+| `icons/hicolor/` | `/usr/share/icons/hicolor/` | App icon, 16-512px plus the scalable SVG |
 | `io.github.ljfloor.VirtDeck.metainfo.xml` | `/usr/share/metainfo/` | AppStream data for software centres |
 | `70-virtdeck-usb.rules` | `/etc/udev/rules.d/` | USB redirection needs rw access to `/dev/bus/usb/*` |
 
