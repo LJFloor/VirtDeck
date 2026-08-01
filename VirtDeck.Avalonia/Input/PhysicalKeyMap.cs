@@ -6,12 +6,12 @@ namespace VirtDeck.Avalonia.Input;
 /// Maps Avalonia's <see cref="PhysicalKey"/> to the SPICE wire scancode (PC/AT set 1).
 ///
 /// <see cref="PhysicalKey"/> identifies the physical key by position (it follows the W3C UI Events
-/// <c>code</c> values), independent of the active keyboard layout — which is exactly what the guest
+/// <c>code</c> values), independent of the active keyboard layout, which is exactly what the guest
 /// wants, since the guest applies its own layout to the scancode. This is strictly more correct
 /// than the WinForms front-end's virtual-key table, which reads through the host layout first.
 ///
 /// Extended ("grey") keys are encoded as <c>0xE0 | (atCode &lt;&lt; 8)</c>, matching spice-html5
-/// utils.js — NOT the 0xE0XX form. KEY_UP applies the high bit in InputsChannel.SendKey.
+/// utils.js, NOT the 0xE0XX form. KEY_UP applies the high bit in InputsChannel.SendKey.
 /// The scancode values here are the same ones VirtDeck has always sent.
 /// </summary>
 public static class PhysicalKeyMap
@@ -85,7 +85,7 @@ public static class PhysicalKeyMap
         [PhysicalKey.NumPadSubtract] = 0x4A,
         [PhysicalKey.NumPadDecimal] = 0x53,
         [PhysicalKey.NumPadDivide] = Ext(0x35),   // extended
-        [PhysicalKey.NumPadEnter] = Ext(0x1C),    // extended — distinct from the main Enter
+        [PhysicalKey.NumPadEnter] = Ext(0x1C),    // extended, distinct from the main Enter
 
         // Function keys
         [PhysicalKey.F1] = 0x3B, [PhysicalKey.F2] = 0x3C, [PhysicalKey.F3] = 0x3D, [PhysicalKey.F4] = 0x3E,
@@ -102,7 +102,7 @@ public static class PhysicalKeyMap
         [PhysicalKey.AltLeft] = 0x38,
         [PhysicalKey.AltRight] = Ext(0x38),       // extended (AltGr)
 
-        // Punctuation — named by their US-layout position, which is what the AT code means.
+        // Punctuation: named by their US-layout position, which is what the AT code means.
         [PhysicalKey.Semicolon] = 0x27,
         [PhysicalKey.Equal] = 0x0D,
         [PhysicalKey.Comma] = 0x33,
@@ -115,7 +115,7 @@ public static class PhysicalKeyMap
         [PhysicalKey.BracketRight] = 0x1B,
         [PhysicalKey.Quote] = 0x28,
 
-        // The extra key ISO/JIS keyboards have between LeftShift and Z — absent from the WinForms
+        // The extra key ISO/JIS keyboards have between LeftShift and Z; absent from the WinForms
         // table, so non-US layouts lost it. Position 0x56 on AT set 1.
         [PhysicalKey.IntlBackslash] = 0x56,
     };

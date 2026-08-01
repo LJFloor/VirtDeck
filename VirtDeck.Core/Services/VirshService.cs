@@ -15,7 +15,7 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Raised (on a background streaming thread) whenever libvirt reports a domain lifecycle
-        /// event. Subscribers must marshal to the UI thread. The argument carries no payload — any
+        /// event. Subscribers must marshal to the UI thread. The argument carries no payload; any
         /// event simply means "power state may have changed, refresh".
         /// </summary>
         public event Action? DomainEventReceived;
@@ -137,7 +137,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Captures a screenshot of a running VM via <c>virsh screenshot</c> and returns the raw
         /// image bytes, or null when the VM is off, has no graphics, or the capture fails. The
-        /// format is whatever libvirt produced — PPM on older hosts, PNG on newer ones — so decode
+        /// format is whatever libvirt produced (PPM on older hosts, PNG on newer ones), so decode
         /// with <see cref="Imaging.ScreenshotImage"/>, not the PPM decoder directly. The name is
         /// base64'd (cf. <see cref="DeleteFile"/>) so quoting is safe; the host temp file is
         /// removed afterwards.
@@ -146,7 +146,7 @@ namespace VirtDeck.Services
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(vmName));
             // virsh's own stdout chatter is dropped and its stderr captured, so stdout carries
-            // either the base64 payload or the ERR marker — a failure leaves a reason in the log
+            // either the base64 payload or the ERR marker; a failure leaves a reason in the log
             // instead of silently becoming a "No preview available" placeholder.
             var cmd = $"n=$(echo {b64} | base64 -d); f=$(mktemp); " +
                       "if err=$(virsh screenshot \"$n\" \"$f\" 2>&1 >/dev/null); " +
@@ -234,7 +234,7 @@ namespace VirtDeck.Services
                     {
                         // stdbuf -oL forces line buffering so each event arrives promptly through the
                         // SSH pipe; without it virsh block-buffers and events stall until the buffer fills.
-                        // We don't parse the line — any lifecycle event just triggers a refresh.
+                        // We don't parse the line; any lifecycle event just triggers a refresh.
                         _ssh.RunSudoCommandStreaming(
                             "stdbuf -oL virsh event --loop --event lifecycle",
                             _ => DomainEventReceived?.Invoke(),
@@ -563,16 +563,16 @@ namespace VirtDeck.Services
         /// <summary>
         /// Attaches a network CD-ROM (NBD URL) so QEMU streams the ISO over its built-in NBD client.
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
-        /// install CD must be ejected/removed or the domain won't start — the caller surfaces that to the user.
+        /// install CD must be ejected/removed or the domain won't start; the caller surfaces that to the user.
         /// </summary>
         public void AttachNetworkCdrom(string vm, string url, string target, string bus = "sata") =>
             RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom", readOnly: true));
 
-        /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO — live by default.</summary>
+        /// <summary>Swaps the media of an existing CD-ROM drive to a network (streamed) ISO, live by default.</summary>
         public void UpdateCdromNetwork(string vm, string target, string bus, string url, bool live = true) =>
             RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom", readOnly: true), live ? "--live" : "--config");
 
-        /// <summary>Attaches a file floppy (`.vfd`) as a raw fdc disk — config-only (the fdc can't hot-add).</summary>
+        /// <summary>Attaches a file floppy (`.vfd`) as a raw fdc disk, config-only (the fdc can't hot-add).</summary>
         public void AttachFloppyFile(string vm, string path, string target) =>
             AttachDataDisk(vm, new DiskInfo
             {
@@ -580,11 +580,11 @@ namespace VirtDeck.Services
                 SourceType = "file", Source = path, DriverType = "raw",
             });
 
-        /// <summary>Attaches a network floppy (NBD URL) so QEMU streams the `.vfd` over its built-in NBD client. Read-write — the guest's writes reach the local file.</summary>
+        /// <summary>Attaches a network floppy (NBD URL) so QEMU streams the `.vfd` over its built-in NBD client. Read-write: the guest's writes reach the local file.</summary>
         public void AttachNetworkFloppy(string vm, string url, string target) =>
             RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy", readOnly: false));
 
-        /// <summary>Swaps the media of an existing floppy drive to a network (streamed) `.vfd` — live by default. Read-write.</summary>
+        /// <summary>Swaps the media of an existing floppy drive to a network (streamed) `.vfd`, live by default. Read-write.</summary>
         public void UpdateFloppyNetwork(string vm, string target, string url, bool live = true) =>
             RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy", readOnly: false), live ? "--live" : "--config");
 
@@ -612,7 +612,7 @@ namespace VirtDeck.Services
         public void DetachDisk(string vm, string target)
         {
             // Idempotent: if the disk is already gone (e.g. an OK retry after a partial failure,
-            // which re-runs every pending op), libvirt says "No disk found" — the drive is already
+            // which re-runs every pending op), libvirt says "No disk found"; the drive is already
             // removed, which is the goal, so treat it as success.
             try { _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config"); }
             catch (Exception ex) when (IsBenign(ex, "No disk found")) { }
@@ -714,7 +714,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Starts a detached server-side download of <paramref name="url"/> to <paramref name="destPath"/>
         /// (downloads to .part, then renames; writes .dlstatus = 0/1). Returns immediately so it doesn't
-        /// hold the SSH lock — poll with <see cref="PollHostDownload"/>.
+        /// hold the SSH lock; poll with <see cref="PollHostDownload"/>.
         /// </summary>
         public void StartHostDownload(string url, string destPath)
         {
@@ -769,7 +769,7 @@ namespace VirtDeck.Services
             catch { return new(); }
         }
 
-        /// <summary>Existing ZFS filesystem datasets — the valid parents for a new zvol; empty if ZFS is absent.</summary>
+        /// <summary>Existing ZFS filesystem datasets: the valid parents for a new zvol; empty if ZFS is absent.</summary>
         public List<string> ListZfsDatasets()
         {
             try
@@ -842,7 +842,7 @@ namespace VirtDeck.Services
         /// Checks host CPU virtualization support, BIOS enablement, and libvirt state.
         /// Returns: cpuSupports (svm/vmx flag in cpuinfo), biosEnabled (/dev/kvm exists),
         /// libvirtState ("active" | "inactive" | "unknown").
-        /// All checks are best-effort — failures leave the corresponding value at its default.
+        /// All checks are best-effort; failures leave the corresponding value at its default.
         /// </summary>
         public (bool cpuSupports, bool biosEnabled, string libvirtState) CheckHostCapabilities()
         {

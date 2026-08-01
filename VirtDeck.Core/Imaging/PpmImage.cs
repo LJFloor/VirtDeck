@@ -1,7 +1,7 @@
 namespace VirtDeck.Imaging
 {
     /// <summary>
-    /// Minimal decoder for binary PPM ("P6") images — the format <c>virsh screenshot</c>
+    /// Minimal decoder for binary PPM ("P6") images, the format <c>virsh screenshot</c>
     /// produces for QXL/SPICE displays. No common imaging library reads PPM and ImageMagick
     /// isn't guaranteed on the host, so we parse the handful of header fields ourselves.
     ///

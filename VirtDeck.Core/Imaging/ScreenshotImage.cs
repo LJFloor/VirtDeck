@@ -41,7 +41,7 @@ namespace VirtDeck.Imaging
                 int w = codec.Info.Width, h = codec.Info.Height;
                 if (w <= 0 || h <= 0) return null;
 
-                // rowBytes = w*4 is the SKImageInfo default — exactly the Bgra layout.
+                // rowBytes = w*4 is the SKImageInfo default, exactly the Bgra layout.
                 var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Opaque);
                 var pixels = new byte[(long)w * h * 4];
                 var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
@@ -61,7 +61,7 @@ namespace VirtDeck.Imaging
             }
         }
 
-        /// <summary>First few bytes as hex — enough to name the format in a log line.</summary>
+        /// <summary>First few bytes as hex, enough to name the format in a log line.</summary>
         private static string Header(byte[] data) =>
             Convert.ToHexString(data, 0, Math.Min(8, data.Length));
     }

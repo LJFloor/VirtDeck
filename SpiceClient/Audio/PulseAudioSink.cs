@@ -11,13 +11,13 @@ namespace SpiceClient.Audio;
 ///
 /// The simple API is *synchronous*: <c>pa_simple_write</c> blocks once the server-side buffer is
 /// full, which for a real-time stream is most of the time. <see cref="Write"/> runs on the playback
-/// channel's read thread, so it must never block there — instead it copies the chunk into a bounded
+/// channel's read thread, so it must never block there; instead it copies the chunk into a bounded
 /// queue (dropping when full, as the interface prefers) and a dedicated writer thread does the
 /// blocking call.
 ///
 /// That writer thread is the **sole owner** of the <c>pa_simple*</c> handle: configure/flush/dispose
 /// are posted to it as pending state rather than touching the handle, so there is no way for
-/// <c>pa_simple_free</c> to race a write in flight. <c>pa_simple_drain</c> is deliberately unused —
+/// <c>pa_simple_free</c> to race a write in flight. <c>pa_simple_drain</c> is deliberately unused;
 /// on teardown we want the console to close now, not after the buffer plays out.
 /// </summary>
 [SupportedOSPlatform("linux")]
@@ -42,7 +42,7 @@ public sealed class PulseAudioSink : IAudioSink
     private readonly Stack<byte[]> _pool = new();
     private readonly Thread _writer;
 
-    // Guarded by _lock — the writer thread's inbox.
+    // Guarded by _lock: the writer thread's inbox.
     private int _sampleRate, _channels, _bits;   // format last requested by Configure
     private bool _reopen;                        // format changed → writer reopens the stream
     private bool _flush;                         // Stop() → writer discards buffered audio
@@ -95,7 +95,7 @@ public sealed class PulseAudioSink : IAudioSink
             if (_queue.Count >= MaxQueuedChunks)
             {
                 if (++_dropped % 100 == 1)
-                    _log?.Invoke($"[audio] output backlog — dropped {_dropped} chunk(s)");
+                    _log?.Invoke($"[audio] output backlog: dropped {_dropped} chunk(s)");
                 return;
             }
 
@@ -107,7 +107,7 @@ public sealed class PulseAudioSink : IAudioSink
     }
 
     /// <summary>
-    /// MSG_PLAYBACK_STOP: the guest went quiet. Deliberately a no-op — everything still buffered is
+    /// MSG_PLAYBACK_STOP: the guest went quiet. Deliberately a no-op; everything still buffered is
     /// audio the guest already produced, so it is left to play out. Flushing here would chop the
     /// tail off every sound (up to <see cref="TargetLatencyMs"/> of it) and click. spice-gtk corks
     /// its stream rather than flushing for the same reason; with no writes arriving, simply letting
@@ -116,7 +116,7 @@ public sealed class PulseAudioSink : IAudioSink
     public void Stop() { }
 
     /// <summary>
-    /// Silence output without disrupting the stream. Muting *does* flush — the user asked for
+    /// Silence output without disrupting the stream. Muting *does* flush; the user asked for
     /// silence now, not in <see cref="TargetLatencyMs"/> ms.
     /// </summary>
     public bool Muted
@@ -153,11 +153,11 @@ public sealed class PulseAudioSink : IAudioSink
             Monitor.Pulse(_lock);
         }
 
-        // The writer can be inside one pa_simple_write (≤ TargetLatencyMs) — this is generous.
+        // The writer can be inside one pa_simple_write (≤ TargetLatencyMs); this is generous.
         // It closes the stream on its way out; if it somehow doesn't, leaking the handle beats
         // freeing one that a live write is still using.
         if (!_writer.Join(TimeSpan.FromSeconds(3)))
-            _log?.Invoke("[audio] writer thread did not exit — leaking the PulseAudio stream");
+            _log?.Invoke("[audio] writer thread did not exit, leaking the PulseAudio stream");
     }
 
     // ---- writer thread ---------------------------------------------------
@@ -225,7 +225,7 @@ public sealed class PulseAudioSink : IAudioSink
         CloseStream();
         if (bits != 16)
         {
-            _log?.Invoke($"[audio] unsupported sample size {bits} — no sound");
+            _log?.Invoke($"[audio] unsupported sample size {bits}, no sound");
             return;
         }
 
@@ -243,7 +243,7 @@ public sealed class PulseAudioSink : IAudioSink
             // The cushion, and the whole point: the guest produces audio at exactly 1×, so the
             // buffer level never climbs back on its own. prebuf=0 would start playback on the
             // first bytes and leave it hovering at empty, turning every scheduling hiccup into an
-            // underrun — that is what crackling is. Waiting for PrebufMs before starting (and
+            // underrun; that is what crackling is. Waiting for PrebufMs before starting (and
             // again after an underrun) buys that much jitter budget for the rest of the stream.
             prebuf = (uint)(bytesPerMs * PrebufMs),
             minreq = PA_INVALID,
@@ -259,7 +259,7 @@ public sealed class PulseAudioSink : IAudioSink
         catch (DllNotFoundException)
         {
             _stream = IntPtr.Zero;
-            _log?.Invoke("[audio] libpulse-simple not available — playback is silent");
+            _log?.Invoke("[audio] libpulse-simple not available; playback is silent");
             return;
         }
 
@@ -271,7 +271,7 @@ public sealed class PulseAudioSink : IAudioSink
 
         _openRate = rate; _openChannels = channels; _openBits = bits;
         // Don't sample the level until the stream has had a second to reach prebuf, or the first
-        // write — legitimately near-empty — reports a dry buffer every time playback starts.
+        // write, legitimately near-empty, reports a dry buffer every time playback starts.
         _lastLatencyCheck = Environment.TickCount64;
         _log?.Invoke($"[audio] playing {rate}Hz {channels}ch s{bits} PCM via PulseAudio");
     }
@@ -283,7 +283,7 @@ public sealed class PulseAudioSink : IAudioSink
 
         if (pa_simple_write(_stream, data, (nuint)length, out int error) < 0)
         {
-            _log?.Invoke($"[audio] pa_simple_write failed: {Describe(error)} — reopening");
+            _log?.Invoke($"[audio] pa_simple_write failed: {Describe(error)}; reopening");
             Reopen(_openRate, _openChannels, _openBits);
             return;
         }
@@ -308,7 +308,7 @@ public sealed class PulseAudioSink : IAudioSink
         int ms = (int)(usec / 1000);
         if (ms >= DryLatencyMs || now - _lastDryWarning < 10_000) return;
         _lastDryWarning = now;
-        _log?.Invoke($"[audio] buffer running dry ({ms} ms of {TargetLatencyMs} ms) — expect dropouts");
+        _log?.Invoke($"[audio] buffer running dry ({ms} ms of {TargetLatencyMs} ms); expect dropouts");
     }
 
     /// <summary>Scale interleaved S16LE samples in place. Perceptual-ish: volume is squared.</summary>
@@ -385,7 +385,7 @@ public sealed class PulseAudioSink : IAudioSink
         [MarshalAs(UnmanagedType.LPUTF8Str)] string streamName,
         ref pa_sample_spec ss, IntPtr map, ref pa_buffer_attr attr, out int error);
 
-    // The default marshaller pins the array for the duration of the call — no unsafe block needed.
+    // The default marshaller pins the array for the duration of the call; no unsafe block needed.
     [DllImport("pulse-simple")]
     private static extern int pa_simple_write(IntPtr s, byte[] data, nuint bytes, out int error);
 

@@ -81,7 +81,7 @@ namespace VirtDeck.Services
         /// Feeds the password to a running <c>sudo -S</c> command's stdin, then closes the stream (EOF).
         /// Must be called after <c>BeginExecute</c>. The bytes go over the channel's input substream, so the
         /// password never appears on the command line. Best-effort: if sudo isn't reading stdin (cached
-        /// credentials, or the command already exited) the write is ignored — the EOF on dispose still lets
+        /// credentials, or the command already exited) the write is ignored; the EOF on dispose still lets
         /// sudo's read complete, so the command never hangs.
         /// </summary>
         private void FeedSudoPassword(SshCommand cmd)
@@ -92,7 +92,7 @@ namespace VirtDeck.Services
                 var pw = System.Text.Encoding.UTF8.GetBytes(_password + "\n");
                 stdin.Write(pw, 0, pw.Length);
             }
-            catch { /* sudo not reading stdin / command already exited — EOF on dispose unblocks it */ }
+            catch { /* sudo not reading stdin / command already exited; EOF on dispose unblocks it */ }
         }
 
         /// <summary>

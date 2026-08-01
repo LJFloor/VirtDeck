@@ -13,19 +13,19 @@ namespace VirtDeck.Avalonia.Input;
 /// reach the guest.
 ///
 /// Avalonia's Linux backend is X11, and a Wayland session runs it through XWayland, where the grab
-/// also applies. Under a future native Wayland backend this reports unsupported — Wayland has no
+/// also applies. Under a future native Wayland backend this reports unsupported; Wayland has no
 /// equivalent for ordinary clients short of the
 /// <c>keyboard-shortcuts-inhibit</c> protocol, which is a separate piece of work.
 ///
 /// The grab must be issued on <b>Avalonia's own</b> X display connection (see
 /// <see cref="ResolveDisplay"/>): X reports key events during an active grab only to the grabbing
-/// *client*, and a client is a connection — a grab taken on a private <c>XOpenDisplay</c> silently
+/// *client*, and a client is a connection; a grab taken on a private <c>XOpenDisplay</c> silently
 /// steals every key from Avalonia, so the console goes deaf the moment the grab succeeds. That also
 /// makes this class UI-thread-only, since it shares Avalonia's connection with its event loop.
 ///
 /// The grab is deliberately narrow: the console takes it only while its window is active and the
 /// pointer is over the guest display, and drops it on pointer-exit, deactivation, disconnect or
-/// dispose — so a wedged app can never hold the desktop's keyboard hostage, and the window manager
+/// dispose, so a wedged app can never hold the desktop's keyboard hostage, and the window manager
 /// can always take the keyboard grab its title-bar/edge drags need (see ConsoleWindow.UpdateGrab).
 /// </summary>
 [SupportedOSPlatform("linux")]
@@ -54,7 +54,7 @@ public sealed class X11KeyboardGrab : IKeyboardGrab
     public bool IsActive { get; private set; }
 
     /// <summary>
-    /// True until we have actually tried and failed to reach the X11 backend — the display can only
+    /// True until we have actually tried and failed to reach the X11 backend; the display can only
     /// be resolved from a window, so the first <see cref="Grab"/> is what settles this.
     /// </summary>
     public bool IsSupported => !_unsupported && OperatingSystem.IsLinux();
@@ -118,7 +118,7 @@ public sealed class X11KeyboardGrab : IKeyboardGrab
         if (_disposed) return;
         _disposed = true;
         Release();
-        // _display belongs to Avalonia — never XCloseDisplay it.
+        // _display belongs to Avalonia; never XCloseDisplay it.
         _display = IntPtr.Zero;
     }
 

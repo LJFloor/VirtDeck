@@ -18,7 +18,7 @@ namespace VirtDeck.Services
 
         public sealed class Catalog
         {
-            /// <summary>id → label, in JSON order — this is what sorts the dropdown.</summary>
+            /// <summary>id → label, in JSON order; this is what sorts the dropdown.</summary>
             public IReadOnlyList<KeyValuePair<string, string>> Labels { get; }
             public IReadOnlySet<string> BiosOnly { get; }
             public Catalog(IReadOnlyList<KeyValuePair<string, string>> labels, IReadOnlySet<string> biosOnly)
@@ -54,7 +54,7 @@ namespace VirtDeck.Services
                     {
                         using var doc = JsonDocument.Parse(s);
                         var root = doc.RootElement;
-                        // JsonDocument preserves property order — that order drives the dropdown.
+                        // JsonDocument preserves property order; that order drives the dropdown.
                         if (root.TryGetProperty("labels", out var labelsEl) && labelsEl.ValueKind == JsonValueKind.Object)
                         {
                             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

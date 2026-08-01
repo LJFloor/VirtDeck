@@ -9,7 +9,7 @@ namespace VirtDeck.Services
     /// host/username or their per-VM console preferences.
     ///
     /// Hooked up through <see cref="AppSettings.LegacyImporter"/> at startup and invoked only when
-    /// no settings file exists yet. The registry keys are left in place — harmless, and they let an
+    /// no settings file exists yet. The registry keys are left in place, harmless, and they let an
     /// older build still run on the same machine.
     ///
     /// Shared by both front-ends, so it lives here rather than in the WinForms app.

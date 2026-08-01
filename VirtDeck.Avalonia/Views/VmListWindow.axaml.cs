@@ -33,7 +33,7 @@ public partial class VmListWindow : Window
     private long _lastSampleTs;    // Stopwatch timestamp at the last sample
     private bool _refreshing;
 
-    /// <summary>Design-time only — the app always constructs this with a live SSH connection.</summary>
+    /// <summary>Design-time only; the app always constructs this with a live SSH connection.</summary>
     public VmListWindow() : this(new SshConnectionManager()) { }
 
     public VmListWindow(SshConnectionManager ssh)
@@ -42,7 +42,7 @@ public partial class VmListWindow : Window
         InitializeComponent();
 
         _virsh = new VirshService(ssh);
-        Title = $"VirtDeck — {ssh.Host}";
+        Title = $"VirtDeck - {ssh.Host}";
         VmList.ItemsSource = _rows;
         NetworkList.ItemsSource = _netRows;
 
@@ -59,7 +59,7 @@ public partial class VmListWindow : Window
         _refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
             async (_, _) => await RefreshAsync());
 
-        // Uptime is ticked client-side from each VM's recorded start time — no SSH round-trip.
+        // Uptime is ticked client-side from each VM's recorded start time, no SSH round-trip.
         _tickTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
         {
             foreach (var r in _rows) r.TickUptime();
@@ -174,7 +174,7 @@ public partial class VmListWindow : Window
     }
 
     /// <summary>
-    /// Updates rows in place so the selection, scroll position and focus survive a refresh —
+    /// Updates rows in place so the selection, scroll position and focus survive a refresh;
     /// rebuilding the collection would drop all three every 30 seconds.
     /// </summary>
     private void Merge(IEnumerable<VmInfo> vms)
@@ -386,7 +386,7 @@ public partial class VmListWindow : Window
         if (targets.Count == 0) return;
         var what = targets.Count == 1 ? $"\"{targets[0]}\"" : $"{targets.Count} VMs";
         if (!await MessageDialog.Confirm(this, "Force off",
-                $"Force off {what}?\n\nThis is equivalent to pulling the power cord — " +
+                $"Force off {what}?\n\nThis is equivalent to pulling the power cord; " +
                 "unsaved work in the guest is lost."))
             return;
         await RunVmActionAsync("Forcing off", r => r.IsRunning, v => _virsh.ForceStopVmAsync(v));
@@ -443,7 +443,7 @@ public partial class VmListWindow : Window
         var wizard = new CreateVmWizard(_virsh, _ssh);
         if (await wizard.ShowDialog<bool?>(this) is not true)
         {
-            foreach (var s in wizard.StreamingServers) s.Dispose(); // cancelled — tear down any streams
+            foreach (var s in wizard.StreamingServers) s.Dispose(); // cancelled: tear down any streams
             return;
         }
         _mediaServers.AddRange(wizard.StreamingServers); // keep host media streams alive for the session
@@ -517,7 +517,7 @@ public partial class VmListWindow : Window
                 try { _virsh.UndefineVm(name); }
                 catch (Exception ex) { undefineErrors.Add($"{name}: {ex.Message}"); failed.Add(name); }
             }
-            // Don't delete the disk images of a VM that failed to undefine — it still exists.
+            // Don't delete the disk images of a VM that failed to undefine; it still exists.
             foreach (var i in checkedIdx)
             {
                 if (failed.Contains(owners[i])) continue;

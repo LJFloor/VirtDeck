@@ -1,7 +1,10 @@
 name: Release
 
-# When a version tag (v*) is pushed, build the installer stamped with the tag
-# version, create a GitHub Release for that tag, and attach the installer EXE.
+# When a version tag (v*) is pushed, build both artifacts stamped with the tag version, create a
+# GitHub Release for that tag, and attach them:
+#
+#   VirtDeckSetup-<version>.exe        Windows installer (app + UsbDk driver)
+#   VirtDeck-<version>-x86_64.AppImage Linux
 #
 #   git tag v1.2.3 && git push origin v1.2.3
 #
@@ -14,8 +17,22 @@ permissions:
   contents: write   # required to create the release and upload assets
 
 jobs:
-  release:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      # Tag "v1.2.3" -> version "1.2.3" (used for the assembly, installer and AppImage).
+      - name: Derive version from tag
+        id: ver
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+  windows:
     runs-on: windows-latest
+    needs: version
 
     steps:
       - name: Checkout
@@ -25,15 +42,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-
-      # Tag "v1.2.3" -> version "1.2.3" (used for the assembly and installer).
-      - name: Derive version from tag
-        id: ver
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "Releasing $version"
 
       # Zip the SpiceClient source BEFORE building so no bin/obj leaks in. The
       # installer ships this beside the app as LGPL "corresponding source"
@@ -49,9 +57,9 @@ jobs:
 
       - name: Publish (self-contained win-x64)
         run: >
-          dotnet publish VirtDeck/VirtDeck.csproj
+          dotnet publish VirtDeck.Avalonia/VirtDeck.Avalonia.csproj
           -c Release -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }}
+          -p:Version=${{ needs.version.outputs.version }}
           -o publish/win-x64
 
       - name: Install Inno Setup
@@ -59,13 +67,64 @@ jobs:
 
       - name: Build installer
         shell: pwsh
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} installer\VirtDeck.iss'
 
-      - name: Create release and attach installer
-        shell: pwsh
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtDeck-installer
+          path: installer/output/VirtDeckSetup-${{ needs.version.outputs.version }}.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    needs: version
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The script downloads appimagetool itself and runs it with APPIMAGE_EXTRACT_AND_RUN, so the
+      # runner needs no FUSE and no extra packages.
+      - name: Build AppImage
+        run: packaging/build-appimage.sh "${{ needs.version.outputs.version }}"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtDeck-AppImage
+          path: publish/VirtDeck-${{ needs.version.outputs.version }}-x86_64.AppImage
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    # Both artifacts or none: a release that is missing one platform is worse than a failed run,
+    # because it looks finished.
+    needs: [version, windows, linux]
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release and attach both artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job has no checkout, so gh has no git remote to infer the repo from.
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          $exe = "installer/output/VirtDeckSetup-${{ steps.ver.outputs.version }}.exe"
-          if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
-          gh release create "${{ github.ref_name }}" "$exe" --title "${{ github.ref_name }}" --generate-notes
+          exe="artifacts/VirtDeckSetup-$VERSION.exe"
+          appimage="artifacts/VirtDeck-$VERSION-x86_64.AppImage"
+          for f in "$exe" "$appimage"; do
+            [ -f "$f" ] || { echo "Missing artifact: $f"; exit 1; }
+          done
+          gh release create "$GITHUB_REF_NAME" "$exe" "$appimage" \
+            --title "$GITHUB_REF_NAME" --generate-notes

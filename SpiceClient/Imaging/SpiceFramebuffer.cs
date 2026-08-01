@@ -6,13 +6,13 @@ namespace SpiceClient.Imaging;
 
 /// <summary>
 /// The primary display surface: a pinned, top-down BGRA byte buffer (one 32-bit pixel per
-/// entry, alpha ignored — the desktop surface is opaque). The UI layer wraps or copies it
+/// entry, alpha ignored; the desktop surface is opaque). The UI layer wraps or copies it
 /// into whatever bitmap type its toolkit wants; this class stays toolkit-agnostic.
 ///
 /// All compositing and all reads must hold <see cref="SyncRoot"/> so the display read-thread
 /// and the UI thread never touch the pixels concurrently.
 ///
-/// <see cref="Rectangle"/> here is System.Drawing.Primitives, which is cross-platform BCL —
+/// <see cref="Rectangle"/> here is System.Drawing.Primitives, which is cross-platform BCL,
 /// not the Windows-only GDI+ in System.Drawing.Common.
 /// </summary>
 public sealed class SpiceFramebuffer : IDisposable
@@ -116,7 +116,7 @@ public sealed class SpiceFramebuffer : IDisposable
     }
 
     /// <summary>
-    /// Returns an independent copy of the current surface as top-down BGRA — safe to keep or encode
+    /// Returns an independent copy of the current surface as top-down BGRA, safe to keep or encode
     /// after the framebuffer changes. Returns null if the surface is disposed. Taken under
     /// <see cref="SyncRoot"/> so it never tears against a concurrent composite.
     /// Alpha is forced opaque: the guest never sets it, and a zeroed alpha channel renders black
@@ -156,7 +156,7 @@ public sealed class SpiceFramebuffer : IDisposable
         var rect = new Rectangle(x, y, w, h);
         if (_dirty.Count >= MaxDirtyRects)
         {
-            // Too many regions — collapse all (incl. this one) into one bounding box.
+            // Too many regions: collapse all (incl. this one) into one bounding box.
             var u = rect;
             foreach (var d in _dirty) u = Rectangle.Union(u, d);
             _dirty.Clear();

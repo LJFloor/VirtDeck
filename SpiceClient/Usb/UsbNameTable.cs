@@ -6,13 +6,13 @@ namespace SpiceClient.Usb;
 
 /// <summary>
 /// Friendly names for the USB picker, resolved from what the OS already cached during
-/// enumeration — this never opens/captures a device, so it is safe to call while merely listing
+/// enumeration; this never opens/captures a device, so it is safe to call while merely listing
 /// devices (opening one to read its string descriptors needs the same permissions as redirecting
 /// it, and would disturb a device the user has not chosen yet).
 ///
 /// Linux reads sysfs (<c>/sys/bus/usb/devices/&lt;dev&gt;/{manufacturer,product}</c>), keyed by
 /// bus+device number, so two identical sticks are told apart. Windows asks SetupAPI, which only
-/// keys by VID:PID — identical devices then share a name, which is what the WinForms picker
+/// keys by VID:PID; identical devices then share a name, which is what the WinForms picker
 /// always did.
 ///
 /// Every lookup is best effort: a miss just leaves <see cref="UsbDeviceInfo.Description"/> on its
@@ -114,7 +114,7 @@ internal sealed class UsbNameTable
         public uint pid;
     }
 
-    // DEVPKEY_Device_BusReportedDeviceDesc — the device's own reported product string.
+    // DEVPKEY_Device_BusReportedDeviceDesc: the device's own reported product string.
     private static DEVPROPKEY PKEY_BusReportedDeviceDesc =
         new() { fmtid = new Guid("540b947e-8b40-45bc-a8a2-6a0b894cbda2"), pid = 4 };
     // DEVPKEY_Device_FriendlyName
@@ -169,11 +169,11 @@ internal sealed class UsbNameTable
                 string? name = GetStringProp(set, ref did, ref PKEY_BusReportedDeviceDesc)
                                ?? GetStringProp(set, ref did, ref PKEY_FriendlyName)
                                ?? GetStringProp(set, ref did, ref PKEY_DeviceDesc);
-                // Windows hands back one combined string — it goes in Product, with no manufacturer.
+                // Windows hands back one combined string; it goes in Product, with no manufacturer.
                 if (!string.IsNullOrWhiteSpace(name)) map[key] = ("", name!.Trim());
             }
         }
-        catch { /* best effort — fall back to VID:PID labels */ }
+        catch { /* best effort: fall back to VID:PID labels */ }
         finally { SetupDiDestroyDeviceInfoList(set); }
         return map;
     }

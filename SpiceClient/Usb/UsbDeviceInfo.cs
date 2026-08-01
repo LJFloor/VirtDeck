@@ -2,7 +2,7 @@ namespace SpiceClient.Usb;
 
 /// <summary>
 /// A redirectable host USB device as shown in the picker. Identified by bus/address
-/// (+ VID/PID) — it deliberately holds no native pointer, since libusb device pointers
+/// (+ VID/PID); it deliberately holds no native pointer, since libusb device pointers
 /// are only valid until the device list is freed; binding re-finds the device by this key.
 /// </summary>
 public sealed class UsbDeviceInfo
@@ -21,7 +21,7 @@ public sealed class UsbDeviceInfo
     /// <summary>Stable identity used to match across re-enumerations.</summary>
     public string Key => $"{BusNumber:D3}.{DeviceAddress:D3}:{VendorId:X4}:{ProductId:X4}";
 
-    /// <summary>Friendly label for the list (best effort — strings may be unavailable without opening the device).</summary>
+    /// <summary>Friendly label for the list (best effort; strings may be unavailable without opening the device).</summary>
     public string Description
     {
         get
@@ -34,7 +34,7 @@ public sealed class UsbDeviceInfo
 
     private static string ClassName(byte cls) => cls switch
     {
-        0x00 => "USB device",          // per-interface (composite) — class is on the interfaces
+        0x00 => "USB device",          // per-interface (composite): class is on the interfaces
         0x01 => "Audio device",
         0x02 => "Communications device",
         0x03 => "HID device",

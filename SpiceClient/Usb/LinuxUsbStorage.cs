@@ -7,8 +7,8 @@ namespace SpiceClient.Usb;
 /// Linux half of <see cref="UsbStoragePrep"/>: maps a USB device to its block devices through
 /// sysfs and unmounts whatever of it is mounted.
 ///
-/// The mapping is a walk down the device's own sysfs subtree —
-/// <c>1-3/1-3:1.0/host6/target6:0:0/6:0:0:0/block/sdb</c> — so it needs no udev database query and
+/// The mapping is a walk down the device's own sysfs subtree,
+/// <c>1-3/1-3:1.0/host6/target6:0:0/6:0:0:0/block/sdb</c>, so it needs no udev database query and
 /// picks out exactly this device's disks even when several sticks are plugged in.
 ///
 /// Unmounting goes through <c>udisksctl</c> rather than the udisks2 D-Bus API directly: it is the
@@ -32,7 +32,7 @@ internal static class LinuxUsbStorage
         }
 
         var disks = FindBlockDevices(deviceDir);
-        if (disks.Count == 0) return; // not a storage device — nothing to do
+        if (disks.Count == 0) return; // not a storage device, nothing to do
 
         var mounts = ReadMounts();
         foreach (string diskDir in disks)
@@ -144,7 +144,7 @@ internal static class LinuxUsbStorage
             }
             catch { /* keep the literal path */ }
 
-            map[dev] = Unescape(parts[1]); // last mount of a device wins — it is the one to report
+            map[dev] = Unescape(parts[1]); // last mount of a device wins; it is the one to report
         }
         return map;
     }
@@ -180,7 +180,7 @@ internal static class LinuxUsbStorage
         // Only udisksctl can put it back without root; a plain "mount" would need the fstab entry
         // that a hand-mounted device does not have. Failing here just leaves the drive unmounted.
         if (!Run("udisksctl", $"mount -b {devPath} --no-user-interaction", log))
-            log?.Invoke($"[usb] unmount: could not remount {devPath} — mount it again from your file manager");
+            log?.Invoke($"[usb] unmount: could not remount {devPath}; mount it again from your file manager");
     }
 
     private static bool Run(string file, string args, Action<string>? log)
@@ -195,7 +195,7 @@ internal static class LinuxUsbStorage
             });
             if (p == null) return false;
 
-            // Drain both pipes concurrently — reading one to the end first can deadlock on the other.
+            // Drain both pipes concurrently; reading one to the end first can deadlock on the other.
             var stdout = p.StandardOutput.ReadToEndAsync();
             var stderrTask = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(CommandTimeoutMs))

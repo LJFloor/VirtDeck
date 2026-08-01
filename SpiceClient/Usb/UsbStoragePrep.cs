@@ -7,11 +7,11 @@ namespace SpiceClient.Usb;
 /// gives them back if redirection then fails. Both platforms need this, for related but different
 /// reasons:
 ///
-/// • Windows — UsbDk captures a device by re-enumerating it with a USB reset. While a volume is
+/// • Windows: UsbDk captures a device by re-enumerating it with a USB reset. While a volume is
 ///   mounted and in use that reset blocks or times out and <c>libusb_open</c> returns
 ///   LIBUSB_ERROR_OTHER. The volume is locked + dismounted, and the lock is *held* until the caller
 ///   disposes this object, so nothing can remount underneath the capture.
-/// • Linux — libusb detaches the <c>usb-storage</c> kernel driver as usbredirhost claims the
+/// • Linux: libusb detaches the <c>usb-storage</c> kernel driver as usbredirhost claims the
 ///   interface. The block device then vanishes from under any mounted filesystem, which is a
 ///   surprise-removal: dirty pages are lost. Unmounting first flushes them.
 ///
@@ -35,7 +35,7 @@ public sealed class UsbStoragePrep : IDisposable
     /// <summary>Volumes taken offline, as user-facing names ("E:", "/media/me/USB").</summary>
     public IReadOnlyList<string> Released => _released;
 
-    /// <summary>Volumes that could NOT be taken offline — open files, or no permission.</summary>
+    /// <summary>Volumes that could NOT be taken offline: open files, or no permission.</summary>
     public IReadOnlyList<string> Blocked => _blocked;
 
     /// <summary>True when at least one volume is still in use, so redirection should not proceed.</summary>
@@ -89,7 +89,7 @@ public sealed class UsbStoragePrep : IDisposable
         {
             foreach (var restore in _restore)
             {
-                try { restore(); } catch { /* best effort — the device may already be gone */ }
+                try { restore(); } catch { /* best effort: the device may already be gone */ }
             }
         }
         _restore.Clear();

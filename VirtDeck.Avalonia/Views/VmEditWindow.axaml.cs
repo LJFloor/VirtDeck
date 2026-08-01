@@ -57,7 +57,7 @@ public partial class VmEditWindow : Window
         _readOnly = readOnly;
         InitializeComponent();
 
-        Title = readOnly ? $"Edit — {vmName} (running — read-only)" : $"Edit — {vmName}";
+        Title = readOnly ? $"Edit - {vmName} (running, read-only)" : $"Edit - {vmName}";
 
         CpuBox.ItemsSource = new[] { "Host passthrough", "Host model", "Default (qemu64)" };
         GpuBox.ItemsSource = new List<string> { "Virtio (virtio-gpu)", "QXL", "VGA", "Bochs" };
@@ -102,7 +102,7 @@ public partial class VmEditWindow : Window
 
     /// <summary>
     /// Streaming servers created in this editor that back saved media URLs. The caller must keep them
-    /// alive for the session on OK (and dispose them otherwise) — the URL is only reachable while they run.
+    /// alive for the session on OK (and dispose them otherwise); the URL is only reachable while they run.
     /// </summary>
     public IReadOnlyList<NbdServer> StreamingServers =>
         _mediaStreams.Values.Select(s => s.Server).ToList();
@@ -136,7 +136,7 @@ public partial class VmEditWindow : Window
                  })
             c.IsEnabled = false;
         // The disk row context menu is gated by _readOnly in PrepareDiskMenu().
-        NoteText.Text = "The VM is running — configuration is read-only. Shut it down to make changes.";
+        NoteText.Text = "The VM is running; configuration is read-only. Shut it down to make changes.";
     }
 
     private void Populate(VmConfig cfg)
@@ -293,7 +293,7 @@ public partial class VmEditWindow : Window
         if (edited.Bus != d.Bus)
         {
             // A different bus needs a different target/address, which libvirt can't do via
-            // update-device — stage a detach + re-attach of the same source on the new bus.
+            // update-device, so stage a detach + re-attach of the same source on the new bus.
             if (!await MessageDialog.Confirm(this, "Change Bus",
                     $"Change disk '{d.Target}' bus from {d.Bus} to {edited.Bus}?\n\n" +
                     "The guest OS must have a driver for the new bus, or it may fail to boot."))
@@ -366,7 +366,7 @@ public partial class VmEditWindow : Window
     }
 
     // Stream a local image over the SSH tunnel (like the console). The saved config points at the
-    // tunnelled URL, so it's only reachable while VirtDeck stays open — fine to install during this
+    // tunnelled URL, so it's only reachable while VirtDeck stays open; fine to install during this
     // session; copy the image to the server for a permanent attachment.
     private async Task ChangeMediaLocalAsync()
     {

@@ -111,7 +111,7 @@ public partial class CreateVmWizard : Window
         catch { /* leave just the generic option */ }
     }
 
-    // Some OSes (e.g. Windows XP and earlier) have no UEFI firmware support — when one is picked,
+    // Some OSes (e.g. Windows XP and earlier) have no UEFI firmware support; when one is picked,
     // force BIOS and lock the UEFI option. The BIOS-only set is data in Data/osinfo-labels.json.
     private void OnOsTypeChanged()
     {
@@ -119,11 +119,11 @@ public partial class CreateVmWizard : Window
         if (biosOnly && BiosRadio.IsChecked != true) BiosRadio.IsChecked = true;
         UefiRadio.IsEnabled = !biosOnly;
         ToolTip.SetTip(FirmwareRow,
-            biosOnly ? "This OS predates UEFI — only BIOS firmware is supported." : null);
+            biosOnly ? "This OS predates UEFI; only BIOS firmware is supported." : null);
     }
 
     // BIOS-only OSes (Windows XP and earlier; the curated set in Data/osinfo-labels.json) also lack
-    // virtio/AHCI drivers — they need IDE for both the disk and the install CD-ROM.
+    // virtio/AHCI drivers; they need IDE for both the disk and the install CD-ROM.
     private bool IsBiosOnlyOsSelected()
     {
         var id = (OsBox.SelectedItem as OsVariant)?.ShortId;
@@ -357,7 +357,7 @@ public partial class CreateVmWizard : Window
             Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic.Type, nic.Source, nic.Model));
 
         // Disk first, then cdrom: on a fresh install the empty disk isn't bootable so
-        // firmware falls through to the ISO; after install the disk boots — no more ISO loop.
+        // firmware falls through to the ISO; after install the disk boots, no more ISO loop.
         var boot = new List<string> { "hd" };
         if (_disks.Any(d => d.IsCdrom)) boot.Add("cdrom");
         if (_disks.Any(d => d.IsFloppy)) boot.Add("fd");

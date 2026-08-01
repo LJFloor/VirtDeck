@@ -27,7 +27,7 @@ public partial class LoginWindow : Window
         };
 
         // Shutdown is explicit (see App), so closing this window before connecting must end the
-        // process itself — otherwise the app would linger with no windows.
+        // process itself; otherwise the app would linger with no windows.
         Closed += (_, _) =>
         {
             if (!_handedOff &&

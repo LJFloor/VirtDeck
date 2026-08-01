@@ -4,13 +4,13 @@ using System.Runtime.Versioning;
 namespace SpiceClient.Audio;
 
 /// <summary>
-/// Windows <see cref="IAudioSink"/>. Minimal streaming PCM sink over the multimedia <c>waveOut</c> API (winmm.dll —
+/// Windows <see cref="IAudioSink"/>. Minimal streaming PCM sink over the multimedia <c>waveOut</c> API (winmm.dll,
 /// a built-in OS component, nothing to ship). Plays the raw signed-16-bit PCM that the SPICE
 /// playback channel delivers when no codec is negotiated.
 ///
 /// A fixed pool of pinned buffers is recycled: <see cref="Write"/> reclaims any buffer the
 /// driver has finished with, copies the new chunk in, and queues it. If the whole pool is in
-/// flight (the host can't keep up), the chunk is dropped — brief audio jitter is preferable to
+/// flight (the host can't keep up), the chunk is dropped; brief audio jitter is preferable to
 /// blocking the channel read thread. <see cref="Write"/> runs on that read thread; mute/volume/
 /// dispose come from the UI thread, so every handle operation is serialized under a lock.
 /// </summary>

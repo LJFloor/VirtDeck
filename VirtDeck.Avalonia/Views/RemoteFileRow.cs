@@ -6,7 +6,7 @@ namespace VirtDeck.Avalonia.Views;
 /// <summary>
 /// One row of the remote file browser. The WinForms version asked Windows for the registered
 /// icon (<c>SHGetFileInfo</c>); there is no cross-platform equivalent worth a P/Invoke, so the
-/// icon is a colour-coded three-letter badge built from the extension — the same look on both
+/// icon is a colour-coded three-letter badge built from the extension; the same look on both
 /// platforms, and it never depends on what the *client* has installed (these are the *server's*
 /// files, so a host association would have been misleading anyway).
 /// </summary>
@@ -35,7 +35,7 @@ public sealed class RemoteFileRow
                 "vfd" or "flp" or "ima" => ("FD", MediaBrush),
                 "tar" or "gz" or "xz" or "zip" or "bz2" or "zst" => (ext.ToUpperInvariant()[..Math.Min(3, ext.Length)], ArchiveBrush),
                 "xml" or "txt" or "log" or "conf" or "cfg" or "json" or "yaml" or "yml" => (ext.ToUpperInvariant()[..Math.Min(3, ext.Length)], TextBrush),
-                "" => ("—", PlainBrush),
+                "" => ("-", PlainBrush),
                 _ => (ext.ToUpperInvariant()[..Math.Min(3, ext.Length)], PlainBrush),
             };
     }

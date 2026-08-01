@@ -13,7 +13,7 @@ namespace SpiceClient.Channels;
 /// Ported from spice-html5 main.js.
 ///
 /// Agent sending is serialized at whole-message granularity by a dedicated
-/// sender thread, token-flow-controlled — interleaving two agent messages'
+/// sender thread, token-flow-controlled; interleaving two agent messages'
 /// fragments would corrupt the guest's agent byte stream.
 /// </summary>
 public sealed class MainChannel : SpiceChannel
@@ -133,7 +133,7 @@ public sealed class MainChannel : SpiceChannel
                 Session.SyncMultimediaTime(r.U32());
                 break;
             }
-            // name, uuid — not needed.
+            // name, uuid: not needed.
         }
     }
 
@@ -363,7 +363,7 @@ public sealed class MainChannel : SpiceChannel
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST)
         {
-            // Guest is pasting and wants the host clipboard — the form supplies it via SendClipboardText.
+            // Guest is pasting and wants the host clipboard; the form supplies it via SendClipboardText.
             Session.ClipboardRequestedByGuestRaise();
         }
         // VD_AGENT_CLIPBOARD_RELEASE: nothing to do.

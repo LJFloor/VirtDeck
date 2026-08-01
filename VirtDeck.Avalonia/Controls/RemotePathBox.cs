@@ -19,7 +19,7 @@ public sealed class RemotePathBox : UserControl
     {
         _text = new TextBox();
         // Square, sized to the field it sits against (TextControlThemeMinHeight). MinWidth and
-        // Padding come from the JetBrains Button theme, which is built for a labelled button —
+        // Padding come from the JetBrains Button theme, which is built for a labelled button;
         // MinWidth 72 would clamp the width straight back up, so both are cleared here.
         _browse = new Button
         {

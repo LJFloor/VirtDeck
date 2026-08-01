@@ -95,7 +95,7 @@ public abstract class SpiceChannel : IDisposable
     /// </summary>
     /// <remarks>
     /// The retry is what makes the intermittent link failure invisible rather than fatal: a
-    /// mis-framed handshake (the "SPICE auth error 1363428690" — the next reply's "REDQ" magic
+    /// mis-framed handshake (the "SPICE auth error 1363428690", the next reply's "REDQ" magic
     /// read where the 4-byte auth result belongs) is a property of that one dirty stream, so a
     /// new socket simply links. A rejected ticket is not transient, so it is never retried.
     /// </remarks>
@@ -109,7 +109,7 @@ public abstract class SpiceChannel : IDisposable
                 Session.Log($"[{ChannelTypeName()}] connecting to {_host}:{_port}");
                 // Serialize the TCP connect + link handshake across the session: secondary channels
                 // are opened in a burst and dial the one SSH-forwarded port at once, and SSH.NET can
-                // cross simultaneous connections — leaking another channel's link reply into this
+                // cross simultaneous connections, leaking another channel's link reply into this
                 // socket and misframing the stream. See SpiceSession.ConnectGate. The handshake is
                 // short; read loops run in parallel once past this.
                 lock (Session.ConnectGate)
@@ -130,7 +130,7 @@ public abstract class SpiceChannel : IDisposable
                 try { socket?.Dispose(); } catch { /* ignore */ }
                 _socket = null;
                 Session.Log($"[{ChannelTypeName()}] link attempt {attempt}/{LinkAttempts} failed " +
-                            $"({ex.Message}) — retrying on a new socket");
+                            $"({ex.Message}); retrying on a new socket");
                 Thread.Sleep(LinkRetryDelayMs);
             }
             catch
@@ -236,7 +236,7 @@ public abstract class SpiceChannel : IDisposable
             var payload = size > 0 ? socket.ReadExact((int)size) : Array.Empty<byte>();
 
             // Per-message tracing is opt-in (verbose) and must never touch the filesystem
-            // synchronously — it would throttle the render loop under heavy draw traffic.
+            // synchronously; it would throttle the render loop under heavy draw traffic.
             if (Session.VerboseLogging && (ChannelType != SpiceConstants.CHANNEL_DISPLAY || type < 300))
                 Session.Log($"[{ChannelTypeName()}] msg type={type} size={size}");
 

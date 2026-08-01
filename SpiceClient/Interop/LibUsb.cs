@@ -25,11 +25,11 @@ internal static class LibUsb
 
     public const int LIBUSB_SUCCESS = 0;
 
-    /// <summary>Insufficient permissions — on Linux, no rw access to the device's /dev/bus/usb node.</summary>
+    /// <summary>Insufficient permissions: on Linux, no rw access to the device's /dev/bus/usb node.</summary>
     public const int LIBUSB_ERROR_ACCESS = -3;
 
     // USB device classes used for the default redirect filter.
-    public const byte USB_CLASS_PER_INTERFACE = 0x00; // composite — class is on the interfaces
+    public const byte USB_CLASS_PER_INTERFACE = 0x00; // composite: class is on the interfaces
     public const byte USB_CLASS_HID = 0x03;
     public const byte USB_CLASS_HUB = 0x09;
 

@@ -209,7 +209,7 @@ public partial class VmDetailsView : UserControl
 
     private static string PrettyBoot(List<string> order)
     {
-        if (order == null || order.Count == 0) return "—";
+        if (order == null || order.Count == 0) return "-";
         return string.Join("  →  ", order.Select(b => b switch
         {
             "hd" => "Hard Disk",
@@ -221,7 +221,7 @@ public partial class VmDetailsView : UserControl
     }
 
     private static string PrettyState(string s) =>
-        string.IsNullOrEmpty(s) ? "—" : char.ToUpper(s[0]) + s[1..];
+        string.IsNullOrEmpty(s) ? "-" : char.ToUpper(s[0]) + s[1..];
 
     private static IBrush StateBrush(string s) => s switch
     {

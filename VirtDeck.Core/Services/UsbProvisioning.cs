@@ -65,7 +65,7 @@ namespace VirtDeck.Services
             {
                 // USB controllers can't be hot-plugged, so the whole change is persistent-only and
                 // takes effect on the next power-cycle. A single xHCI controller covers all device
-                // speeds in one element — the simplest reliable add.
+                // speeds in one element, the simplest reliable add.
                 _virsh.AttachDeviceXml(vmName, "<controller type='usb' model='qemu-xhci' ports='8'/>", live: false);
             }
 

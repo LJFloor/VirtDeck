@@ -16,7 +16,7 @@
 
       <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
         <TextBlock Name="RunningWarning" IsVisible="False" TextWrapping="Wrap" Opacity="0.8"
-                   Text="The VM is running — the exported disks are a crash-consistent snapshot, not a clean shutdown state." />
+                   Text="The VM is running; the exported disks are a crash-consistent snapshot, not a clean shutdown state." />
         <CheckBox Name="SparseCheck" IsEnabled="False"
                   Content="Sparsify disks on the host before export (reclaims unused space)" />
         <!-- Indented to the checkbox label above it: 14px box + 6px label padding. -->

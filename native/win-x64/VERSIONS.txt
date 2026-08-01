@@ -2,8 +2,8 @@ Native USB-redirection libraries (Windows x64)
 ==============================================
 
 Drop the following 64-bit DLLs into this folder. The build copies every *.dll here
-next to VmManager.exe (loaded by bare DllImport name). These DLLs ARE committed to the
-repo (build inputs); their license texts are in licenses\ — see THIRD-PARTY-NOTICES.md.
+next to virtdeck.exe (loaded by bare DllImport name). These DLLs ARE committed to the
+repo (build inputs); their license texts are in licenses\. See THIRD-PARTY-NOTICES.md.
 
 Required (MinGW/MSYS2 builds use the SONAME-suffixed names on the right; the app's
 DllImport resolver accepts either, so stage whichever your build produces):
@@ -11,13 +11,13 @@ DllImport resolver accepts either, so stage whichever your build produces):
   usbredirhost.dll   OR  libusbredirhost-1.dll    usbredir host state machine
   usbredirparser.dll OR  libusbredirparser-1.dll  usbredir protocol parser (host depends on it)
 
-MinGW runtime deps (include if the above were built with MSYS2/MinGW — verify with
+MinGW runtime deps (include if the above were built with MSYS2/MinGW; verify with
 `dumpbin /dependents usbredirhost.dll` and stage every non-system import):
   libgcc_s_seh-1.dll
   libwinpthread-1.dll
 
 Where to get them (pick one):
-  1) Copy from a virt-viewer 10.x Windows install (bin\) — a known-good, ABI-matched set.
+  1) Copy from a virt-viewer 10.x Windows install (bin\), a known-good, ABI-matched set.
      IMPORTANT: pin the virt-viewer 10.x libusb-1.0.dll. virt-viewer 11 shipped a libusb
      that regressed USB redirection on Windows 10/11; do not use it.
   2) MSYS2/MinGW64:  pacman -S mingw-w64-x86_64-usbredir mingw-w64-x86_64-libusb
@@ -26,15 +26,15 @@ Where to get them (pick one):
 CRITICAL: usbredirhost and libusb MUST come from the SAME build family. usbredirhost is built
 against a specific libusb and calls into it; pairing it with an OLDER libusb causes an access
 violation (0xc0000005) INSIDE libusb-1.0.dll the moment data flows. Do NOT mix the libusb from
-the spice-space usbredirect MSI (1.0.24) with the MSYS2 usbredir DLLs — that exact mix crashed.
+the spice-space usbredirect MSI (1.0.24) with the MSYS2 usbredir DLLs; that exact mix crashed.
 
-Currently staged (matched MSYS2 mingw64 set — known good):
+Currently staged (matched MSYS2 mingw64 set, known good):
   libusb-1.0.dll          : 1.0.28.11946        (MSYS2 mingw-w64-x86_64-libusb 1.0.28-1)
   libusbredirhost-1.dll   : usbredir 0.15.0      (MSYS2 mingw-w64-x86_64-usbredir 0.15.0-1)
   libusbredirparser-1.dll : usbredir 0.15.0      (MSYS2 mingw-w64-x86_64-usbredir 0.15.0-1)
   libgcc_s_seh-1.dll / libwinpthread-1.dll / libssp-0.dll : MinGW runtime (compatible)
 
-The UsbDk kernel driver is NOT staged here — it is installed separately by the installer
+The UsbDk kernel driver is NOT staged here; it is installed separately by the installer
 (installer\redist\UsbDk_1.0.22_x64.msi). It is a driver, not a bundled DLL.
 
 Re-verify end-to-end USB redirection whenever libusb-1.0.dll changes.

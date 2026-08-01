@@ -6,7 +6,7 @@ namespace VirtDeck.Avalonia;
 
 internal static class Program
 {
-    /// <summary>Crash log path — %LOCALAPPDATA%\VirtDeck\crash.log, ~/.local/share/VirtDeck/crash.log.</summary>
+    /// <summary>Crash log path: %LOCALAPPDATA%\VirtDeck\crash.log, ~/.local/share/VirtDeck/crash.log.</summary>
     public static readonly string CrashLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VirtDeck", "crash.log");
@@ -34,7 +34,7 @@ internal static class Program
         }
     }
 
-    // Referenced by name by the Avalonia designer tooling — keep the signature.
+    // Referenced by name by the Avalonia designer tooling; keep the signature.
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()

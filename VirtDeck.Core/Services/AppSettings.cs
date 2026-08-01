@@ -12,7 +12,7 @@ namespace VirtDeck.Services
     /// migrates the existing registry values so upgrading users keep their settings; see
     /// <see cref="LegacyImporter"/>, which the WinForms host supplies.
     ///
-    /// Writes are best-effort — a settings file that can't be written must never break the app.
+    /// Writes are best-effort; a settings file that can't be written must never break the app.
     /// </summary>
     public sealed class AppSettings
     {

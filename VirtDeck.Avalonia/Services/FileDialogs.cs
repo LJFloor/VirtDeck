@@ -6,7 +6,7 @@ namespace VirtDeck.Avalonia.Services;
 /// <summary>
 /// Local file pickers over Avalonia's <see cref="IStorageProvider"/> (the XDG portal on Linux,
 /// the common item dialogs on Windows). The rest of the app still speaks the WinForms filter
-/// string — <see cref="ParseFilter"/> is the one place that dialect is translated.
+/// string; <see cref="ParseFilter"/> is the one place that dialect is translated.
 /// </summary>
 public static class FileDialogs
 {
@@ -38,7 +38,7 @@ public static class FileDialogs
     }
 
     /// <summary>
-    /// Only local paths are usable — everything downstream (NBD streaming, tar writing) works on
+    /// Only local paths are usable; everything downstream (NBD streaming, tar writing) works on
     /// <see cref="FileStream"/>, not on portal handles. A non-file URI reads as "nothing picked".
     /// </summary>
     private static string? PathOf(IStorageItem? item)

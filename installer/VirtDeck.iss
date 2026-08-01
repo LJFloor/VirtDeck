@@ -4,19 +4,20 @@
 ;
 ; Build steps (run from the repo root):
 ;   1) Stage the native x64 DLLs into native\win-x64\  (see native\win-x64\VERSIONS.txt)
-;   2) dotnet publish VirtDeck.App\VirtDeck.App.csproj -c Release -r win-x64 --self-contained true -o publish\win-x64
+;   2) dotnet publish VirtDeck.Avalonia\VirtDeck.Avalonia.csproj -c Release -r win-x64 --self-contained true -o publish\win-x64
 ;   2b) Zip the SpiceClient source to publish\SpiceClient-src.zip (LGPL corresponding source)
 ;   3) Place UsbDk_1.0.22_x64.msi into installer\redist\
 ;   4) iscc installer\VirtDeck.iss
 ;
 ; publish.bat performs steps 2, 2b and 4 automatically.
 ;
-; The app is published self-contained, so the .NET runtime is bundled — no runtime check needed.
+; The app is published self-contained, so the .NET runtime is bundled, no runtime check needed.
 
 #define AppName "VirtDeck"
 #define AppPublisher "Leendert-Jan Floor"
 #define AppVersion "1.0.0"
-#define AppExe "VirtDeck.exe"
+; The Avalonia project's <AssemblyName> is lower-case, so the apphost is virtdeck.exe.
+#define AppExe "virtdeck.exe"
 #define UsbDkMsi "UsbDk_1.0.22_x64.msi"
 #define PublishDir "..\publish\win-x64"
 
@@ -46,7 +47,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; LGPL corresponding source for the SpiceClient library (the spice-html5-derived component),
 ; produced by publish.bat. Installed beside the app so the binary is "accompanied by source"
-; (LGPL/GPL §3(a)) — no separate written offer or hosted URL required.
+; (LGPL/GPL §3(a)), so no separate written offer or hosted URL is required.
 Source: "..\publish\SpiceClient-src.zip"; DestDir: "{app}"; Flags: ignoreversion
 ; The app's freeware EULA, plus third-party notices + license texts. We redistribute the
 ; LGPL/MIT native DLLs and the Apache-licensed UsbDk MSI, so their licenses ship beside them.
@@ -88,7 +89,7 @@ begin
 
   // UsbDk is a USB hub filter driver; installing it re-enumerates the USB bus, which briefly
   // disconnects/reconnects attached devices (removable drives may unmount and remount). Warn
-  // first — like VirtualBox warns its network driver will reset connectivity.
+  // first, like VirtualBox warns its network driver will reset connectivity.
   if MsgBox('VirtDeck will now install the UsbDk driver, which is required to redirect USB '
     + 'devices into virtual machines.' + #13#10#13#10
     + 'Installing this driver briefly disconnects and reconnects the USB devices on this PC. '

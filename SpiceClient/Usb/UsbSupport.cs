@@ -4,12 +4,12 @@ using SpiceClient.Interop;
 namespace SpiceClient.Usb;
 
 /// <summary>
-/// Answers "can this client redirect USB at all?" without opening anything — just whether the
+/// Answers "can this client redirect USB at all?" without opening anything, just whether the
 /// native stack (<c>libusb-1.0</c> + <c>usbredirhost</c>) is present.
 ///
 /// This has to be checked *before* a usbredir channel is connected, not after. A channel that
 /// links and then cannot drive a usbredirhost never sends the usb_redir hello, and the SPICE
-/// server responds by closing the **entire** connection — display, inputs and all — a second or so
+/// server responds by closing the **entire** connection (display, inputs and all) a second or so
 /// later. The console then reconnects, links the dead channel again, and gets dropped again: a
 /// flickering console on any VM that has &lt;redirdev&gt; elements. So when the stack is missing the
 /// channel is simply not opened, exactly as spice-gtk built without usbredir does.

@@ -25,7 +25,7 @@ public partial class ConsoleWindow : Window
     private static string GuestVirtioServerPath =>
         "/var/lib/libvirt/images/" + GuestVirtioUrl[(GuestVirtioUrl.LastIndexOf('/') + 1)..];
 
-    private const string NoCdromTip = "This VM has no CD/DVD drive — add one in the editor while the VM is shut off.";
+    private const string NoCdromTip = "This VM has no CD/DVD drive; add one in the editor while the VM is shut off.";
     private const string CdromTip = "Eject or change the VM's CD/DVD media.";
     private const string FloppyTip = "Eject or change the VM's floppy media.";
 
@@ -41,7 +41,7 @@ public partial class ConsoleWindow : Window
     private bool _starting; // powered-off overlay: a virsh start is in flight
     private PixelSize? _fittedSize; // display size the window was last fitted to (null → never fitted)
 
-    /// <summary>Display size for a console with no guest surface — one opened on a shut-off VM.</summary>
+    /// <summary>Display size for a console with no guest surface, one opened on a shut-off VM.</summary>
     private static readonly PixelSize OffSize = new(640, 480);
     private bool _windowActive;
     private long _lastGrabAttempt;
@@ -59,7 +59,7 @@ public partial class ConsoleWindow : Window
     private string? _lastHostClipboard;
 
     // Auto-reconnect. There is no Reconnect button: a console whose session drops (or whose connect
-    // fails) while the guest is still running retries itself. The VM-list poll is a 30 s backstop —
+    // fails) while the guest is still running retries itself. The VM-list poll is a 30 s backstop,
     // far too slow to be the only recovery, which is what made a manual button necessary.
     private readonly DispatcherTimer _reconnectTimer;
     private int _reconnectAttempt;
@@ -67,7 +67,7 @@ public partial class ConsoleWindow : Window
 
     public string VmName { get; }
 
-    /// <summary>Design-time only — the app always constructs this from the VM list.</summary>
+    /// <summary>Design-time only; the app always constructs this from the VM list.</summary>
     public ConsoleWindow() : this(new SshConnectionManager(), new VirshService(new SshConnectionManager()), "preview") { }
 
     public ConsoleWindow(SshConnectionManager ssh, VirshService virsh, string vmName)
@@ -77,7 +77,7 @@ public partial class ConsoleWindow : Window
         VmName = vmName;
 
         InitializeComponent();
-        Title = $"Console — {vmName}";
+        Title = $"Console - {vmName}";
 
         var settings = AppSettings.Current;
         string? uuid = GetVmUuid();
@@ -119,7 +119,7 @@ public partial class ConsoleWindow : Window
         Activated += (_, _) => { _windowActive = true; UpdateGrab(); _clipboardPoll.Start(); };
         Deactivated += (_, _) => { _windowActive = false; UpdateGrab(); _clipboardPoll.Stop(); };
 
-        // The grab follows the pointer, not just focus — see UpdateGrab. PointerMoved is the
+        // The grab follows the pointer, not just focus; see UpdateGrab. PointerMoved is the
         // re-arm: IsPointerOver can already be true when the window is activated (alt-tabbed back
         // with the pointer parked over the guest), in which case no enter event ever arrives.
         Display.PointerEntered += (_, _) => UpdateGrab();
@@ -163,7 +163,7 @@ public partial class ConsoleWindow : Window
         ResetItem.Click += async (_, _) =>
         {
             if (await MessageDialog.Confirm(this, "Reset",
-                    $"Reset \"{VmName}\"?\n\nThis is a hard reset — unsaved work in the guest is lost."))
+                    $"Reset \"{VmName}\"?\n\nThis is a hard reset; unsaved work in the guest is lost."))
                 await PowerAsync("Reset", () => _virsh.ForceStopVmAsync(VmName).ContinueWith(_ => _virsh.StartVmAsync(VmName)).Unwrap());
         };
 
@@ -249,7 +249,7 @@ public partial class ConsoleWindow : Window
         // periodic poll and the libvirt event stream, so "running" can arrive several times while a
         // connect is still in flight; a second overlapping attempt would tear down the first one's
         // forwarder mid-handshake and leak stale bytes into the new socket (the intermittent
-        // "SPICE auth error" — link magic read where the auth result should be).
+        // "SPICE auth error", link magic read where the auth result should be).
         if (_connecting) return;
         _connecting = true;
         _reconnectTimer.Stop();   // an actual attempt supersedes any pending retry
@@ -310,7 +310,7 @@ public partial class ConsoleWindow : Window
 
     /// <summary>
     /// Queues another <see cref="ConnectSpice"/> after a failed connect or a dropped session, with a
-    /// linear back-off and a bounded budget. Only ever for a guest that is still running — a powered-off
+    /// linear back-off and a bounded budget. Only ever for a guest that is still running; a powered-off
     /// VM belongs to the overlay, and exhausting the budget leaves the 30 s VM-list poll as the backstop,
     /// so no failure state is permanently stuck without a button to press.
     /// </summary>
@@ -327,7 +327,7 @@ public partial class ConsoleWindow : Window
         _reconnectAttempt++;
         _reconnectTimer.Interval = TimeSpan.FromSeconds(_reconnectAttempt);   // 1s, 2s, … 5s
         _reconnectTimer.Start();
-        StatusText.Text = $"{reason} — reconnecting ({_reconnectAttempt}/{MaxReconnectAttempts})…";
+        StatusText.Text = $"{reason}, reconnecting ({_reconnectAttempt}/{MaxReconnectAttempts})…";
     }
 
     /// <summary>Cancels a pending retry and hands the next boot of this guest a full budget.</summary>
@@ -386,7 +386,7 @@ public partial class ConsoleWindow : Window
         else if (vm?.State == "shut off" && !_connected && !_connecting)
         {
             StopReconnect();
-            // Off and idle — a console opened on a stopped VM, a failed connect, or a state that
+            // Off and idle: a console opened on a stopped VM, a failed connect, or a state that
             // flapped. Make sure the overlay (and its Start button) is up.
             StatusText.Text = "VM is powered off.";
             ShowOffOverlay(true);
@@ -469,7 +469,7 @@ public partial class ConsoleWindow : Window
         ToolTip.SetTip(CdDvdMenu, !_connected ? "Start the VM to manage CD/DVD."
                                 : _cdromTarget == null ? NoCdromTip : CdromTip);
 
-        // Floppy is rare — show the menu only when this VM actually has a floppy drive,
+        // Floppy is rare; show the menu only when this VM actually has a floppy drive,
         // hiding it entirely rather than showing a dead, disabled one.
         FloppyMenu.IsVisible = _floppyTarget != null;
         FloppyMenu.IsEnabled = _connected && _floppyTarget != null;
@@ -577,13 +577,13 @@ public partial class ConsoleWindow : Window
         try
         {
             await Task.Run(liveOp);
-            if (!_closing) StatusText.Text = $"Media: {label} — done";
+            if (!_closing) StatusText.Text = $"Media: {label}, done";
             return;
         }
         catch (Exception ex)
         {
             // Changing media on a running VM can be blocked by the host (e.g. an AppArmor profile
-            // reload). Offer to apply it to the saved config instead — no live relabel, effective
+            // reload). Offer to apply it to the saved config instead; no live relabel, effective
             // after a restart.
             if (configOp == null || _closing)
             {
@@ -606,7 +606,7 @@ public partial class ConsoleWindow : Window
         try
         {
             await Task.Run(configOp);
-            if (!_closing) StatusText.Text = $"Media: {label} — saved (restart the VM to apply)";
+            if (!_closing) StatusText.Text = $"Media: {label}, saved (restart the VM to apply)";
         }
         catch (Exception ex2)
         {
@@ -685,7 +685,7 @@ public partial class ConsoleWindow : Window
     /// <summary>
     /// Waits briefly for the usbredir channels to link after (re)connecting. Returns as soon as a
     /// slot is ready, or immediately when USB support is known-unavailable (no libusb, or no capture
-    /// backend) — the picker then explains why rather than the user waiting for nothing.
+    /// backend); the picker then explains why rather than the user waiting for nothing.
     /// </summary>
     private async Task<UsbDeviceManager?> WaitForUsbReadyAsync(int timeoutMs)
     {
@@ -704,7 +704,7 @@ public partial class ConsoleWindow : Window
 
     /// <summary>
     /// Host → guest. Avalonia has no equivalent of <c>WM_CLIPBOARDUPDATE</c>, so the text is polled
-    /// while the console has focus and a SPICE grab is announced only when it actually changed —
+    /// while the console has focus and a SPICE grab is announced only when it actually changed;
     /// that comparison is also what stops the guest→host mirror below from looping back.
     /// </summary>
     private async Task PollHostClipboardAsync()
@@ -744,7 +744,7 @@ public partial class ConsoleWindow : Window
 
     /// <summary>
     /// Synthesizes the clipboard text as keystrokes. For guests without the agent, where the real
-    /// clipboard channel is unavailable — best-effort ASCII on a US layout.
+    /// clipboard channel is unavailable; best-effort ASCII on a US layout.
     /// </summary>
     private async Task TypeClipboardAsync()
     {
@@ -756,7 +756,7 @@ public partial class ConsoleWindow : Window
         catch { return; }
         if (string.IsNullOrEmpty(text)) return;
 
-        // A newline is typed as Enter — warn it may run a command / submit a form in the guest.
+        // A newline is typed as Enter; warn it may run a command / submit a form in the guest.
         if (text.Contains('\n') &&
             !await MessageDialog.Confirm(this, "Type Clipboard",
                 "The clipboard contains line breaks.\n\n" +
@@ -793,7 +793,7 @@ public partial class ConsoleWindow : Window
     /// </summary>
     private async Task SaveScreenshotAsync()
     {
-        // Take the pixels and their dimensions together — a resolution change between the two
+        // Take the pixels and their dimensions together; a resolution change between the two
         // would otherwise reinterpret the buffer at the wrong size.
         byte[]? pixels = null;
         int w = 0, h = 0;
@@ -813,7 +813,7 @@ public partial class ConsoleWindow : Window
         try
         {
             await File.WriteAllBytesAsync(path, png);
-            StatusText.Text = $"Screenshot saved — {w}×{h}";
+            StatusText.Text = $"Screenshot saved: {w}×{h}";
         }
         catch (Exception ex)
         {
@@ -834,10 +834,10 @@ public partial class ConsoleWindow : Window
 
     private void OnResolutionChanged(int w, int h)
     {
-        StatusText.Text = $"Connected — {w}×{h}";
+        StatusText.Text = $"Connected: {w}×{h}";
 
         // Size to the guest on the first surface, and keep tracking it afterwards (grow or shrink,
-        // in place) while windowed — like VirtualBox/Hyper-V. A guest that switches mode (installer
+        // in place) while windowed, like VirtualBox/Hyper-V. A guest that switches mode (installer
         // → desktop, display-settings change, agent-driven resize) should carry the window with it.
         // Maximized/full-screen deliberately doesn't move: there the guest image re-centres on black.
         // Only a real change refits, so a surface recreated at the same size leaves a window the
@@ -850,14 +850,15 @@ public partial class ConsoleWindow : Window
     }
 
     /// <summary>
-    /// Sizes a console that has no guest surface to show — one opened on a shut-off VM. Without this
-    /// it would sit at the XAML's 1024×768 with nothing but the overlay in it. Only ever the *first*
-    /// sizing decision: a window already fitted to a guest keeps that size when the VM shuts down,
-    /// and the user's own resize survives the poll re-asserting the overlay.
+    /// Sizes a console that has no guest surface to show, one opened on a shut-off VM, or one whose
+    /// guest just powered off. Without this the former would sit at the XAML's 1024×768 and the
+    /// latter would keep the guest's (possibly 1920×1080) size around the overlay alone. Fits only on
+    /// the transition into the off size, so the user's own resize survives the poll re-asserting the
+    /// overlay.
     /// </summary>
     private void FitToOffSize()
     {
-        if (_fittedSize != null) return;
+        if (_fittedSize == OffSize) return;
         _fittedSize = OffSize;
         FitToResolution();
     }
@@ -889,7 +890,7 @@ public partial class ConsoleWindow : Window
 
         // Grow the window by the chrome around the display so the guest lands 1:1. The display is
         // the DockPanel's fill child, so this difference is the toolbar + status bar + borders and
-        // doesn't depend on the guest size — it stays correct even before layout catches up.
+        // doesn't depend on the guest size; it stays correct even before layout catches up.
         double chromeW = Bounds.Width - Display.Bounds.Width;
         double chromeH = Bounds.Height - Display.Bounds.Height;
         if (chromeW < 0 || chromeH < 0) return;
@@ -906,7 +907,7 @@ public partial class ConsoleWindow : Window
     }
 
     /// <summary>
-    /// Nudges the window back inside the work area after a fit — a guest that jumps to a larger mode
+    /// Nudges the window back inside the work area after a fit; a guest that jumps to a larger mode
     /// would otherwise push its own title bar off the bottom/right. Posted because the new bounds
     /// only exist after the resize has been through layout. Best-effort: positioning is a no-op on
     /// compositors that don't let a client place its own windows.
@@ -938,7 +939,7 @@ public partial class ConsoleWindow : Window
     /// The pointer condition is not cosmetic. X11 window managers (mutter/muffin, kwin, xfwm) take
     /// their own keyboard grab as part of a title-bar or window-edge drag, so Escape cancels the
     /// move and the arrow keys nudge the window. If we are holding the keyboard, that grab is
-    /// refused with AlreadyGrabbed and the WM aborts the whole move-resize op — the console window
+    /// refused with AlreadyGrabbed and the WM aborts the whole move-resize op; the console window
     /// then cannot be moved or resized at all. Releasing on pointer-exit hands the keyboard back
     /// before the user ever reaches the chrome.
     /// </summary>
@@ -958,7 +959,7 @@ public partial class ConsoleWindow : Window
 
     /// <summary>
     /// Pointer-move re-arm, rate-limited. A refused grab (something else holds the keyboard) is a
-    /// synchronous X round-trip, and pointer moves stream in while the user works in the guest —
+    /// synchronous X round-trip, and pointer moves stream in while the user works in the guest;
     /// retrying on every one of them would put that round-trip on the UI thread that also drives
     /// the framebuffer pump.
     /// </summary>
@@ -978,7 +979,7 @@ public partial class ConsoleWindow : Window
     {
         var inputs = _session?.Inputs;
         if (inputs == null) return;
-        // Let an open toolbar menu keep the keyboard — that is what makes its arrow-key
+        // Let an open toolbar menu keep the keyboard; that is what makes its arrow-key
         // navigation work; the guest only gets keys while it has focus or the pointer.
         if (!Display.IsFocused && !IsPointerOverDisplay()) return;
 

@@ -6,7 +6,7 @@ namespace VirtDeck.Avalonia.Input;
 /// Takes exclusive keyboard input for the console window so combinations the desktop would
 /// otherwise swallow (Alt+Tab, Super, Ctrl+Alt+arrows) reach the guest instead.
 ///
-/// This is best-effort by design: when no grab is available the console still works — ordinary
+/// This is best-effort by design: when no grab is available the console still works; ordinary
 /// keys are delivered normally and the Keyboard toolbar menu sends the reserved combinations as
 /// raw scancodes. Nothing in the console may depend on a grab succeeding.
 /// </summary>

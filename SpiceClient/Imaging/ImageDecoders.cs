@@ -39,7 +39,7 @@ public static class ImageDecoders
 
     /// <summary>
     /// SPICE_IMAGE_TYPE_JPEG (and MJPEG stream frames) via Skia. Decodes straight into a
-    /// top-down BGRA buffer — no intermediate bitmap and no channel swap.
+    /// top-down BGRA buffer, no intermediate bitmap and no channel swap.
     /// Returns null on a corrupt or unreadable frame; callers skip it.
     /// </summary>
     public static DecodedImage? DecodeJpeg(byte[] jpeg)
@@ -51,14 +51,14 @@ public static class ImageDecoders
         int w = codec.Info.Width, h = codec.Info.Height;
         if (w <= 0 || h <= 0) return null;
 
-        // Opaque BGRA, rowBytes = w*4 (the SKImageInfo default) — exactly the framebuffer layout.
+        // Opaque BGRA, rowBytes = w*4 (the SKImageInfo default), exactly the framebuffer layout.
         var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Opaque);
         var outBuf = new byte[w * h * 4];
         var handle = GCHandle.Alloc(outBuf, GCHandleType.Pinned);
         try
         {
             var result = codec.GetPixels(info, handle.AddrOfPinnedObject());
-            // IncompleteInput still leaves the decoded prefix in the buffer — better a partial
+            // IncompleteInput still leaves the decoded prefix in the buffer; better a partial
             // frame than a dropped one, matching the old GDI+ behaviour on truncated data.
             if (result != SKCodecResult.Success && result != SKCodecResult.IncompleteInput)
                 return null;

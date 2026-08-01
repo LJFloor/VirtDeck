@@ -53,6 +53,13 @@
       </FluentTheme.Palettes>
     </FluentTheme>
 
+    <!-- One taskbar/title-bar icon for every window, set here rather than repeated in fourteen
+         .axaml files. Icon is a styled property, so a Style reaches it. The PNG is used instead
+         of the .ico because Skia (Avalonia's decoder on Linux) does not read ICO. -->
+    <Style Selector="Window">
+      <Setter Property="Icon" Value="/Assets/virtdeck-256.png" />
+    </Style>
+
     <!-- NumericUpDown draws itself inside a ButtonSpinner, whose height Fluent sets in its own
          ControlTheme rather than from the TextControl* keys the resource dictionary retunes. Pinned
          to the field height here so a spinner never stands proud of the text boxes beside it; a

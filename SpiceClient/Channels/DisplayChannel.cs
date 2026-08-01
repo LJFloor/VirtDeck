@@ -47,7 +47,7 @@ public sealed class DisplayChannel : SpiceChannel
         SendPreferred();               // ask the server for a codec we can decode (default LZ)
     }
 
-    /// <summary>Runtime image-compression preference (e.g. LZ or OFF) — overrides the VM's configured mode for this session.</summary>
+    /// <summary>Runtime image-compression preference (e.g. LZ or OFF); overrides the VM's configured mode for this session.</summary>
     public void SetPreferredCompression(byte mode)
     {
         _preferred = mode;

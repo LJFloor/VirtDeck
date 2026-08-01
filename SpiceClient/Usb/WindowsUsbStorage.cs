@@ -5,7 +5,7 @@ namespace SpiceClient.Usb;
 /// <summary>
 /// Windows half of <see cref="UsbStoragePrep"/>: maps a USB device (VID/PID) to its drive letters
 /// via SetupAPI + a cfgmgr32 parent-walk, then <c>FSCTL_LOCK_VOLUME</c> + <c>FSCTL_DISMOUNT_VOLUME</c>
-/// each one. The lock handle stays open until the prep is disposed — closing it is what lets Windows
+/// each one. The lock handle stays open until the prep is disposed; closing it is what lets Windows
 /// remount, so it doubles as the undo. spice-gtk/virt-viewer skip this step; UsbDk's capture-by-reset
 /// is why VirtDeck cannot.
 /// </summary>
@@ -94,7 +94,7 @@ internal static class WindowsUsbStorage
             }
             else
             {
-                log?.Invoke($"[usb] dismount: lock {letter}: failed (err {Marshal.GetLastWin32Error()}) — files open?");
+                log?.Invoke($"[usb] dismount: lock {letter}: failed (err {Marshal.GetLastWin32Error()}); files open?");
                 CloseHandle(h);
                 prep.AddBlocked($"{letter}:"); // a file/handle on the volume is still open
             }
@@ -122,7 +122,7 @@ internal static class WindowsUsbStorage
 
     private static int GetDiskNumber(char letter)
     {
-        // Query-only access (0) — no elevation needed just to read the disk number.
+        // Query-only access (0), no elevation needed just to read the disk number.
         IntPtr h = CreateFileW($@"\\.\{letter}:", 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
             IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
         if (h == INVALID_HANDLE_VALUE) return -1;
@@ -146,7 +146,7 @@ internal static class WindowsUsbStorage
                 if (string.IsNullOrEmpty(path)) continue;
                 if (DiskNumberOfPath(path) != diskNumber) continue;
 
-                // Found the disk's devnode — walk up to the USB node and match VID/PID.
+                // Found the disk's devnode; walk up to the USB node and match VID/PID.
                 string target = $"VID_{vid:X4}&PID_{pid:X4}";
                 uint cur = devInfo.DevInst;
                 for (int depth = 0; depth < 10; depth++)

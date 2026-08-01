@@ -1,7 +1,7 @@
 namespace SpiceClient.Imaging;
 
 /// <summary>
-/// A decoded image in top-down BGRA byte order (stride = Width*4) — the same
+/// A decoded image in top-down BGRA byte order (stride = Width*4), the same
 /// byte order as the framebuffer (Format32bppArgb), so blits are a direct copy.
 /// </summary>
 public sealed class DecodedImage

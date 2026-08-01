@@ -44,7 +44,7 @@ public partial class UsbDeviceDialog : Window
         Closed += (_, _) => _usb.DevicesChanged -= OnDevicesChanged;
     }
 
-    // Fired from a channel thread (e.g. the device was unplugged) — marshal, then refresh.
+    // Fired from a channel thread (e.g. the device was unplugged); marshal, then refresh.
     private void OnDevicesChanged() => Dispatcher.UIThread.Post(async () => await RefreshAsync());
 
     private UsbDeviceInfo? Selected() => (DeviceList.SelectedItem as UsbDeviceRow)?.Device;
@@ -87,7 +87,7 @@ public partial class UsbDeviceDialog : Window
             return;
         }
         StatusText.Text = $"{_usb.UsedSlots} of {_usb.ReadySlots} USB slots in use." +
-            (_usb.FreeSlots == 0 ? "  All slots are full — release a device to redirect another." : "");
+            (_usb.FreeSlots == 0 ? "  All slots are full; release a device to redirect another." : "");
     }
 
     private void SetButtonsEnabled(bool enabled)
@@ -112,7 +112,7 @@ public partial class UsbDeviceDialog : Window
         SetButtonsEnabled(false);
         StatusText.Text = $"Preparing {d.Description}…";
 
-        // Mass storage has to be taken offline first — on Windows because UsbDk's capture-by-reset
+        // Mass storage has to be taken offline first: on Windows because UsbDk's capture-by-reset
         // fails while a volume is mounted, on Linux because the kernel driver is about to be
         // detached under a mounted filesystem. No-op for anything that isn't storage.
         var prep = await Task.Run(() => UsbStoragePrep.Prepare(d, SpiceLog.Log));

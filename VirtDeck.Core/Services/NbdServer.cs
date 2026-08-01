@@ -9,13 +9,13 @@ namespace VirtDeck.Services
     /// Serves a single local file as a Network Block Device (NBD) export on a loopback port, and exposes
     /// it to the remote host via an SSH reverse port-forward so QEMU can use it as a network disk source.
     /// Replaces the old HTTP/curl path: NBD's client is always compiled into QEMU (no qemu-block-extra
-    /// needed), and the export can be read-write — so a streamed floppy is writable and the guest's writes
+    /// needed), and the export can be read-write, so a streamed floppy is writable and the guest's writes
     /// persist back to the local file. One instance per file; the dedicated reverse-forwarded port makes
     /// each URL unique.
     ///
     /// Implements the NBD "fixed newstyle" handshake with simple replies (structured replies are refused
     /// during option haggling, so QEMU negotiates down). Wire format per the NBD protocol spec:
-    /// https://github.com/NetworkBlockDevice/nbd/blob/master/doc/proto.md — all multi-byte fields are
+    /// https://github.com/NetworkBlockDevice/nbd/blob/master/doc/proto.md; all multi-byte fields are
     /// big-endian (unlike the little-endian SPICE wire format elsewhere in this solution).
     /// </summary>
     public sealed class NbdServer : IDisposable
@@ -138,7 +138,7 @@ namespace VirtDeck.Services
                         Transmission(stream);
                 }
             }
-            catch { /* client went away / protocol error — drop the connection */ }
+            catch { /* client went away / protocol error; drop the connection */ }
         }
 
         // ---- Handshake (fixed newstyle) ------------------------------------
@@ -191,7 +191,7 @@ namespace VirtDeck.Services
                         SendOptReply(s, OPT_ABORT, REP_ACK);
                         return false;
                     default:
-                        // STRUCTURED_REPLY, SET_META_CONTEXT, STARTTLS, LIST, … — refuse; the client adapts.
+                        // STRUCTURED_REPLY, SET_META_CONTEXT, STARTTLS, LIST, …: refuse; the client adapts.
                         SendOptReply(s, option, REP_ERR_UNSUP);
                         continue;
                 }

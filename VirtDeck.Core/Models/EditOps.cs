@@ -24,7 +24,7 @@ namespace VirtDeck.Models
         public bool IsCdrom => Kind == "cdrom";
         public bool IsFloppy => Kind == "floppy";
 
-        /// <summary>Carrier for VirshService.BuildDiskXml — same fields the editor renders/applies.</summary>
+        /// <summary>Carrier for VirshService.BuildDiskXml; same fields the editor renders/applies.</summary>
         public DiskInfo ToDiskInfo() => new()
         {
             Target = Target, Device = IsCdrom ? "cdrom" : IsFloppy ? "floppy" : "disk", Bus = Bus,

@@ -64,7 +64,7 @@
       <TabItem Header="Boot">
         <DockPanel Margin="20,14,20,20">
           <TextBlock DockPanel.Dock="Top" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,10"
-                     Text="Tick devices to boot from. Order is priority — topmost is tried first." />
+                     Text="Tick devices to boot from. Order is priority; topmost is tried first." />
           <StackPanel DockPanel.Dock="Right" Spacing="6" Margin="10,0,0,0" VerticalAlignment="Top">
             <Button Name="BootUpButton" Content="Up" MinWidth="80" />
             <Button Name="BootDownButton" Content="Down" MinWidth="80" />

@@ -11,7 +11,7 @@ namespace SpiceClient.Usb;
 /// via <see cref="SetDevice"/>/<see cref="DetachDevice"/>. usbredirhost owns any device handle
 /// and libusb_close()es it.
 ///
-/// THREADING — usbredirhost and libusb are NOT safe to call from several threads at once in the
+/// THREADING: usbredirhost and libusb are NOT safe to call from several threads at once in the
 /// way we need, so everything is driven SINGLE-THREADED on the shared libusb worker thread (the
 /// model usbredirserver/spice-gtk use). Other threads only hand work over:
 ///   • the SPICE channel read thread enqueues incoming bytes (<see cref="Feed"/>) and wakes the worker;

@@ -13,7 +13,7 @@ namespace SpiceClient.Usb;
 ///
 /// Thread-safety: <see cref="Enumerate"/>/<see cref="Bind"/>/<see cref="Unbind"/> are called
 /// from the UI thread; <see cref="OnChannelLinked"/>/<see cref="OnDeviceLost"/> from channel
-/// threads. <see cref="DevicesChanged"/> fires on the caller's thread — subscribers marshal.
+/// threads. <see cref="DevicesChanged"/> fires on the caller's thread; subscribers marshal.
 /// </summary>
 public sealed class UsbDeviceManager
 {
@@ -36,7 +36,7 @@ public sealed class UsbDeviceManager
     public bool Available => _ctx.Available;
 
     /// <summary>
-    /// True when a backend able to capture devices is present — UsbDk on Windows, libusb's
+    /// True when a backend able to capture devices is present: UsbDk on Windows, libusb's
     /// native backend elsewhere.
     /// </summary>
     public bool CaptureAvailable => _ctx.CaptureAvailable;
@@ -85,7 +85,7 @@ public sealed class UsbDeviceManager
     /// Lists redirectable host USB devices. HID (keyboard/mouse) and hubs are excluded so
     /// the local machine stays usable. Names come from what the OS cached at enumeration
     /// (<see cref="UsbNameTable"/>) rather than from the device's own string descriptors, which
-    /// would mean opening it — deliberately avoided here to stay non-invasive.
+    /// would mean opening it, deliberately avoided here to stay non-invasive.
     /// </summary>
     public List<UsbDeviceInfo> Enumerate()
     {
@@ -158,7 +158,7 @@ public sealed class UsbDeviceManager
             {
                 int ready = _channels.Count(c => c.HostReady);
                 return (false, ready == 0
-                    ? "USB redirection channels are not ready yet — try again in a moment."
+                    ? "USB redirection channels are not ready yet; try again in a moment."
                     : $"All {ready} USB redirection slots are in use.");
             }
             slot = free;
@@ -219,17 +219,47 @@ public sealed class UsbDeviceManager
     /// <summary>
     /// Turns a failed <c>libusb_open</c> into something the user can act on. The interesting case is
     /// LIBUSB_ERROR_ACCESS, which on Linux means the udev rule granting access to /dev/bus/usb is
-    /// missing — a fixable setup problem rather than a broken device.
+    /// missing, a fixable setup problem rather than a broken device.
     /// </summary>
     private static string DescribeOpenFailure(int rc)
     {
         if (rc == LibUsb.LIBUSB_ERROR_ACCESS && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var rule = FindUdevRule();
             return "Permission denied opening the device. Your user needs read/write access to it " +
-                   "under /dev/bus/usb — install the VirtDeck udev rule, then unplug and replug the device.";
+                   "under /dev/bus/usb; install the VirtDeck udev rule, then unplug and replug the device." +
+                   (rule == null ? "" :
+                       $"\n\n    sudo install -m 0644 \"{rule}\" /etc/udev/rules.d/\n" +
+                       "    sudo udevadm control --reload-rules && sudo udevadm trigger");
+        }
 
         return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? "Could not open the device — it may have been unplugged, or UsbDk could not capture it."
-            : "Could not open the device — it may have been unplugged, or another program is using it.";
+            ? "Could not open the device; it may have been unplugged, or UsbDk could not capture it."
+            : "Could not open the device; it may have been unplugged, or another program is using it.";
+    }
+
+    /// <summary>
+    /// Locates the shipped udev rule so the access error can name the exact file to install.
+    /// An AppImage cannot install it itself (no install step, no root), so telling the user where
+    /// the copy inside the mounted image lives is the whole fix. Returns null if it isn't found;
+    /// the advice above still stands, just without the command.
+    /// </summary>
+    private static string? FindUdevRule()
+    {
+        const string name = "70-virtdeck-usb.rules";
+        var appDir = Environment.GetEnvironmentVariable("VIRTDECK_APPDIR");
+        string?[] candidates =
+        {
+            appDir == null ? null : Path.Combine(appDir, "usr", "share", "virtdeck", name),
+            Path.Combine(AppContext.BaseDirectory, name),
+            $"/usr/share/virtdeck/{name}",
+            $"/usr/local/share/virtdeck/{name}",
+        };
+
+        foreach (var path in candidates)
+            if (path != null && File.Exists(path)) return path;
+
+        return null;
     }
 
     private IntPtr OpenDevice(UsbDeviceInfo info, out int rcOut)
@@ -262,7 +292,7 @@ public sealed class UsbDeviceManager
                 {
                     // On Linux the device is still bound to its kernel driver (usb-storage, usbhid…);
                     // without this, claiming an interface fails with LIBUSB_ERROR_BUSY. Not supported
-                    // on Windows, where UsbDk has already taken the device — ignore the error there.
+                    // on Windows, where UsbDk has already taken the device; ignore the error there.
                     try { LibUsb.libusb_set_auto_detach_kernel_driver(handle, 1); }
                     catch (EntryPointNotFoundException) { /* pre-1.0.9 libusb */ }
                 }

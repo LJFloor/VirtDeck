@@ -1,15 +1,15 @@
 name: Build & Publish
 
-# Build the app and produce the Windows installer on every merge to main.
-# The installer EXE is uploaded as a build artifact (downloadable from the run's
-# "Artifacts" section). This mirrors publish.bat, run on a windows runner.
+# Build the app on every merge to main and produce both release artifacts: the Windows installer
+# and the Linux AppImage. Each is uploaded as a build artifact (downloadable from the run's
+# "Artifacts" section). This mirrors publish.bat and packaging/build-appimage.sh respectively.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
 
     steps:
@@ -41,7 +41,7 @@ jobs:
 
       - name: Publish (self-contained win-x64)
         run: >
-          dotnet publish VirtDeck/VirtDeck.csproj
+          dotnet publish VirtDeck.Avalonia/VirtDeck.Avalonia.csproj
           -c Release -r win-x64 --self-contained true
           -p:Version=${{ steps.ver.outputs.version }}
           -o publish/win-x64
@@ -58,4 +58,32 @@ jobs:
         with:
           name: VirtDeck-installer
           path: installer/output/*.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Derive CI version
+        id: ver
+        run: echo "version=1.0.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      # The script downloads appimagetool itself and runs it with APPIMAGE_EXTRACT_AND_RUN, so the
+      # runner needs no FUSE and no extra packages.
+      - name: Build AppImage
+        run: packaging/build-appimage.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtDeck-AppImage
+          path: publish/*.AppImage
           if-no-files-found: error

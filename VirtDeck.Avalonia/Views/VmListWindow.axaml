@@ -47,7 +47,8 @@
             <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                     BorderThickness="0,0,0,1" BorderBrush="#22808080">
               <StackPanel Orientation="Horizontal">
-                <TextBlock Text="Name"   Width="{StaticResource ColName}"  FontWeight="SemiBold" />
+                <!-- Padding (not Margin) indents the heading over the rows' state dot without widening the column. -->
+                <TextBlock Text="Name"   Width="{StaticResource ColName}"  FontWeight="SemiBold" Padding="14,0,0,0" />
                 <TextBlock Text="State"  Width="{StaticResource ColState}" FontWeight="SemiBold" />
                 <TextBlock Text="vCPUs"  Width="{StaticResource ColCpu}"   FontWeight="SemiBold" />
                 <TextBlock Text="Memory" Width="{StaticResource ColMem}"   FontWeight="SemiBold" />
@@ -75,7 +76,13 @@
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:VmRow">
                   <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding Name}"   Width="{StaticResource ColName}"  TextTrimming="CharacterEllipsis" />
+                    <!-- Same 9px state dot as the details sidebar, sharing VmRow.StateBrush. -->
+                    <DockPanel Width="{StaticResource ColName}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
                     <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}" />
                     <TextBlock Text="{Binding VCpus}"  Width="{StaticResource ColCpu}" />
                     <TextBlock Text="{Binding Memory}" Width="{StaticResource ColMem}" />

@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <!-- System.IO.Pipelines and Microsoft.Win32.Registry (used by LegacyRegistryImport) are both
-         in the net10.0 shared framework — no PackageReference needed. -->
+         in the net10.0 shared framework, no PackageReference needed. -->
     <PackageReference Include="SSH.NET" Version="2024.2.0" />
   </ItemGroup>
 

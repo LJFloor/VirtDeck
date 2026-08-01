@@ -59,7 +59,7 @@
 
       <!-- Dropdowns: the closed ComboBox is a text field with a chevron, so every background/border
            key tracks the TextControl* values above. Fluent swaps in a second "HighlightBackground"
-           layer while focused or open (ComboBoxBackground*Unfocused/*BorderBrushFocused) — those are
+           layer while focused or open (ComboBoxBackground*Unfocused/*BorderBrushFocused); those are
            painted to the same face so only the border colour moves, as on a text field. -->
       <SolidColorBrush x:Key="ComboBoxBackground" Color="#FF45494A" />
       <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#FF45494A" />
@@ -257,16 +257,16 @@
 
   <!--
     THE font size for the whole app. Avalonia gives a bare TextBlock 12, while every Fluent
-    ControlTheme sets its own FontSize from this key (14) — so labels and the controls they label
+    ControlTheme sets its own FontSize from this key (14), so labels and the controls they label
     were rendering two points apart, and each retemplated control here (which drops that setter and
     falls back to the inherited 12) widened the gap. Pulling the key down to 12 puts the controls we
-    have NOT retemplated — text fields, dropdowns, spinners, list items, menus, tooltips — on the
+    have NOT retemplated (text fields, dropdowns, spinners, list items, menus, tooltips) on the
     same baseline as the labels, so views never need a local FontSize to line things up.
     Control metrics below are all sized for this 12: 24px fields and buttons, a 14px check box.
   -->
   <x:Double x:Key="ControlContentThemeFontSize">12</x:Double>
 
-  <!-- Shared metrics. The border stays 1px on focus — Fluent thickens it to an accent underline,
+  <!-- Shared metrics. The border stays 1px on focus; Fluent thickens it to an accent underline,
        JetBrains just recolours it. -->
   <CornerRadius x:Key="ControlCornerRadius">3</CornerRadius>
   <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
@@ -275,8 +275,8 @@
   <!-- 24, the same box the Button theme below draws: a field and the button beside it have the same
        1px border and the same 3px vertical inset around a 12pt line, so one shared height lines the
        two up exactly. Fluent's own 32 (and the 26 this used to carry) left fields standing proud of
-       every button they sat next to. Anything that has to match a field by hand — the "…" button in
-       RemotePathBox — is sized off this number, not off its own guess. -->
+       every button they sat next to. Anything that has to match a field by hand (the "…" button in
+       RemotePathBox) is sized off this number, not off its own guess. -->
   <x:Double x:Key="TextControlThemeMinHeight">24</x:Double>
 
   <!-- Dropdown metrics, matched to the text field above: same 1px hairline, same 24px box, same
@@ -385,7 +385,7 @@
 
   <!--
     Toolbar button: the same flat cell a top-level MenuItem draws, so a plain command can sit next
-    to the dropdowns in one strip without looking like a dialog button. Keyed rather than implicit —
+    to the dropdowns in one strip without looking like a dialog button. Keyed rather than implicit;
     the bordered Button above stays the default everywhere else.
   -->
   <ControlTheme x:Key="JbToolButton" TargetType="Button">
@@ -433,7 +433,7 @@
   </ControlTheme>
 
   <!--
-    Check box. Fluent's is a 20px box inside a 32px row — a touch target, not a desktop control.
+    Check box. Fluent's is a 20px box inside a 32px row, a touch target, not a desktop control.
     JetBrains draws a 14px square that sits on the text baseline. The box size is hard-coded in
     Fluent's template (not a resource), so shrinking it means replacing the template outright.
     The tick is a stroked Path rather than a filled glyph: at 14px a stroke stays crisp where a
@@ -519,7 +519,7 @@
   </ControlTheme>
 
   <!--
-    Radio button — the check box above, rounded. Same 14px box, same accent fill, same states, so a
+    Radio button: the check box above, rounded. Same 14px box, same accent fill, same states, so a
     dialog that mixes the two (the create wizard does) keeps one control height throughout.
   -->
   <ControlTheme x:Key="{x:Type RadioButton}" TargetType="RadioButton">
@@ -590,7 +590,7 @@
   </ControlTheme>
 
   <!--
-    Tabs. Fluent draws big rounded cards with an accent pill — the Windows 8 look. JetBrains draws a
+    Tabs. Fluent draws big rounded cards with an accent pill, the Windows 8 look. JetBrains draws a
     flat strip of square cells, ruled off from the content by a hairline, with the selected cell
     marked by a 2px underline. The underline border is always present (transparent when unselected)
     so selecting a tab does not shift its label by two pixels.
@@ -668,7 +668,7 @@
   </ControlTheme>
 
   <!--
-    Table row: the tight, square, full-width row a DataGrip/Rider grid draws — ~20px, no corner
+    Table row: the tight, square, full-width row a DataGrip/Rider grid draws, ~20px, no corner
     radius, no inset selection pill. Keyed rather than implicit so ordinary pick-lists elsewhere
     (dialogs, the file browser) keep Fluent's roomier item.
   -->

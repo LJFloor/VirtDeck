@@ -1,4 +1,4 @@
-# VirtDeck — USB redirection
+# VirtDeck: USB redirection
 #
 # Handing a USB device to a guest means talking to it directly from user space, which needs
 # read/write access to its raw node under /dev/bus/usb/. By default those are root-owned, so

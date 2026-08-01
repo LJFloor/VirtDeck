@@ -32,7 +32,7 @@ public static class AudioSinks
 {
     /// <summary>
     /// Returns the best available sink: winmm on Windows, PulseAudio (or PipeWire, which ships the
-    /// same library) on Linux. Anything else — or a Linux box without libpulse — gets a silent sink;
+    /// same library) on Linux. Anything else (or a Linux box without libpulse) gets a silent sink;
     /// the playback channel still runs and reports correctly, there is just no output.
     /// </summary>
     public static IAudioSink Create(Action<string>? log = null)
@@ -43,11 +43,11 @@ public static class AudioSinks
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             if (PulseAudioSink.IsAvailable) return new PulseAudioSink(log);
-            log?.Invoke("[audio] libpulse-simple not installed — playback is silent");
+            log?.Invoke("[audio] libpulse-simple not installed; playback is silent");
             return new NullAudioSink();
         }
 
-        log?.Invoke("[audio] no output backend for this platform — playback is silent");
+        log?.Invoke("[audio] no output backend for this platform; playback is silent");
         return new NullAudioSink();
     }
 }

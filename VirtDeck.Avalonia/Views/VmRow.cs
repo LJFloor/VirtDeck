@@ -18,7 +18,7 @@ public sealed class VmRow : INotifyPropertyChanged
 
     public string Name { get; }
 
-    /// <summary>The last snapshot this row was updated from — what the details sidebar renders.</summary>
+    /// <summary>The last snapshot this row was updated from, and what the details sidebar renders.</summary>
     public VmInfo Info { get; private set; }
 
     private string _state = "";

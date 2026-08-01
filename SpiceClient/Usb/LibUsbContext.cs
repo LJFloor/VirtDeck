@@ -12,7 +12,7 @@ namespace SpiceClient.Usb;
 ///
 /// Capturing a device away from the OS needs a platform backend. On Windows that is the UsbDk
 /// kernel driver, requested via LIBUSB_OPTION_USE_USBDK at init. On Linux libusb's native backend
-/// does it directly — there is nothing extra to install, so capture is available whenever libusb
+/// does it directly; there is nothing extra to install, so capture is available whenever libusb
 /// initialises (per-device permissions on /dev/bus/usb are enforced later, at open time).
 ///
 /// Construction never throws: if the native libraries are missing/wrong-arch or the capture backend
@@ -21,7 +21,7 @@ namespace SpiceClient.Usb;
 /// </summary>
 internal sealed class LibUsbContext : IDisposable
 {
-    /// <summary>libusb_context* — valid only while <see cref="Available"/> is true.</summary>
+    /// <summary>libusb_context*, valid only while <see cref="Available"/> is true.</summary>
     public IntPtr Handle { get; private set; }
 
     /// <summary>True when libusb initialised and the event thread is running.</summary>
@@ -101,7 +101,7 @@ internal sealed class LibUsbContext : IDisposable
                 if (!CaptureAvailable)
                 {
                     UnavailableReason =
-                        "UsbDk driver not found — install UsbDk to redirect USB devices to the guest.";
+                        "UsbDk driver not found; install UsbDk to redirect USB devices to the guest.";
                     _log($"[usb] {UnavailableReason} (libusb_set_option={LibUsb.ErrorName(opt)})");
                 }
                 else
@@ -125,7 +125,7 @@ internal sealed class LibUsbContext : IDisposable
         {
             UnavailableReason = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? "USB libraries (libusb-1.0.dll / usbredirhost.dll) are not installed."
-                : "USB libraries are not installed — install the libusb-1.0 and usbredir packages.";
+                : "USB libraries are not installed; install the libusb-1.0 and usbredir packages.";
             _log($"[usb] {UnavailableReason}");
         }
         catch (BadImageFormatException)

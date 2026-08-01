@@ -4,8 +4,8 @@ using SpiceClient.Usb;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One row of the USB picker. The list is rebuilt wholesale on every refresh — device identity
-/// lives in <see cref="UsbDeviceInfo.Key"/>, not in the row — so nothing here needs to be
+/// One row of the USB picker. The list is rebuilt wholesale on every refresh; device identity
+/// lives in <see cref="UsbDeviceInfo.Key"/>, not in the row, so nothing here needs to be
 /// observable.
 /// </summary>
 public sealed class UsbDeviceRow

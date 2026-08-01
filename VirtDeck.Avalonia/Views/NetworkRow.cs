@@ -6,7 +6,7 @@ using VirtDeck.Models;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One row of the Networks tab. Same shape as <see cref="VmRow"/> — display-only formatting plus
+/// One row of the Networks tab. Same shape as <see cref="VmRow"/>: display-only formatting plus
 /// change notification, so a refresh updates in place instead of dropping the selection.
 /// </summary>
 public sealed class NetworkRow : INotifyPropertyChanged

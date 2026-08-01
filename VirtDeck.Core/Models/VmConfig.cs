@@ -48,7 +48,7 @@ namespace VirtDeck.Models
         public string Source { get; set; } = string.Empty;      // br0 | default
     }
 
-    /// <summary>An installable OS profile from `osinfo-query os` — its short-id feeds virt-install --os-variant.</summary>
+    /// <summary>An installable OS profile from `osinfo-query os`; its short-id feeds virt-install --os-variant.</summary>
     public class OsVariant
     {
         public string ShortId { get; set; } = string.Empty; // e.g. "winxp", "win10", "ubuntu22.04"

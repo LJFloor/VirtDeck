@@ -15,7 +15,7 @@ public sealed class BootItem
 /// staged change) or a not-yet-applied <see cref="DiskAddOp"/>.
 ///
 /// The two states are surfaced as booleans rather than brushes so the row template can drive them
-/// through style classes — a hard-coded colour would have to pick a side between the light and dark
+/// through style classes; a hard-coded colour would have to pick a side between the light and dark
 /// themes, and the theme's own resources already have a correct answer for both.
 /// </summary>
 public sealed class DiskEditRow
@@ -61,7 +61,7 @@ public sealed class DiskEditRow
     public bool IsAdded { get; }
 }
 
-/// <summary>One row of the editor's Network list — an existing NIC or a pending add.</summary>
+/// <summary>One row of the editor's Network list: an existing NIC or a pending add.</summary>
 public sealed class NicEditRow
 {
     public NicInfo? Existing { get; }

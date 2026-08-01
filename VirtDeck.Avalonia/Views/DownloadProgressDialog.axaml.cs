@@ -91,7 +91,7 @@ public partial class DownloadProgressDialog : Window
                 }
             }
         }
-        catch { /* transient SSH error during a poll — try again next tick */ }
+        catch { /* transient SSH error during a poll; try again next tick */ }
         finally { _polling = false; }
     }
 

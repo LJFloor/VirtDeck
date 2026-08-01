@@ -9,7 +9,7 @@ namespace SpiceClient.Interop;
 ///
 /// usbredirhost is opened once per usbredir SPICE channel (sending the usb_redir_hello
 /// at open); a device is attached/detached afterwards with
-/// <see cref="usbredirhost_set_device"/> — passing NULL detaches without a second hello.
+/// <see cref="usbredirhost_set_device"/>; passing NULL detaches without a second hello.
 /// </summary>
 internal static class UsbRedirHost
 {
@@ -24,7 +24,7 @@ internal static class UsbRedirHost
     public const int LOG_DEBUG_DATA = 5;
 
     // open flags
-    public const int FL_WRITE_CB_OWNS_BUFFER = 0x01; // we do NOT set this — usbredirhost frees the buffer
+    public const int FL_WRITE_CB_OWNS_BUFFER = 0x01; // we do NOT set this; usbredirhost frees the buffer
 
     // usbredirhost_read_guest_data return codes (0 = ok / would-block).
     public const int READ_IO_ERROR = -1;

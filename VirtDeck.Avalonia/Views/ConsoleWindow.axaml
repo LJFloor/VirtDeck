@@ -33,7 +33,7 @@
     <!--
       A Menu, not a row of Buttons with flyouts. That is what makes this a toolbar rather than
       a button bar: one click opens a dropdown, sliding across the neighbours switches between
-      them without re-clicking, and the arrow keys walk the whole strip — the ToolStripDropDownButton
+      them without re-clicking, and the arrow keys walk the whole strip; the ToolStripDropDownButton
       behaviour the WinForms console had. Headers carry no access-key underscores on purpose:
       Alt belongs to the guest (see ForwardKey), so an Alt+P mnemonic here would never fire.
     -->
@@ -56,7 +56,7 @@
             <MenuItem Name="CtrlAltDelItem" Header="Ctrl+Alt+Del" />
             <Separator />
             <MenuItem Name="TypeClipboardItem" Header="Type clipboard"
-                      ToolTip.Tip="Synthesizes the clipboard text as keystrokes — for guests without the agent." />
+                      ToolTip.Tip="Synthesizes the clipboard text as keystrokes, for guests without the agent." />
           </MenuItem>
 
           <MenuItem Name="CdDvdMenu" Header="CD/DVD">
@@ -72,7 +72,7 @@
           <MenuItem Name="FloppyMenu" Header="Floppy" IsVisible="False">
             <MenuItem Name="FloppyServerItem" Header="Insert image from server…" />
             <MenuItem Name="FloppyLocalItem" Header="Insert image from this PC…"
-                      ToolTip.Tip="Streamed read-write — guest writes persist back to the local file." />
+                      ToolTip.Tip="Streamed read-write: guest writes persist back to the local file." />
             <Separator />
             <MenuItem Name="FloppyEjectItem" Header="Eject" />
           </MenuItem>
@@ -94,7 +94,7 @@
                is no playback channel and the item would be permanently dead. -->
           <MenuItem Name="AudioMenu" Header="Audio" IsVisible="False">
             <MenuItem Name="MuteItem" Header="Mute" ToggleType="CheckBox"
-                      ToolTip.Tip="Silences guest audio on this PC only — the guest keeps playing." />
+                      ToolTip.Tip="Silences guest audio on this PC only; the guest keeps playing." />
           </MenuItem>
 
         </Menu>

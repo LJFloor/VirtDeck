@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ljfloor.VirtDeck</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- Tracks LICENSE.txt, which is still the freeware EULA. Change this to the SPDX id when the
+       project settles on an open-source licence. -->
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>VirtDeck</name>
+  <summary>Manage libvirt/KVM virtual machines over SSH</summary>
+
+  <description>
+    <p>
+      VirtDeck manages libvirt/KVM virtual machines on a remote Linux host over SSH, and opens
+      their SPICE console in a native client.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>List, create, edit, start, stop and export virtual machines</li>
+      <li>Native SPICE console with keyboard, mouse, guest-drawn cursors and guest audio</li>
+      <li>Redirect a USB device from this PC into the guest</li>
+      <li>Insert a CD/DVD or floppy image from the server or streamed from this PC</li>
+      <li>Clipboard sharing, screenshots and a remote file browser</li>
+    </ul>
+  </description>
+
+  <developer id="io.github.ljfloor">
+    <name>Leendert-Jan Floor</name>
+  </developer>
+
+  <launchable type="desktop-id">virtdeck.desktop</launchable>
+  <url type="homepage">https://github.com/LJFloor/VirtDeck</url>
+  <url type="bugtracker">https://github.com/LJFloor/VirtDeck/issues</url>
+
+  <provides>
+    <binary>virtdeck</binary>
+  </provides>
+
+  <categories>
+    <category>System</category>
+    <category>Network</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="1.0.0" date="2026-08-01" />
+  </releases>
+</component>

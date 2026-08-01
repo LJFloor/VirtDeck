@@ -10,7 +10,7 @@ public partial class AddDiskDialog : Window
 {
     private const string CreateZvolItem = "➕  Create new ZVOL…";
     private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
-    // A zvol name is pool[/dataset]+/name — at least one slash, ZFS-legal characters only.
+    // A zvol name is pool[/dataset]+/name: at least one slash, ZFS-legal characters only.
     private static readonly Regex ZvolNameRegex =
         new(@"^[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)+$");
 
@@ -174,7 +174,7 @@ public partial class AddDiskDialog : Window
                 op.Format = "raw";
                 op.Source = path;
             }
-            else // cdrom — op.Bus already holds the optical bus chosen above
+            else // cdrom: op.Bus already holds the optical bus chosen above
             {
                 op.Kind = "cdrom";
                 op.Source = path;

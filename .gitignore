@@ -37,4 +37,4 @@ Thumbs.db
 *.log
 
 # NOTE: the third-party redistributables (native\win-x64\*.dll, installer\redist\*.msi) are
-# committed on purpose so the build inputs aren't lost — they are intentionally NOT ignored.
+# committed on purpose so the build inputs aren't lost; they are intentionally NOT ignored.

@@ -17,7 +17,7 @@ namespace VirtDeck.Avalonia.Controls;
 /// one cursor is ever visible over the display: it replaces <see cref="InputElement.Cursor"/>
 /// (the OS never stacks cursors).
 ///
-/// Unlike the WinForms control this does not alias the framebuffer's memory — Avalonia bitmaps
+/// Unlike the WinForms control this does not alias the framebuffer's memory; Avalonia bitmaps
 /// can't wrap external memory that another thread mutates. Instead a ~60 Hz pump copies only the
 /// dirty rows into a <see cref="WriteableBitmap"/> under the framebuffer's lock. One copy per
 /// changed region is negligible next to LZ/JPEG decode, and it removes the
@@ -52,7 +52,7 @@ public sealed class SpiceDisplay : Control
     public SpiceDisplay()
     {
         Focusable = true;
-        // A strict 1:1 opaque copy — no smoothing, or every guest pixel gets blurred.
+        // A strict 1:1 opaque copy: no smoothing, or every guest pixel gets blurred.
         RenderOptions.SetBitmapInterpolationMode(this, BitmapInterpolationMode.None);
 
         _pump = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, Pump);
@@ -150,7 +150,7 @@ public sealed class SpiceDisplay : Control
                                   PixelFormat.Bgra8888, AlphaFormat.Opaque);
 
         Resolution = _fb == null ? null : new PixelSize(_fb.Width, _fb.Height);
-        // A brand-new surface has no dirty regions recorded yet — force a full repaint.
+        // A brand-new surface has no dirty regions recorded yet; force a full repaint.
         _frameDirty = true;
         ResolutionChanged?.Invoke(w, h);
         InvalidateVisual();
@@ -292,7 +292,7 @@ public sealed class SpiceDisplay : Control
 
     /// <summary>
     /// Builds a native cursor from a SPICE ALPHA cursor shape. Avalonia takes a bitmap and a
-    /// hotspot directly, so there is no HICON to create or destroy — the WinForms front-end needs
+    /// hotspot directly, so there is no HICON to create or destroy; the WinForms front-end needs
     /// ~90 lines of user32/gdi32 interop for this.
     /// </summary>
     private static Cursor? TryCreateCursor(CursorShape shape)

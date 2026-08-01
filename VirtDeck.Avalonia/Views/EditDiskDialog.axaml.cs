@@ -23,7 +23,7 @@ public partial class EditDiskDialog : Window
         _disk = disk;
         InitializeComponent();
 
-        Title = $"Edit {(disk.IsCdrom ? "CD-ROM" : disk.IsFloppy ? "Floppy" : "Disk")} — {disk.Target}";
+        Title = $"Edit {(disk.IsCdrom ? "CD-ROM" : disk.IsFloppy ? "Floppy" : "Disk")} - {disk.Target}";
         TargetText.Text = disk.Target;
         SourceText.Text = disk.Source;
 
@@ -59,7 +59,7 @@ public partial class EditDiskDialog : Window
     }
 
     // Removable media (CD-ROM rides ide/sata/scsi/usb; floppy is fixed to fdc) has no meaningful
-    // <driver> tuning — so swap the bus list and hide the cache/io/discard rows.
+    // <driver> tuning, so swap the bus list and hide the cache/io/discard rows.
     private void ConfigureForRemovable(string type, string[] buses)
     {
         TypeText.Text = type;

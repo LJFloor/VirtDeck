@@ -5,14 +5,14 @@ using SpiceClient.Usb;
 namespace SpiceClient.Channels;
 
 /// <summary>
-/// SPICE usbredir channel (type 9) — a spicevmc byte-stream tunnel that carries the raw
+/// SPICE usbredir channel (type 9): a spicevmc byte-stream tunnel that carries the raw
 /// usbredir wire protocol. One channel exists per host-side &lt;redirdev&gt; and can host a
 /// single redirected device at a time.
 ///
 /// On link it creates a persistent <see cref="UsbredirHostInstance"/> with no device (so the
 /// usb_redir hello is negotiated immediately); the <see cref="UsbDeviceManager"/> later
 /// attaches/detaches a physical device. spice-html5 has no usbredir support, so this has no
-/// JS reference — it follows usbredirhost's documented contract.
+/// JS reference; it follows usbredirhost's documented contract.
 /// </summary>
 public sealed class UsbredirChannel : SpiceChannel
 {

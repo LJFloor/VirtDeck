@@ -54,7 +54,7 @@ public partial class ExportVmDialog : Window
         _vmIsRunning = vmIsRunning;
         InitializeComponent();
 
-        Title = $"Export VM — {vmName}";
+        Title = $"Export VM - {vmName}";
 
         ExportButton.Click += (_, _) => StartExport();
         CancelSelectButton.Click += (_, _) => Close();
@@ -127,7 +127,7 @@ public partial class ExportVmDialog : Window
         {
             string msg = _vmIsRunning
                 ? "VM must be shut down to sparsify safely."
-                : "virt-sparsify not found — install libguestfs-tools on the host.";
+                : "virt-sparsify not found; install libguestfs-tools on the host.";
             ToolTip.SetTip(SparseCheck, msg);
             SparseHint.Text = msg;
             SparseHint.IsVisible = true;
@@ -272,7 +272,7 @@ public partial class ExportVmDialog : Window
                     }
                     else
                     {
-                        // Size unknown — fall back to a temp file so TarWriter can measure it.
+                        // Size unknown; fall back to a temp file so TarWriter can measure it.
                         string tmpFile = Path.GetTempFileName();
                         try
                         {
@@ -331,7 +331,7 @@ public partial class ExportVmDialog : Window
 
         CurrentFileText.Text = label;
 
-        // Rate over the last half-second, not since the start — a stalled tunnel should show as slow.
+        // Rate over the last half-second, not since the start; a stalled tunnel should show as slow.
         var now = Stopwatch.GetTimestamp();
         var sampleSec = (now - _speedSampleTick) / (double)Stopwatch.Frequency;
         if (sampleSec >= 0.5)

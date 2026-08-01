@@ -10,13 +10,13 @@ namespace SpiceClient.Interop;
 ///
 /// On Windows the DLLs are staged next to the exe: MinGW/MSYS2 builds use SONAME-suffixed names
 /// (<c>libusbredirhost-1.dll</c>) while other builds use the plain names. On Linux the libraries
-/// come from the distro and carry versioned SONAMEs (<c>libusb-1.0.so.0</c>) — the unversioned
+/// come from the distro and carry versioned SONAMEs (<c>libusb-1.0.so.0</c>); the unversioned
 /// <c>.so</c> symlink only exists when the <c>-dev</c> package is installed, so the versioned name
 /// must be tried first.
 ///
 /// This resolver tries every candidate so whichever set is present loads. There can only be **one**
 /// <see cref="NativeLibrary.SetDllImportResolver"/> per assembly (a second call throws), so every
-/// native dependency of SpiceClient — USB and audio alike — is registered here.
+/// native dependency of SpiceClient (USB and audio alike) is registered here.
 /// Register once (idempotent) before the first P/Invoke.
 /// </summary>
 internal static class NativeLibraryResolver
@@ -55,7 +55,7 @@ internal static class NativeLibraryResolver
     /// <summary>
     /// True if one of the candidates for <paramref name="libraryName"/> is present. Lets a caller
     /// pick a backend up front instead of discovering the miss as a DllNotFoundException on the
-    /// first P/Invoke. The handle is deliberately not freed — the load is what we want to keep.
+    /// first P/Invoke. The handle is deliberately not freed; the load is what we want to keep.
     /// </summary>
     public static bool CanLoad(string libraryName)
     {
