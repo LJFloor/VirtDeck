@@ -120,7 +120,13 @@
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:NetworkRow">
                   <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding Name}"      Width="{StaticResource ColNetName}"  TextTrimming="CharacterEllipsis" />
+                    <!-- Same 9px state dot as the VMs tab, sharing NetworkRow.StateBrush. -->
+                    <DockPanel Width="{StaticResource ColNetName}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
                     <TextBlock Text="{Binding State}"     Width="{StaticResource ColNetState}" Foreground="{Binding StateBrush}" />
                     <TextBlock Text="{Binding Autostart}" Opacity="0.75" />
                   </StackPanel>

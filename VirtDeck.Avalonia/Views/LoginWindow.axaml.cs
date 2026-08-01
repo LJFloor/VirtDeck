@@ -1,11 +1,14 @@
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
 
 public partial class LoginWindow : Window
 {
+    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.FromRgb(0xc0, 0x39, 0x2b));
+
     private bool _handedOff;
 
     public LoginWindow()
@@ -44,12 +47,12 @@ public partial class LoginWindow : Window
 
         if (host.Length == 0 || user.Length == 0 || password.Length == 0)
         {
-            StatusText.Text = "Please fill in all fields.";
+            SetStatus("Please fill in all fields.", isError: true);
             return;
         }
 
         ConnectButton.IsEnabled = false;
-        StatusText.Text = "Connecting…";
+        SetStatus("Connecting…", isError: false);
 
         var ssh = new SshConnectionManager();
         try
@@ -70,8 +73,18 @@ public partial class LoginWindow : Window
         catch (Exception ex)
         {
             ssh.Dispose();
-            StatusText.Text = $"Connection failed: {ex.Message}";
+            SetStatus($"Connection failed: {ex.Message}", isError: true);
             ConnectButton.IsEnabled = true;
         }
+    }
+
+    // Only failures are red; progress messages keep the normal text colour so they don't read as errors.
+    private void SetStatus(string text, bool isError)
+    {
+        StatusText.Text = text;
+        if (isError)
+            StatusText.Foreground = ErrorBrush;
+        else
+            StatusText.ClearValue(TextBlock.ForegroundProperty);
     }
 }
