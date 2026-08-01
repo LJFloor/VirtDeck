@@ -4,7 +4,7 @@ using SpiceClient.Protocol;
 namespace SpiceClient.Channels;
 
 /// <summary>
-/// SPICE playback channel — guest speaker audio (server → client). The client sends nothing here;
+/// SPICE playback channel: guest speaker audio (server → client). The client sends nothing here;
 /// it just consumes START/MODE/DATA/STOP and feeds S16 PCM to the session's audio sink.
 /// We advertise PLAYBACK_CAP_OPUS and decode the server's preferred Opus stream (via Concentus),
 /// falling back to RAW signed-16-bit PCM for servers built without Opus. CELT is never advertised,
@@ -39,7 +39,7 @@ public sealed class PlaybackChannel : SpiceChannel
                 r.U32();                 // time
                 _mode = r.U16();
                 if (_mode != SpiceConstants.AUDIO_DATA_MODE_RAW && _mode != SpiceConstants.AUDIO_DATA_MODE_OPUS)
-                    Session.Status("Audio: server selected a codec this client can't decode — no sound.");
+                    Session.Status("Audio: server selected a codec this client can't decode; no sound.");
                 break;
             }
             case SpiceConstants.MSG_PLAYBACK_START:
@@ -48,10 +48,10 @@ public sealed class PlaybackChannel : SpiceChannel
                 uint channels = r.U32();
                 ushort format = r.U16();
                 uint frequency = r.U32();
-                // u32 time follows — unused.
+                // u32 time follows, unused.
                 if (format != SpiceConstants.AUDIO_FMT_S16)
                 {
-                    Session.Status($"Audio: unsupported sample format {format} — no sound.");
+                    Session.Status($"Audio: unsupported sample format {format}; no sound.");
                     break;
                 }
 
@@ -59,7 +59,7 @@ public sealed class PlaybackChannel : SpiceChannel
                 {
                     _opus?.Dispose();
                     _opus = new OpusAudioDecoder((int)frequency, (int)channels);
-                    // 120 ms Opus max (5760 samples/ch) × channels × 2 bytes — fits any packet.
+                    // 120 ms Opus max (5760 samples/ch) × channels × 2 bytes; fits any packet.
                     _pcmOut = new byte[5760 * (int)channels * 2];
                     Session.Log($"[playback] Opus {frequency}Hz {channels}ch");
                 }

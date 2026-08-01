@@ -1,0 +1,40 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.EditDiskDialog"
+        Title="Edit Disk"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="96,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+          ColumnSpacing="8" RowSpacing="10">
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Disk:" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="0" Grid.Column="1" Name="TargetText" VerticalAlignment="Center" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Source:" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="1" Grid.Column="1" Name="SourceText" TextWrapping="Wrap" />
+
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="Format:" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="2" Grid.Column="1" Name="TypeText" VerticalAlignment="Center" />
+
+      <TextBlock Grid.Row="3" Grid.Column="0" Text="Bus:" VerticalAlignment="Center" />
+      <ComboBox  Grid.Row="3" Grid.Column="1" Name="BusBox" Width="170" HorizontalAlignment="Left" />
+
+      <TextBlock Grid.Row="4" Grid.Column="0" Name="CacheLabel" Text="Cache:" VerticalAlignment="Center" />
+      <ComboBox  Grid.Row="4" Grid.Column="1" Name="CacheBox" Width="170" HorizontalAlignment="Left" />
+
+      <TextBlock Grid.Row="5" Grid.Column="0" Name="IoLabel" Text="I/O:" VerticalAlignment="Center" />
+      <ComboBox  Grid.Row="5" Grid.Column="1" Name="IoBox" Width="170" HorizontalAlignment="Left" />
+
+      <TextBlock Grid.Row="6" Grid.Column="0" Name="DiscardLabel" Text="Discard:" VerticalAlignment="Center" />
+      <ComboBox  Grid.Row="6" Grid.Column="1" Name="DiscardBox" Width="170" HorizontalAlignment="Left" />
+    </Grid>
+  </DockPanel>
+</Window>

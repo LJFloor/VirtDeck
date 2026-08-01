@@ -1,0 +1,141 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.VmListWindow"
+        x:DataType="vm:VmRow"
+        Title="VirtDeck"
+        Width="1080" Height="640"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.Resources>
+    <!-- One column layout shared by the header and every row, so they stay aligned. -->
+    <x:Double x:Key="ColName">220</x:Double>
+    <x:Double x:Key="ColState">100</x:Double>
+    <x:Double x:Key="ColCpu">70</x:Double>
+    <x:Double x:Key="ColMem">100</x:Double>
+    <x:Double x:Key="ColNetName">220</x:Double>
+    <x:Double x:Key="ColNetState">110</x:Double>
+  </Window.Resources>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <!-- Only the commands that don't need a selection live here; everything per-VM is on the
+           list's right-click menu. -->
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Name="NewVmButton" Content="New VM…" Classes="accent" />
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="10,5" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel>
+        <TextBlock Name="HostCapsText" DockPanel.Dock="Right" Opacity="0.7" />
+        <Border DockPanel.Dock="Right" Width="1" Margin="10,1" Background="#33808080" />
+        <TextBlock Name="ThroughputText" DockPanel.Dock="Right" Opacity="0.7"
+                   ToolTip.Tip="Combined SSH tunnel throughput: management channel, SPICE consoles and NBD media streams" />
+        <TextBlock Name="StatusText" />
+      </DockPanel>
+    </Border>
+
+    <!-- List on the left, details sidebar on the right; the splitter is user-movable. -->
+    <Grid ColumnDefinitions="*,4,330">
+
+      <TabControl Grid.Column="0" Name="Tabs">
+
+        <TabItem Header="Virtual machines">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                    BorderThickness="0,0,0,1" BorderBrush="#22808080">
+              <StackPanel Orientation="Horizontal">
+                <!-- Padding (not Margin) indents the heading over the rows' state dot without widening the column. -->
+                <TextBlock Text="Name"   Width="{StaticResource ColName}"  FontWeight="SemiBold" Padding="14,0,0,0" />
+                <TextBlock Text="State"  Width="{StaticResource ColState}" FontWeight="SemiBold" />
+                <TextBlock Text="vCPUs"  Width="{StaticResource ColCpu}"   FontWeight="SemiBold" />
+                <TextBlock Text="Memory" Width="{StaticResource ColMem}"   FontWeight="SemiBold" />
+                <TextBlock Text="Uptime" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+
+            <ListBox Name="VmList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="VmMenu">
+                  <MenuItem Name="MenuConsole" Header="Open console" />
+                  <Separator />
+                  <MenuItem Name="MenuStart" Header="Start" />
+                  <MenuItem Name="MenuStop" Header="Shut down" />
+                  <MenuItem Name="MenuForceStop" Header="Force off" />
+                  <MenuItem Name="MenuReboot" Header="Reboot" />
+                  <Separator />
+                  <MenuItem Name="MenuEdit" Header="Settings…" />
+                  <MenuItem Name="MenuExport" Header="Export VM…" />
+                  <MenuItem Name="MenuDelete" Header="Delete…" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:VmRow">
+                  <StackPanel Orientation="Horizontal">
+                    <!-- Same 9px state dot as the details sidebar, sharing VmRow.StateBrush. -->
+                    <DockPanel Width="{StaticResource ColName}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}" />
+                    <TextBlock Text="{Binding VCpus}"  Width="{StaticResource ColCpu}" />
+                    <TextBlock Text="{Binding Memory}" Width="{StaticResource ColMem}" />
+                    <TextBlock Text="{Binding Uptime}" Opacity="0.75" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </TabItem>
+
+        <TabItem Header="Networks">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                    BorderThickness="0,0,0,1" BorderBrush="#22808080">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Name"      Width="{StaticResource ColNetName}"  FontWeight="SemiBold" />
+                <TextBlock Text="State"     Width="{StaticResource ColNetState}" FontWeight="SemiBold" />
+                <TextBlock Text="Autostart" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+
+            <ListBox Name="NetworkList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="NetMenu">
+                  <MenuItem Name="MenuNetActivate" Header="Activate" />
+                  <MenuItem Name="MenuNetDeactivate" Header="Deactivate" />
+                  <Separator />
+                  <MenuItem Name="MenuNetAutostartOn" Header="Autostart on" />
+                  <MenuItem Name="MenuNetAutostartOff" Header="Autostart off" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:NetworkRow">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Name}"      Width="{StaticResource ColNetName}"  TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding State}"     Width="{StaticResource ColNetState}" Foreground="{Binding StateBrush}" />
+                    <TextBlock Text="{Binding Autostart}" Opacity="0.75" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </TabItem>
+
+      </TabControl>
+
+      <GridSplitter Grid.Column="1" Background="#22808080" ResizeDirection="Columns" />
+
+      <vm:VmDetailsView Grid.Column="2" Name="Details" />
+
+    </Grid>
+  </DockPanel>
+</Window>

@@ -36,6 +36,10 @@ public abstract class SpiceChannel : IDisposable
     /// <summary>Upper bound on each handshake read while the connect gate is held.</summary>
     private const int HandshakeTimeoutMs = 20_000;
 
+    /// <summary>Connect + link attempts before the channel gives up and tears the session down.</summary>
+    private const int LinkAttempts = 3;
+    private const int LinkRetryDelayMs = 250;
+
     protected SpiceChannel(SpiceSession session, string host, int port,
         byte channelType, byte channelId, uint connectionId, string password)
     {
@@ -64,22 +68,8 @@ public abstract class SpiceChannel : IDisposable
         ChannelSocket? socket = null;
         try
         {
-            Session.Log($"[{ChannelTypeName()}] connecting to {_host}:{_port}");
-            // Serialize the TCP connect + link handshake across the session: secondary channels
-            // are opened in a burst and dial the one SSH-forwarded port at once, and SSH.NET can
-            // cross simultaneous connections — leaking another channel's link reply into this
-            // socket and misframing the stream (auth result reads the next "REDQ" magic). See
-            // SpiceSession.ConnectGate. The handshake is short; read loops below run in parallel.
-            lock (Session.ConnectGate)
-            {
-                socket = new ChannelSocket(_host, _port);
-                _socket = socket;
-                if (_disposed) return;        // disposed during connect → finally closes socket
-                socket.ReadTimeoutMs = HandshakeTimeoutMs;   // don't hold the gate forever on a stall
-                Handshake(socket);
-                socket.ReadTimeoutMs = 0;                    // read loop blocks indefinitely (idle servers)
-            }
-            if (_disposed) return;            // disposed during handshake
+            socket = ConnectAndLink();
+            if (socket == null) return;       // disposed during connect/handshake
             Session.Log($"[{ChannelTypeName()}] ready");
             OnLinked();
             ReadLoop(socket);
@@ -98,6 +88,59 @@ public abstract class SpiceChannel : IDisposable
     }
 
     // ---- Handshake -------------------------------------------------------
+
+    /// <summary>
+    /// Opens the socket and runs the link handshake, retrying on a fresh socket. Returns null
+    /// if the channel was disposed mid-way; throws the last failure once the attempts run out.
+    /// </summary>
+    /// <remarks>
+    /// The retry is what makes the intermittent link failure invisible rather than fatal: a
+    /// mis-framed handshake (the "SPICE auth error 1363428690", the next reply's "REDQ" magic
+    /// read where the 4-byte auth result belongs) is a property of that one dirty stream, so a
+    /// new socket simply links. A rejected ticket is not transient, so it is never retried.
+    /// </remarks>
+    private ChannelSocket? ConnectAndLink()
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            ChannelSocket? socket = null;
+            try
+            {
+                Session.Log($"[{ChannelTypeName()}] connecting to {_host}:{_port}");
+                // Serialize the TCP connect + link handshake across the session: secondary channels
+                // are opened in a burst and dial the one SSH-forwarded port at once, and SSH.NET can
+                // cross simultaneous connections, leaking another channel's link reply into this
+                // socket and misframing the stream. See SpiceSession.ConnectGate. The handshake is
+                // short; read loops run in parallel once past this.
+                lock (Session.ConnectGate)
+                {
+                    socket = new ChannelSocket(_host, _port);
+                    _socket = socket;
+                    if (_disposed) { socket.Dispose(); return null; }
+                    socket.ReadTimeoutMs = HandshakeTimeoutMs;   // don't hold the gate forever on a stall
+                    Handshake(socket);
+                    socket.ReadTimeoutMs = 0;                    // read loop blocks indefinitely (idle servers)
+                }
+                if (_disposed) { socket.Dispose(); return null; }
+                return socket;
+            }
+            catch (Exception ex) when (ex is not UnauthorizedAccessException
+                                       && attempt < LinkAttempts && _running && !_disposed)
+            {
+                try { socket?.Dispose(); } catch { /* ignore */ }
+                _socket = null;
+                Session.Log($"[{ChannelTypeName()}] link attempt {attempt}/{LinkAttempts} failed " +
+                            $"({ex.Message}); retrying on a new socket");
+                Thread.Sleep(LinkRetryDelayMs);
+            }
+            catch
+            {
+                try { socket?.Dispose(); } catch { /* ignore */ }
+                _socket = null;
+                throw;
+            }
+        }
+    }
 
     private void Handshake(ChannelSocket socket)
     {
@@ -135,12 +178,12 @@ public abstract class SpiceChannel : IDisposable
         var authReply = socket.ReadExact(4);
         uint authCode = new SpiceReader(authReply).U32();
         Session.Log($"[{ChannelTypeName()}] auth code={authCode}");
+        if (authCode == SpiceConstants.LINK_ERR_PERMISSION_DENIED)
+            // Typed apart from the IOExceptions below: a rejected ticket is the one link failure
+            // that a retry cannot fix, so ConnectAndLink must not burn attempts on it.
+            throw new UnauthorizedAccessException("SPICE permission denied (bad password).");
         if (authCode != SpiceConstants.LINK_ERR_OK)
-        {
-            throw new IOException(authCode == SpiceConstants.LINK_ERR_PERMISSION_DENIED
-                ? "SPICE permission denied (bad password)."
-                : $"SPICE auth error {authCode}.");
-        }
+            throw new IOException($"SPICE auth error {authCode}.");
     }
 
     private void SendLink(ChannelSocket socket)
@@ -193,7 +236,7 @@ public abstract class SpiceChannel : IDisposable
             var payload = size > 0 ? socket.ReadExact((int)size) : Array.Empty<byte>();
 
             // Per-message tracing is opt-in (verbose) and must never touch the filesystem
-            // synchronously — it would throttle the render loop under heavy draw traffic.
+            // synchronously; it would throttle the render loop under heavy draw traffic.
             if (Session.VerboseLogging && (ChannelType != SpiceConstants.CHANNEL_DISPLAY || type < 300))
                 Session.Log($"[{ChannelTypeName()}] msg type={type} size={size}");
 

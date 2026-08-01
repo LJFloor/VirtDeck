@@ -17,7 +17,7 @@ pushd "%~dp0"
 set "CONFIG=Release"
 set "RID=win-x64"
 set "PUBLISH_DIR=publish\win-x64"
-set "PROJECT=VirtDeck\VirtDeck.csproj"
+set "PROJECT=VirtDeck.Avalonia\VirtDeck.Avalonia.csproj"
 set "ISS=installer\VirtDeck.iss"
 set "SRC_ZIP=publish\SpiceClient-src.zip"
 
@@ -32,7 +32,7 @@ if errorlevel 1 (
 
 echo.
 echo === [2/3] Packaging SpiceClient source (LGPL corresponding source) ===
-rem Stage a clean copy of the SpiceClient project (source only — no bin/obj/.vs), then zip it.
+rem Stage a clean copy of the SpiceClient project (source only, no bin/obj/.vs), then zip it.
 rem The installer ships this zip next to the app so the binary is "accompanied by source".
 if not exist "publish" md "publish"
 if exist "%SRC_ZIP%" del /q "%SRC_ZIP%"

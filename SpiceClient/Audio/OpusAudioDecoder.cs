@@ -7,7 +7,7 @@ namespace SpiceClient.Audio;
 /// Decodes the SPICE playback channel's Opus stream to interleaved signed-16-bit PCM using the
 /// pure-C# Concentus library (no native dependency). Each MSG_PLAYBACK_DATA payload carries one
 /// bare Opus packet (no Ogg/container), so it maps directly onto a single <see cref="Decode"/>
-/// call. Used only from the playback channel's read thread — not thread-safe by design.
+/// call. Used only from the playback channel's read thread; not thread-safe by design.
 /// </summary>
 public sealed class OpusAudioDecoder : IDisposable
 {

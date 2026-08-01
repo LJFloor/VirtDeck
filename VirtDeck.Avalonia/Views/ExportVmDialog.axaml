@@ -1,0 +1,61 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.ExportVmDialog"
+        x:DataType="vm:ExportDiskRow"
+        Title="Export VM"
+        Width="600" Height="440"
+        WindowStartupLocation="CenterOwner">
+
+  <Panel Margin="16">
+
+    <!-- Disk selection -->
+    <DockPanel Name="SelectPanel">
+      <TextBlock DockPanel.Dock="Top" Name="SelectHint" Margin="0,0,0,8"
+                 Text="Select disks to include in the export:" />
+
+      <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+        <TextBlock Name="RunningWarning" IsVisible="False" TextWrapping="Wrap" Opacity="0.8"
+                   Text="The VM is running; the exported disks are a crash-consistent snapshot, not a clean shutdown state." />
+        <CheckBox Name="SparseCheck" IsEnabled="False"
+                  Content="Sparsify disks on the host before export (reclaims unused space)" />
+        <!-- Indented to the checkbox label above it: 14px box + 6px label padding. -->
+        <TextBlock Name="SparseHint" IsVisible="False" Opacity="0.6" TextWrapping="Wrap" Margin="20,0,0,0" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+          <Button Name="CancelSelectButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <Button Name="ExportButton" Content="Export" MinWidth="88" IsDefault="True" Classes="accent" />
+        </StackPanel>
+      </StackPanel>
+
+      <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+        <ScrollViewer>
+          <!-- An ItemsControl of CheckBoxes replaces the owner-drawn CheckedListBox: the disabled
+               state and its reason are ordinary control properties here. -->
+          <ItemsControl Name="DiskList" Margin="8">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:ExportDiskRow">
+                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Content="{Binding Label}"
+                          IsEnabled="{Binding IsEnabled}" ToolTip.Tip="{Binding Tooltip}" Margin="0,2" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </DockPanel>
+
+    <!-- Progress -->
+    <StackPanel Name="ProgressPanel" IsVisible="False" VerticalAlignment="Center" Spacing="10">
+      <TextBlock Name="StatusText" TextWrapping="Wrap" />
+      <TextBlock Name="CurrentFileText" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+      <ProgressBar Name="FileProgress" Height="6" IsIndeterminate="True" Minimum="0" Maximum="1000" />
+      <TextBlock Name="BytesText" Opacity="0.75" />
+
+      <TextBlock Name="OverallText" IsVisible="False" Margin="0,10,0,0" Opacity="0.75" />
+      <ProgressBar Name="OverallProgress" IsVisible="False" Height="6" Minimum="0" Maximum="1000" />
+
+      <Button Name="CancelProgressButton" Content="Cancel" MinWidth="88"
+              HorizontalAlignment="Right" Margin="0,14,0,0" />
+    </StackPanel>
+
+  </Panel>
+</Window>

@@ -1,17 +1,19 @@
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
 namespace SpiceClient.Imaging;
 
 /// <summary>
-/// The primary display surface. Backed by a pinned BGRA byte buffer that a
-/// <see cref="System.Drawing.Bitmap"/> (Format32bppArgb) wraps directly, so
-/// compositing writes are visible to the UI paint with no copy.
+/// The primary display surface: a pinned, top-down BGRA byte buffer (one 32-bit pixel per
+/// entry, alpha ignored; the desktop surface is opaque). The UI layer wraps or copies it
+/// into whatever bitmap type its toolkit wants; this class stays toolkit-agnostic.
 ///
-/// All compositing and all painting must hold <see cref="SyncRoot"/> so the
-/// display read-thread and the UI thread never touch the pixels concurrently.
+/// All compositing and all reads must hold <see cref="SyncRoot"/> so the display read-thread
+/// and the UI thread never touch the pixels concurrently.
+///
+/// <see cref="Rectangle"/> here is System.Drawing.Primitives, which is cross-platform BCL,
+/// not the Windows-only GDI+ in System.Drawing.Common.
 /// </summary>
 public sealed class SpiceFramebuffer : IDisposable
 {
@@ -19,7 +21,15 @@ public sealed class SpiceFramebuffer : IDisposable
     public int Height { get; }
     public int Stride { get; }
     public object SyncRoot { get; } = new();
-    public Bitmap Bitmap { get; }
+
+    /// <summary>Raw BGRA pixels, top-down, <see cref="Stride"/> bytes per row. Access under <see cref="SyncRoot"/>.</summary>
+    public byte[] Pixels => _pixels;
+
+    /// <summary>
+    /// Address of the pinned pixel buffer, for a bulk native copy into a UI bitmap.
+    /// Valid until <see cref="Dispose"/>; access under <see cref="SyncRoot"/>.
+    /// </summary>
+    public IntPtr Scan0 => _handle.IsAllocated ? _handle.AddrOfPinnedObject() : IntPtr.Zero;
 
     private readonly byte[] _pixels;
     private GCHandle _handle;
@@ -36,10 +46,8 @@ public sealed class SpiceFramebuffer : IDisposable
         Height = height;
         Stride = width * 4;
         _pixels = new byte[Stride * height]; // zero = opaque black (alpha byte is ignored)
+        // Pinned so the UI layer can bulk-copy from Scan0 without re-pinning every frame.
         _handle = GCHandle.Alloc(_pixels, GCHandleType.Pinned);
-        // Format32bppRgb (opaque): blits are a straight byte copy and GDI paints without
-        // alpha-blending — the desktop surface has no meaningful alpha.
-        Bitmap = new Bitmap(width, height, Stride, PixelFormat.Format32bppRgb, _handle.AddrOfPinnedObject());
     }
 
     public void FillRect(int x, int y, int w, int h, uint colorBgr)
@@ -108,20 +116,21 @@ public sealed class SpiceFramebuffer : IDisposable
     }
 
     /// <summary>
-    /// Returns an independent, opaque 24bpp copy of the current surface — safe to keep, put on the
-    /// clipboard, or use after the framebuffer changes. Returns null if the surface is disposed.
-    /// Taken under <see cref="SyncRoot"/> so it never tears against a concurrent composite.
+    /// Returns an independent copy of the current surface as top-down BGRA, safe to keep or encode
+    /// after the framebuffer changes. Returns null if the surface is disposed. Taken under
+    /// <see cref="SyncRoot"/> so it never tears against a concurrent composite.
+    /// Alpha is forced opaque: the guest never sets it, and a zeroed alpha channel renders black
+    /// in anything that honours it.
     /// </summary>
-    public Bitmap? Snapshot()
+    public byte[]? SnapshotBgra(out int width, out int height)
     {
         lock (SyncRoot)
         {
+            width = Width;
+            height = Height;
             if (_disposed) return null;
-            // 24bpp (no alpha) so it pastes correctly everywhere — a 32bpp DIB with a zeroed alpha
-            // channel renders black in apps that honour it.
-            var copy = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
-            using var g = Graphics.FromImage(copy);
-            g.DrawImage(Bitmap, new Rectangle(0, 0, Width, Height), 0, 0, Width, Height, GraphicsUnit.Pixel);
+            var copy = (byte[])_pixels.Clone();
+            for (int i = 3; i < copy.Length; i += 4) copy[i] = 255;
             return copy;
         }
     }
@@ -147,7 +156,7 @@ public sealed class SpiceFramebuffer : IDisposable
         var rect = new Rectangle(x, y, w, h);
         if (_dirty.Count >= MaxDirtyRects)
         {
-            // Too many regions — collapse all (incl. this one) into one bounding box.
+            // Too many regions: collapse all (incl. this one) into one bounding box.
             var u = rect;
             foreach (var d in _dirty) u = Rectangle.Union(u, d);
             _dirty.Clear();
@@ -172,7 +181,6 @@ public sealed class SpiceFramebuffer : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            try { Bitmap.Dispose(); } catch { /* ignore */ }
             if (_handle.IsAllocated) _handle.Free();
         }
     }

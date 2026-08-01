@@ -3,7 +3,7 @@ using SpiceClient.Protocol;
 namespace SpiceClient.Channels;
 
 /// <summary>
-/// SPICE inputs channel — keyboard and mouse. The UI calls the Send* methods.
+/// SPICE inputs channel: keyboard and mouse. The UI calls the Send* methods.
 /// Ported from spice-html5 inputs.js. Mouse motion is rate-limited against
 /// MOUSE_MOTION_ACK like the reference.
 /// </summary>

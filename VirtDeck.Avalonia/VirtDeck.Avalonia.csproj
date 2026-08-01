@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VirtDeck.Avalonia</RootNamespace>
+    <AssemblyName>virtdeck</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Shell icon baked into virtdeck.exe. Ignored when the apphost is not a Windows PE, so it
+         costs nothing on the Linux publish. See packaging/icons/make-icons.py. -->
+    <ApplicationIcon>Assets\virtdeck.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RuntimeIdentifiers>linux-x64;win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VirtDeck.Core\VirtDeck.Core.csproj" />
+    <ProjectReference Include="..\SpiceClient\SpiceClient.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <!-- The .ico is a build input for <ApplicationIcon>, not a runtime asset; embedding it as
+         well would carry a second copy of every frame in the assembly for nothing. -->
+    <AvaloniaResource Remove="Assets\virtdeck.ico" />
+  </ItemGroup>
+
+  <!-- USB redirection needs the native libusb/usbredir libraries. On Windows they ship with the
+       app (staged in native\win-x64); on Linux they come from the distro packages. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or '$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))' == 'true'">
+    <None Include="..\native\win-x64\*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>false</Pack>
+    </None>
+  </ItemGroup>
+
+</Project>

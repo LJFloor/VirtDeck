@@ -13,7 +13,7 @@ namespace SpiceClient.Channels;
 /// Ported from spice-html5 main.js.
 ///
 /// Agent sending is serialized at whole-message granularity by a dedicated
-/// sender thread, token-flow-controlled — interleaving two agent messages'
+/// sender thread, token-flow-controlled; interleaving two agent messages'
 /// fragments would corrupt the guest's agent byte stream.
 /// </summary>
 public sealed class MainChannel : SpiceChannel
@@ -133,7 +133,7 @@ public sealed class MainChannel : SpiceChannel
                 Session.SyncMultimediaTime(r.U32());
                 break;
             }
-            // name, uuid — not needed.
+            // name, uuid: not needed.
         }
     }
 
@@ -354,13 +354,16 @@ public sealed class MainChannel : SpiceChannel
             if (UseSelection) r.U32();
             if (r.Remaining >= 4 && r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT)
             {
-                var text = Encoding.UTF8.GetString(r.Rest());
-                Session.ClipboardTextFromGuestRaise(text.Replace("\r\n", "\n").Replace("\n", "\r\n"));
+                // The agent sends LF; normalise to the host's own line ending so pasted text
+                // isn't single-line on Windows or full of stray CRs on Linux.
+                var text = Encoding.UTF8.GetString(r.Rest()).Replace("\r\n", "\n");
+                if (Environment.NewLine != "\n") text = text.Replace("\n", Environment.NewLine);
+                Session.ClipboardTextFromGuestRaise(text);
             }
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST)
         {
-            // Guest is pasting and wants the host clipboard — the form supplies it via SendClipboardText.
+            // Guest is pasting and wants the host clipboard; the form supplies it via SendClipboardText.
             Session.ClipboardRequestedByGuestRaise();
         }
         // VD_AGENT_CLIPBOARD_RELEASE: nothing to do.

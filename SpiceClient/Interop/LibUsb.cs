@@ -3,28 +3,33 @@ using System.Runtime.InteropServices;
 namespace SpiceClient.Interop;
 
 /// <summary>
-/// Raw P/Invoke surface for libusb-1.0 (the Windows build that ships next to the
-/// executable). Only the functions needed for SPICE usbredir are bound. All calls
-/// use the C calling convention (the MinGW/MSVC libusb build is cdecl).
+/// Raw P/Invoke surface for libusb-1.0. Only the functions needed for SPICE usbredir are
+/// bound. All calls use the C calling convention (cdecl on every libusb build).
 ///
-/// The DLL is loaded by bare name; <c>libusb-1.0.dll</c> + its runtime deps must sit
-/// beside VirtDeck.exe (see the native\win-x64 staging in the build). Callers must
-/// tolerate <see cref="DllNotFoundException"/>/<see cref="BadImageFormatException"/>
-/// so the SPICE session still works when the USB DLLs are absent.
+/// The library is loaded by bare name and mapped to a real filename by
+/// <see cref="NativeLibraryResolver"/>: on Windows <c>libusb-1.0.dll</c> + its runtime deps ship
+/// beside the executable (see the native\win-x64 staging); on Linux it comes from the distro
+/// as <c>libusb-1.0.so.0</c>. Callers must tolerate
+/// <see cref="DllNotFoundException"/>/<see cref="BadImageFormatException"/> so the SPICE session
+/// still works when the USB libraries are absent.
 /// </summary>
 internal static class LibUsb
 {
     private const string Dll = "libusb-1.0";
 
-    // libusb_option (subset). USE_USBDK switches the Windows backend to UsbDk, which is
-    // the only backend that can capture an arbitrary device for redirection.
+    // libusb_option (subset). USE_USBDK switches the *Windows* backend to UsbDk, which is the only
+    // Windows backend that can capture an arbitrary device. It is not valid on other platforms,
+    // where the native backend already does this.
     public const int LIBUSB_OPTION_LOG_LEVEL = 0;
     public const int LIBUSB_OPTION_USE_USBDK = 1;
 
     public const int LIBUSB_SUCCESS = 0;
 
+    /// <summary>Insufficient permissions: on Linux, no rw access to the device's /dev/bus/usb node.</summary>
+    public const int LIBUSB_ERROR_ACCESS = -3;
+
     // USB device classes used for the default redirect filter.
-    public const byte USB_CLASS_PER_INTERFACE = 0x00; // composite — class is on the interfaces
+    public const byte USB_CLASS_PER_INTERFACE = 0x00; // composite: class is on the interfaces
     public const byte USB_CLASS_HID = 0x03;
     public const byte USB_CLASS_HUB = 0x09;
 
@@ -82,6 +87,11 @@ internal static class LibUsb
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void libusb_close(IntPtr devHandle);
+
+    // Linux/macOS: lets libusb kick the in-kernel driver (usb-storage, usbhid, …) off an interface
+    // as it claims it, and hand it back on release. Returns LIBUSB_ERROR_NOT_SUPPORTED on Windows.
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int libusb_set_auto_detach_kernel_driver(IntPtr devHandle, int enable);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr libusb_ref_device(IntPtr dev);

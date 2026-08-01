@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Threading;
 using SpiceClient.Audio;
 using SpiceClient.Channels;
@@ -11,7 +10,7 @@ namespace SpiceClient;
 /// <summary>
 /// Top-level SPICE session. Orchestrates channel bring-up over the SSH-forwarded
 /// port and exposes the framebuffer, input, and cursor to the UI through events.
-/// All events fire from background channel threads — subscribers must marshal to
+/// All events fire from background channel threads; subscribers must marshal to
 /// the UI thread.
 /// </summary>
 public sealed class SpiceSession : IDisposable
@@ -28,11 +27,11 @@ public sealed class SpiceSession : IDisposable
     public InputsChannel? Inputs { get; private set; }
     public DisplayChannel? Display { get; private set; }
 
-    private WaveOutPlayer? _audio;
+    private IAudioSink? _audio;
     private bool _audioMutedPref;
 
     /// <summary>
-    /// Mute/un-mute guest speaker audio. Settable before the playback channel links — the
+    /// Mute/un-mute guest speaker audio. Settable before the playback channel links; the
     /// preference is applied to the sink as soon as audio starts.
     /// </summary>
     public bool AudioMuted
@@ -42,16 +41,16 @@ public sealed class SpiceSession : IDisposable
     }
 
     /// <summary>
-    /// USB redirection manager — non-null once the host advertises at least one usbredir
+    /// USB redirection manager, non-null once the host advertises at least one usbredir
     /// channel (i.e. the VM has &lt;redirdev&gt; devices). Null means the VM has no redirect
-    /// channels. Check <see cref="UsbDeviceManager.UsbDkAvailable"/> for client-side readiness.
+    /// channels. Check <see cref="UsbDeviceManager.CaptureAvailable"/> for client-side readiness.
     /// </summary>
     public UsbDeviceManager? Usb => _usb;
 
     /// <summary>When true, channels log every received message (very chatty). Default off.</summary>
     public volatile bool VerboseLogging;
 
-    /// <summary>True once the guest agent (vdagent) is connected — required for resize and file transfer.</summary>
+    /// <summary>True once the guest agent (vdagent) is connected; required for resize and file transfer.</summary>
     public bool AgentConnected { get; internal set; }
 
     // Events (raised from channel threads)
@@ -85,7 +84,7 @@ public sealed class SpiceSession : IDisposable
     /// (display/inputs/cursor/playback/usbredir) are all opened in a tight burst from
     /// MSG_MAIN_CHANNELS_LIST and dial the SAME SSH-forwarded local port at once. SSH.NET's
     /// ForwardedPortLocal can cross simultaneous connections, leaking one channel's link-reply
-    /// bytes into another's socket — the crossed stream is then read misframed (the 4-byte auth
+    /// bytes into another's socket; the crossed stream is then read misframed (the 4-byte auth
     /// result lands on the next reply's "REDQ" magic = "SPICE auth error 1363428690"). Channels
     /// hold this only for the short connect+handshake; their read loops still run in parallel.
     /// </summary>
@@ -94,6 +93,7 @@ public sealed class SpiceSession : IDisposable
     private MainChannel? _main;
     private UsbDeviceManager? _usb;
     private LibUsbContext? _usbCtx;
+    private bool _usbChannelsSkipped; // log the "no usbredir stack" reason once, not per channel
     private int _down;
     private int _disposed;
     private bool _codecWarned;
@@ -135,16 +135,31 @@ public sealed class SpiceSession : IDisposable
 
     // ---- USB redirection -----------------------------------------------
 
-    private UsbredirChannel CreateUsbChannel(byte id)
+    private UsbredirChannel? CreateUsbChannel(byte id)
     {
-        // First usbredir channel brings up the shared libusb context (UsbDk backend) + manager.
-        // This never throws: if the native USB libraries or UsbDk are missing, the manager
-        // reports itself unavailable and the channel still links (just stays dormant).
+        // First usbredir channel brings up the shared libusb context (UsbDk backend on Windows) +
+        // manager. This never throws: if the native libraries or the capture backend are missing,
+        // the manager reports itself unavailable and the picker explains why.
         if (_usb == null)
         {
             _usbCtx = new LibUsbContext(Log);
             _usb = new UsbDeviceManager(_usbCtx, Log);
         }
+
+        // Without libusb+usbredirhost the channel could link but never speak usb_redir, and the
+        // server answers that silence by closing the WHOLE connection, taking display and inputs
+        // with it. Leaving the channel unconnected is the safe dormant state (what spice-gtk built
+        // without usbredir does); the manager still exists, so the picker can say what to install.
+        if (!_usbCtx!.Available)
+        {
+            if (!_usbChannelsSkipped)
+            {
+                _usbChannelsSkipped = true;
+                Log($"[usb] not connecting usbredir channels: {_usb.UnavailableReason}");
+            }
+            return null;
+        }
+
         var ch = new UsbredirChannel(this, Host, Port, id, ConnectionId, Password);
         _usb.RegisterChannel(ch);
         return ch;
@@ -162,7 +177,7 @@ public sealed class SpiceSession : IDisposable
     /// <summary>Ask the guest agent to change resolution (no-op if the agent isn't connected).</summary>
     public void RequestResize(int width, int height) => _main?.SendMonitorsConfig(width, height);
 
-    /// <summary>Request a runtime image-compression mode from the server (e.g. LZ or OFF) — no VM config change.</summary>
+    /// <summary>Request a runtime image-compression mode from the server (e.g. LZ or OFF); no VM config change.</summary>
     public void SetPreferredCompression(byte mode) => Display?.SetPreferredCompression(mode);
 
     /// <summary>Send a local file to the guest (drops it in the guest, via vdagent file transfer).</summary>
@@ -206,7 +221,7 @@ public sealed class SpiceSession : IDisposable
 
     internal void CreateFramebuffer(int width, int height)
     {
-        // Don't dispose the old framebuffer here — the UI thread may be painting it.
+        // Don't dispose the old framebuffer here; the UI thread may be painting it.
         // The display control disposes the previous one on the UI thread when it
         // processes ResolutionChanged.
         Framebuffer = new SpiceFramebuffer(width, height);
@@ -220,7 +235,7 @@ public sealed class SpiceSession : IDisposable
         if (_codecWarned) return;
         _codecWarned = true;
         StatusMessage?.Invoke(
-            "Unsupported image codec (QUIC/GLZ) — set the VM's <image compression='off'/> and restart it.");
+            "Unsupported image codec (QUIC/GLZ); set the VM's <image compression='off'/> and restart it.");
     }
 
     // ---- Called by CursorChannel ---------------------------------------
@@ -234,7 +249,7 @@ public sealed class SpiceSession : IDisposable
     internal void AudioStart(int frequency, int channels)
     {
         if (Volatile.Read(ref _disposed) == 1) return;
-        var audio = _audio ??= new WaveOutPlayer(Log);
+        var audio = _audio ??= AudioSinks.Create(Log);
         audio.Configure(frequency, channels);
         audio.Muted = _audioMutedPref;
         AudioStarted?.Invoke();
@@ -254,7 +269,7 @@ public sealed class SpiceSession : IDisposable
         if (Interlocked.Exchange(ref _down, 1) == 1) return;
         Log($"[{ch.ChannelType}] ERROR ({ex.GetType().Name}): {ex.Message}");
         // This runs on a channel thread. A throwing subscriber (e.g. BeginInvoke racing a closing
-        // form) must never escape here — a background-thread exception terminates the process.
+        // form) must never escape here; a background-thread exception terminates the process.
         try { Disconnected?.Invoke(ex.Message); }
         catch (Exception hex) { Log($"Disconnected handler threw: {hex.Message}"); }
     }

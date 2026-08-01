@@ -73,7 +73,7 @@ public static class SpiceConstants
     public const ushort MSGC_MAIN_AGENT_DATA = 107;
     public const ushort MSGC_MAIN_AGENT_TOKEN = 108;
 
-    // Guest agent (vdagent) — minimal subset for dynamic resize
+    // Guest agent (vdagent): minimal subset for dynamic resize
     public const uint VD_AGENT_PROTOCOL = 1;
     public const int VD_AGENT_MAX_DATA_SIZE = 2048;
     public const uint VD_AGENT_MONITORS_CONFIG = 2;
@@ -143,8 +143,8 @@ public static class SpiceConstants
     // Image-compression modes (payload of MSGC_DISPLAY_PREFERRED_COMPRESSION).
     // Full set: INVALID=0, OFF=1, AUTO_GLZ=2, AUTO_LZ=3, QUIC=4, GLZ=5, LZ=6, LZ4=7.
     public const byte IMAGE_COMPRESSION_OFF = 1;     // raw bitmaps
-    public const byte IMAGE_COMPRESSION_AUTO_GLZ = 2; // server default (GLZ + QUIC) — not decodable here
-    public const byte IMAGE_COMPRESSION_LZ = 6;      // LZ only (no QUIC/GLZ) — the safe default for this client
+    public const byte IMAGE_COMPRESSION_AUTO_GLZ = 2; // server default (GLZ + QUIC), not decodable here
+    public const byte IMAGE_COMPRESSION_LZ = 6;      // LZ only (no QUIC/GLZ), the safe default for this client
 
     // Video stream codecs
     public const byte VIDEO_CODEC_TYPE_MJPEG = 1;
@@ -175,7 +175,7 @@ public static class SpiceConstants
     public const ushort MSG_CURSOR_INVAL_ONE = 107;
     public const ushort MSG_CURSOR_INVAL_ALL = 108;
 
-    // SpiceVMC channels (usbredir / smartcard / port) — opaque byte-stream tunnel.
+    // SpiceVMC channels (usbredir / smartcard / port): opaque byte-stream tunnel.
     // The usbredir channel carries the raw usbredir wire protocol in these messages.
     // We never advertise compression, so the server sends plain DATA (not COMPRESSED_DATA=102).
     public const ushort MSG_SPICEVMC_DATA = 101;   // server -> client

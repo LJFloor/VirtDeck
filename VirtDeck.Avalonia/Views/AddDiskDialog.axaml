@@ -1,0 +1,62 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.AddDiskDialog"
+        Title="Add Disk"
+        Width="560" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="170,*">
+
+      <!-- Kind -->
+      <StackPanel Grid.Column="0" Spacing="10" Margin="0,4,12,0">
+        <RadioButton Name="Qcow2Radio" GroupName="Kind" Content="Qcow2" IsChecked="True" />
+        <RadioButton Name="ZvolRadio" GroupName="Kind" Content="Zvol" />
+        <RadioButton Name="CdromRadio" GroupName="Kind" Content="CD-ROM (ISO)" />
+        <RadioButton Name="FloppyRadio" GroupName="Kind" Content="Floppy (VFD)" />
+      </StackPanel>
+
+      <StackPanel Grid.Column="1" Spacing="4">
+
+        <!-- Path (qcow2 / cdrom / floppy) -->
+        <TextBlock Name="PathLabel" Text="Path:" />
+        <c:RemotePathBox Name="PathPicker" />
+
+        <!-- Volume (zvol) -->
+        <TextBlock Name="ZvolLabel" Text="Volume:" />
+        <ComboBox Name="ZvolBox" HorizontalAlignment="Stretch" />
+
+        <!-- Size (qcow2) -->
+        <TextBlock Name="SizeLabel" Text="Size:" Margin="0,8,0,0" />
+        <StackPanel Name="SizeRow" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="SizeBox" Width="130" Minimum="1" Maximum="1048576"
+                         Value="20" Increment="1" FormatString="0" />
+          <TextBlock Text="GiB" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- New zvol name + size -->
+        <TextBlock Name="NewVolLabel" Text="Name:" Margin="0,8,0,0" />
+        <TextBox Name="NewVolBox" PlaceholderText="pool/dataset/name" />
+        <TextBlock Name="NewSizeLabel" Text="Size:" Margin="0,8,0,0" />
+        <StackPanel Name="NewSizeRow" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="NewSizeBox" Width="130" Minimum="1" Maximum="1048576"
+                         Value="20" Increment="1" FormatString="0" />
+          <TextBlock Text="GiB" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Bus -->
+        <TextBlock Text="Bus:" Margin="0,8,0,0" />
+        <ComboBox Name="BusBox" Width="150" HorizontalAlignment="Left" />
+
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</Window>

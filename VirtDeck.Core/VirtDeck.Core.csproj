@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Namespaces stay VirtDeck.* so both the WinForms and Avalonia front-ends
+         reference this without touching a single using directive. -->
+    <RootNamespace>VirtDeck</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- System.IO.Pipelines and Microsoft.Win32.Registry (used by LegacyRegistryImport) are both
+         in the net10.0 shared framework, no PackageReference needed. -->
+    <PackageReference Include="SSH.NET" Version="2024.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpiceClient\SpiceClient.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fallback osinfo short-id → label map, read by OsLabelCatalog when the host has no
+         live osinfo-query to enrich the Create-VM OS dropdown. Resolved by name suffix, so
+         it works from whichever assembly it is embedded in. -->
+    <EmbeddedResource Include="Data\*.json" />
+  </ItemGroup>
+
+</Project>

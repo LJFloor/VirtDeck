@@ -5,7 +5,7 @@ namespace SpiceClient.Channels;
 /// <summary>
 /// SPICE cursor channel. Decodes ALPHA (BGRA) cursor shapes with hotspot and
 /// raises session events; the UI owns all cursor assignment. Implements a cursor
-/// cache (by header.unique) so server FROM_CACHE references resolve — this is more
+/// cache (by header.unique) so server FROM_CACHE references resolve; this is more
 /// robust than spice-html5, which omits the cache. Ported from cursor.js.
 /// </summary>
 public sealed class CursorChannel : SpiceChannel

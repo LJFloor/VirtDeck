@@ -1,0 +1,127 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.ConsoleWindow"
+        Title="Console"
+        Width="1024" Height="768"
+        WindowStartupLocation="CenterScreen"
+        Background="#FF1E1F22">
+
+  <Window.Styles>
+    <!-- The strip itself: a shade above the window face, closed by a hairline. -->
+    <Style Selector="Border.toolbar">
+      <Setter Property="Background" Value="{DynamicResource JbToolBarBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbToolBarBorder}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="3,2" />
+    </Style>
+
+    <!-- Match the dropdown cells to the plain toolbar buttons beside them. -->
+    <Style Selector="Menu.toolbar">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Menu.toolbar > MenuItem">
+      <Setter Property="Padding" Value="10,3" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="CornerRadius" Value="3" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel>
+
+    <!--
+      A Menu, not a row of Buttons with flyouts. That is what makes this a toolbar rather than
+      a button bar: one click opens a dropdown, sliding across the neighbours switches between
+      them without re-clicking, and the arrow keys walk the whole strip; the ToolStripDropDownButton
+      behaviour the WinForms console had. Headers carry no access-key underscores on purpose:
+      Alt belongs to the guest (see ForwardKey), so an Alt+P mnemonic here would never fire.
+    -->
+    <Border DockPanel.Dock="Top" Classes="toolbar">
+      <StackPanel Orientation="Horizontal">
+
+        <Menu Classes="toolbar">
+
+          <MenuItem Name="PowerMenu" Header="Power">
+            <MenuItem Name="StartItem" Header="Start" />
+            <Separator />
+            <MenuItem Name="ShutdownItem" Header="Shut down (ACPI)" />
+            <MenuItem Name="RebootItem" Header="Reboot" />
+            <Separator />
+            <MenuItem Name="ForceOffItem" Header="Force off" />
+            <MenuItem Name="ResetItem" Header="Reset" />
+          </MenuItem>
+
+          <MenuItem Name="KeyboardMenu" Header="Keyboard">
+            <MenuItem Name="CtrlAltDelItem" Header="Ctrl+Alt+Del" />
+            <Separator />
+            <MenuItem Name="TypeClipboardItem" Header="Type clipboard"
+                      ToolTip.Tip="Synthesizes the clipboard text as keystrokes, for guests without the agent." />
+          </MenuItem>
+
+          <MenuItem Name="CdDvdMenu" Header="CD/DVD">
+            <MenuItem Name="CdServerItem" Header="Insert ISO from server…" />
+            <MenuItem Name="CdLocalItem" Header="Insert ISO from this PC…"
+                      ToolTip.Tip="Streams the image over the SSH tunnel; it stays available while VirtDeck is open." />
+            <MenuItem Name="CdGuestIsoItem" Header="Insert guest agent ISO" />
+            <Separator />
+            <MenuItem Name="CdEjectItem" Header="Eject" />
+          </MenuItem>
+
+          <!-- Floppy drives are rare: this stays hidden unless this VM has one. -->
+          <MenuItem Name="FloppyMenu" Header="Floppy" IsVisible="False">
+            <MenuItem Name="FloppyServerItem" Header="Insert image from server…" />
+            <MenuItem Name="FloppyLocalItem" Header="Insert image from this PC…"
+                      ToolTip.Tip="Streamed read-write: guest writes persist back to the local file." />
+            <Separator />
+            <MenuItem Name="FloppyEjectItem" Header="Eject" />
+          </MenuItem>
+
+          <!-- A leaf MenuItem in the strip: one click opens the picker, like the WinForms button. -->
+          <MenuItem Name="UsbMenu" Header="USB" />
+
+          <MenuItem Name="DisplayMenu" Header="Display">
+            <MenuItem Name="LzItem" Header="Low bandwidth (LZ)" ToggleType="Radio" GroupName="compression" />
+            <MenuItem Name="RawItem" Header="Raw (uncompressed)" ToggleType="Radio" GroupName="compression" />
+            <Separator />
+            <MenuItem Name="FitWindowItem" Header="Fit window to guest" />
+            <MenuItem Name="ShowHostCursorItem" Header="Show host cursor" ToggleType="CheckBox" />
+            <Separator />
+            <MenuItem Name="ScreenshotItem" Header="Save screenshot…" />
+          </MenuItem>
+
+          <!-- Hidden unless the VM has a <sound> device, like Floppy: with no sound device there
+               is no playback channel and the item would be permanently dead. -->
+          <MenuItem Name="AudioMenu" Header="Audio" IsVisible="False">
+            <MenuItem Name="MuteItem" Header="Mute" ToggleType="CheckBox"
+                      ToolTip.Tip="Silences guest audio on this PC only; the guest keeps playing." />
+          </MenuItem>
+
+        </Menu>
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="10,4"
+            Background="{DynamicResource JbToolBarBackground}"
+            BorderBrush="{DynamicResource JbToolBarBorder}" BorderThickness="0,1,0,0">
+      <DockPanel>
+        <TextBlock Name="GrabText" DockPanel.Dock="Right" Opacity="0.7" />
+        <TextBlock Name="StatusText" />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <controls:SpiceDisplay Name="Display" />
+
+      <!-- Shown instead of the framebuffer when the guest is powered off. -->
+      <Border Name="OffOverlay" IsVisible="False" Background="#FF2B2D31">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+          <TextBlock Name="OffText" Text="This VM is powered off."
+                     Foreground="#FFDBDEE1" FontSize="18" HorizontalAlignment="Center" />
+          <Button Name="OverlayStartButton" Content="Start VM" HorizontalAlignment="Center" Classes="accent" />
+        </StackPanel>
+      </Border>
+    </Panel>
+
+  </DockPanel>
+</Window>

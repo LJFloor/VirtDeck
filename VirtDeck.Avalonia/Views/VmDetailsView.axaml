@@ -1,0 +1,81 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.VmDetailsView"
+             x:DataType="vm:DetailRow">
+
+  <UserControl.Resources>
+    <!-- The label column of every section, so all four line up. -->
+    <x:Double x:Key="ColLabel">96</x:Double>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- One shared shape for the four detail sections: heading, rule, then label/value rows. -->
+    <Style Selector="ItemsControl.details">
+      <Setter Property="Margin" Value="0,2,0,10" />
+    </Style>
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,6,0,2" />
+    </Style>
+  </UserControl.Styles>
+
+  <Panel>
+    <!-- Empty state -->
+    <TextBlock Name="EmptyText" Text="Select a VM to see details" Opacity="0.6"
+               HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+    <ScrollViewer Name="Body" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="12">
+
+        <!-- Live screenshot preview. Clicking it opens the console. -->
+        <Border Name="PreviewBox" Height="150" Background="#202024" BorderBrush="#46464c"
+                BorderThickness="1" Cursor="Hand" Margin="0,0,0,10">
+          <Panel>
+            <Image Name="PreviewImage" Stretch="Uniform" Margin="1" />
+            <StackPanel Name="PreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="6">
+              <!-- A monitor outline; replaces the WinForms bitmap icon set. -->
+              <Path HorizontalAlignment="Center"
+                    Stroke="#8a8a92" StrokeThickness="1.5" Fill="Transparent"
+                    Data="M2,2 H30 V21 H2 Z M12,25 H20 M16,21 V25" />
+              <TextBlock Name="PreviewText" Foreground="#c8c8cd" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Panel>
+        </Border>
+
+        <TextBlock Classes="section" Text="General" />
+        <Border Height="1" Background="#33808080" />
+        <ItemsControl Name="GeneralRows" Classes="details" />
+
+        <TextBlock Classes="section" Text="System" />
+        <Border Height="1" Background="#33808080" />
+        <ItemsControl Name="SystemRows" Classes="details" />
+
+        <TextBlock Classes="section" Text="Storage" />
+        <Border Height="1" Background="#33808080" />
+        <ItemsControl Name="StorageRows" Classes="details" />
+
+        <TextBlock Classes="section" Text="Network" />
+        <Border Height="1" Background="#33808080" />
+        <ItemsControl Name="NetworkRows" Classes="details" />
+
+      </StackPanel>
+    </ScrollViewer>
+  </Panel>
+
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="vm:DetailRow">
+      <DockPanel Margin="2,1">
+        <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" Width="{StaticResource ColLabel}"
+                   Opacity="0.65" TextTrimming="CharacterEllipsis" />
+        <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                 VerticalAlignment="Center" Fill="{Binding ValueBrush}"
+                 IsVisible="{Binding ShowDot}" />
+        <TextBlock Text="{Binding Value}" Foreground="{Binding ValueBrush}"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+</UserControl>

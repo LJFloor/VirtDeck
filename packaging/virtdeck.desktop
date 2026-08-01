@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=VirtDeck
+GenericName=Virtual Machine Manager
+Comment=Manage libvirt/KVM virtual machines over SSH with a native SPICE console
+Exec=virtdeck
+Icon=virtdeck
+Terminal=false
+# One main category (System) plus RemoteAccess for the console half; adding Network as well would
+# list the app twice in menus that split by main category.
+Categories=System;RemoteAccess;
+Keywords=libvirt;KVM;QEMU;SPICE;virtual machine;virtualization;VM;console;
+# Avalonia's X11 backend sets WM_CLASS from the assembly name, so this is what ties a running
+# window back to this launcher (correct icon in the dock, no duplicate entry).
+StartupWMClass=virtdeck
+StartupNotify=true

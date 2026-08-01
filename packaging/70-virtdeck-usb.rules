@@ -1,0 +1,18 @@
+# VirtDeck: USB redirection
+#
+# Handing a USB device to a guest means talking to it directly from user space, which needs
+# read/write access to its raw node under /dev/bus/usb/. By default those are root-owned, so
+# libusb_open() fails with LIBUSB_ERROR_ACCESS and the picker can only report the device.
+#
+# uaccess is the standard answer: systemd-logind grants the user currently logged in at the
+# seat an ACL on the device, exactly as it already does for scanners, webcams and security
+# keys. No group membership, and nothing is granted to remote or background sessions.
+#
+# Install:
+#   sudo install -m 0644 70-virtdeck-usb.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# The ACL is applied when a device appears, so anything already plugged in has to be
+# unplugged and replugged once after installing this rule.
+
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", TAG+="uaccess"

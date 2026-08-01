@@ -46,7 +46,7 @@ public sealed class SpiceReader
         return v;
     }
 
-    /// <summary>Big-endian uint32 — used by the LZ_RGB / JPEG-alpha sub-header fields.</summary>
+    /// <summary>Big-endian uint32, used by the LZ_RGB / JPEG-alpha sub-header fields.</summary>
     public uint U32BE()
     {
         var v = BinaryPrimitives.ReadUInt32BigEndian(Buf.AsSpan(Pos));
