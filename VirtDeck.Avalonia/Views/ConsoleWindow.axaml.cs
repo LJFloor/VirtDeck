@@ -52,6 +52,14 @@ public partial class ConsoleWindow : Window
     private string? _floppyTarget;
     private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers a playback channel
     private readonly List<NbdServer> _mediaServers = new(); // streamed "this PC" media; alive while open
+    private bool _mediaBusy;      // a change-media action is in flight; drops must not stack
+    private bool _dragActive;     // a file drag is over this window (see SetDragActive)
+
+    // Client → guest file transfers. One shared progress bar for a whole multi-file drop, so this
+    // is a refcount rather than a flag; _lastXferPct throttles the bar to whole percent changes.
+    private int _activeXfers;
+    private int _lastXferPct = -1;
+    private string? _xferName;
 
     // Clipboard sharing. Avalonia has no clipboard-change notification, so the host side is polled
     // while this window is focused; _lastHostClipboard is what suppresses the self-triggered round trip.
@@ -136,6 +144,16 @@ public partial class ConsoleWindow : Window
         Display.PointerExited += (_, _) => UpdateGrab();
         Display.PointerMoved += (_, _) => { if (!_grab.IsActive) RetryGrab(); };
 
+        // Files dropped anywhere in the console window: sent into the guest, or, for a disc image
+        // on a VM with the matching drive, inserted after asking. The whole window is the target
+        // rather than the display, because OffOverlay covers the display exactly when the VM is
+        // off, which is a perfectly good time to insert an image.
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragEnterEvent, OnDragOverConsole);
+        AddHandler(DragDrop.DragOverEvent, OnDragOverConsole);
+        AddHandler(DragDrop.DragLeaveEvent, OnDragLeaveConsole);
+        AddHandler(DragDrop.DropEvent, OnDropConsole);
+
         Opened += async (_, _) =>
         {
             Display.Focus();
@@ -195,6 +213,9 @@ public partial class ConsoleWindow : Window
 
         UsbMenu.Click += async (_, _) => await OpenUsbPickerAsync();
 
+        // Cancels every transfer at once; the bar comes down through the resulting failed events.
+        CancelXferButton.Click += (_, _) => _session?.CancelFileTransfers();
+
         ShowHostCursorItem.Click += (_, _) =>
         {
             bool host = ShowHostCursorItem.IsChecked;
@@ -245,6 +266,7 @@ public partial class ConsoleWindow : Window
         {
             StatusText.Text = "VM is powered off.";
             ShowOffOverlay(true);
+            _ = DetectVmDevicesAsync(); // an image can still be dropped onto a stopped VM
         }
         else
         {
@@ -285,6 +307,10 @@ public partial class ConsoleWindow : Window
             _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
             _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
             _session.AgentStateChanged += OnAgentStateChanged;
+            _session.FileStarted += OnFileStarted;
+            _session.FileProgress += OnFileProgress;
+            _session.FileCompleted += OnFileCompleted;
+            _session.FileFailed += OnFileFailed;
             _session.AudioMuted = MuteItem.IsChecked; // apply the remembered mute pref before audio starts
 
             Display.Attach(_session);
@@ -355,6 +381,7 @@ public partial class ConsoleWindow : Window
         _hasSoundDevice = false;
         _guestResizeTimer.Stop();
         _requestedGuestSize = null;
+        ResetTransferUi();   // every way a session ends comes through here
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
 
@@ -391,6 +418,7 @@ public partial class ConsoleWindow : Window
             CleanupConnection();
             StatusText.Text = "VM is powered off.";
             ShowOffOverlay(true);
+            _ = DetectVmDevicesAsync();   // after CleanupConnection, which clears the drive targets
         }
         else if (vm?.State == "shut off" && !_connected && !_connecting)
         {
@@ -399,6 +427,7 @@ public partial class ConsoleWindow : Window
             // flapped. Make sure the overlay (and its Start button) is up.
             StatusText.Text = "VM is powered off.";
             ShowOffOverlay(true);
+            _ = DetectVmDevicesAsync();
         }
 
         UpdateToolbarState();
@@ -511,11 +540,10 @@ public partial class ConsoleWindow : Window
     private async Task InsertMediaFromServerAsync(bool cdrom)
     {
         if (Target(cdrom) is not { } t) return;
-        var dlg = new RemoteFileBrowserDialog(_virsh, "/var/lib/libvirt/images",
-            cdrom ? "ISO images (*.iso)|*.iso|All files (*.*)|*.*"
-                  : "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*",
-            false, cdrom ? "Select ISO on the server" : "Select floppy on the server");
-        if (await dlg.ShowDialog<bool?>(this) is not true || dlg.SelectedPath is not { } path) return;
+        var picked = await MediaLocations.BrowseServerAsync(this, _virsh,
+            cdrom ? "Select ISO on the server" : "Select floppy on the server",
+            cdrom ? MediaLocations.IsoFilter : MediaLocations.FloppyFilter);
+        if (picked is not { } path) return;
 
         await RunMediaActionAsync(cdrom ? "Insert media" : "Insert floppy",
             () => _virsh.ChangeMedia(VmName, t, path, live: true),
@@ -525,23 +553,59 @@ public partial class ConsoleWindow : Window
     private async Task InsertMediaFromLocalAsync(bool cdrom)
     {
         if (Target(cdrom) is not { } t) return;
-        var local = await FileDialogs.OpenFileAsync(this,
+        var local = await MediaLocations.OpenLocalAsync(this,
             cdrom ? "Select an ISO on this PC" : "Select a floppy image on this PC",
-            cdrom ? "ISO images (*.iso)|*.iso|All files (*.*)|*.*"
-                  : "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*");
+            cdrom ? MediaLocations.IsoFilter : MediaLocations.FloppyFilter);
         if (local == null) return;
 
-        string bus = _cdromBus ?? "sata";
-        await RunMediaActionAsync(cdrom ? "Insert (streamed)" : "Insert floppy (streamed)", () =>
+        await InsertLocalMediaAsync(cdrom, local);
+    }
+
+    /// <summary>
+    /// Streams an image on this PC into the VM's CD-ROM or floppy drive over the SSH tunnel. Shared
+    /// by the toolbar's "This PC…" entries and by dropping an image on the console.
+    /// </summary>
+    private async Task InsertLocalMediaAsync(bool cdrom, string localPath)
+    {
+        if (Target(cdrom) is not { } t) return;
+        // One media action at a time: two quick drops would otherwise race two NbdServers onto the
+        // same drive, and the loser would sit in _mediaServers holding a forward until close.
+        if (_mediaBusy) return;
+        _mediaBusy = true;
+        try
         {
-            var server = new NbdServer();
-            // A floppy is exported read-write so guest writes persist back to the local file;
-            // an ISO is read-only.
-            server.Start(local, _ssh.Client, writable: !cdrom);
-            lock (_mediaServers) _mediaServers.Add(server);
-            if (cdrom) _virsh.UpdateCdromNetwork(VmName, t, bus, server.RemoteUrl, live: true);
-            else _virsh.UpdateFloppyNetwork(VmName, t, server.RemoteUrl, live: true);
-        });
+            string bus = _cdromBus ?? "sata";
+            NbdServer? server = null;
+
+            // Started once, even if the live attempt falls back to the saved config below.
+            void Apply(bool live)
+            {
+                if (server == null)
+                {
+                    // A floppy is exported read-write so guest writes persist back to the local
+                    // file; an ISO is read-only.
+                    server = new NbdServer();
+                    server.Start(localPath, _ssh.Client, writable: !cdrom);
+                    lock (_mediaServers) _mediaServers.Add(server);
+                }
+                if (cdrom) _virsh.UpdateCdromNetwork(VmName, t, bus, server.RemoteUrl, live);
+                else _virsh.UpdateFloppyNetwork(VmName, t, server.RemoteUrl, live);
+            }
+
+            // A shut-off VM has nothing to update live, so write the saved config straight away
+            // rather than failing first and then offering it.
+            if (_connected)
+                await RunMediaActionAsync(cdrom ? "Insert (streamed)" : "Insert floppy (streamed)",
+                    () => Apply(true), () => Apply(false));
+            else
+                await RunMediaActionAsync(cdrom ? "Insert (streamed, restart to apply)"
+                                                : "Insert floppy (streamed, restart to apply)",
+                    () => Apply(false));
+        }
+        finally
+        {
+            _mediaBusy = false;
+        }
     }
 
     private async Task EjectAsync(bool cdrom)
@@ -622,6 +686,182 @@ public partial class ConsoleWindow : Window
             await MessageDialog.Info(this, "Media", $"{label} failed:\n{ex2.Message}");
             if (!_closing) StatusText.Text = "Ready";
         }
+    }
+
+    // ---- File drag and drop ---------------------------------------------
+
+    private enum DropAction
+    {
+        None,
+        SendToGuest,      // hand the files to the guest agent
+        AskMountOrSend,   // a disc image on a VM that has the matching drive
+    }
+
+    private bool AgentReady => _session is { AgentConnected: true };
+
+    /// <summary>
+    /// What a drop of these files would do. A single ISO or floppy image on a VM that has the
+    /// matching drive always asks, agent or no agent: the same gesture must not mean two different
+    /// things depending on state the user cannot see, and nothing gets mounted unconfirmed. Where
+    /// there is no drive to insert into, the only remaining meaning is a file transfer, which needs
+    /// the guest agent.
+    /// </summary>
+    private DropAction DecideDrop(IReadOnlyList<string> files, out bool cdrom)
+    {
+        cdrom = true;
+        if (_closing || files.Count == 0) return DropAction.None;
+
+        // Mounting is inherently single-image, so a multi-file drop is never ambiguous.
+        if (files.Count == 1 && DropFiles.IsRemovableMedia(files[0]))
+        {
+            bool floppy = DropFiles.IsFloppyImage(files[0]);
+            if (Target(cdrom: !floppy) != null)
+            {
+                cdrom = !floppy;
+                return DropAction.AskMountOrSend;
+            }
+        }
+
+        return AgentReady ? DropAction.SendToGuest : DropAction.None;
+    }
+
+    private void OnDragOverConsole(object? sender, DragEventArgs e)
+    {
+        var files = DropFiles.LocalFiles(e);
+        var action = DecideDrop(files, out bool cdrom);
+        e.DragEffects = action == DropAction.None ? DragDropEffects.None : DragDropEffects.Copy;
+        e.Handled = true;
+
+        SetDragActive(action != DropAction.None);
+        DropHintText.Text = action switch
+        {
+            DropAction.SendToGuest when files.Count == 1 => $"Send \"{Path.GetFileName(files[0])}\" to the guest",
+            DropAction.SendToGuest => $"Send {files.Count} files to the guest",
+            DropAction.AskMountOrSend => cdrom ? "Insert as CD/DVD, or send to the guest"
+                                               : "Insert as floppy, or send to the guest",
+            _ => "",
+        };
+    }
+
+    private void OnDragLeaveConsole(object? sender, DragEventArgs e) => SetDragActive(false);
+
+    private async void OnDropConsole(object? sender, DragEventArgs e)
+    {
+        SetDragActive(false);
+
+        var files = DropFiles.LocalFiles(e);
+        var action = DecideDrop(files, out bool cdrom);
+        if (action == DropAction.None)
+        {
+            // A drag that carried files but nothing this app can open: a portal handle, a remote
+            // URI, or only directories. Say so instead of looking broken.
+            if (files.Count == 0 && e.DataTransfer?.TryGetFiles() is { Length: > 0 } && !_closing)
+                StatusText.Text = "Only local files can be sent to the guest.";
+            return;
+        }
+        e.Handled = true;
+
+        if (action == DropAction.SendToGuest) { SendFilesToGuest(files); return; }
+
+        string insert = cdrom ? "Insert as CD/DVD" : "Insert as floppy";
+        var choice = await MessageDialog.Choose(this, "Dropped image",
+            $"What should VirtDeck do with \"{Path.GetFileName(files[0])}\"?",
+            primary: insert, alternative: "Send to the guest",
+            alternativeDisabledReason: AgentReady
+                ? null
+                : "The guest agent is not reachable, so files cannot be sent into this guest.");
+
+        if (choice == MessageDialog.Choice.Primary) await InsertLocalMediaAsync(cdrom, files[0]);
+        else if (choice == MessageDialog.Choice.Alternative) SendFilesToGuest(files);
+    }
+
+    /// <summary>
+    /// Client to guest over the agent's file-transfer channel; the guest agent decides where the
+    /// file lands (its download or desktop directory). One call per file, each with its own
+    /// transfer; progress is reported through the session's file events.
+    /// </summary>
+    private void SendFilesToGuest(IReadOnlyList<string> files)
+    {
+        if (_session is not { AgentConnected: true } session) return;
+        foreach (var path in files) session.SendFile(path);
+    }
+
+    // ---- File transfer progress -----------------------------------------
+    //
+    // The counter is driven by events only, never bumped when SendFile is called: that call returns
+    // silently for a file that no longer exists or a guest whose agent just went away, and an
+    // optimistic increment would leave the bar up forever. The events arrive on the transfer
+    // threads, hence the Dispatcher hops.
+
+    private void OnFileStarted(string name) => Dispatcher.UIThread.Post(() =>
+    {
+        if (_closing) return;
+        _activeXfers++;
+        _xferName = name;
+        _lastXferPct = -1;
+        XferProgress.Value = 0;
+        XferText.Text = XferLabel();
+        XferPanel.IsVisible = true;
+        StatusText.Text = $"Sending {name}…";
+    });
+
+    private void OnFileProgress(string name, long sent, long total)
+    {
+        int pct = total > 0 ? (int)(sent * 100 / total) : 0;
+        // One repaint per whole percent. Progress fires per 64 KiB chunk, and every update would
+        // otherwise land on the UI thread that also drives the framebuffer pump.
+        if (pct == _lastXferPct) return;
+        _lastXferPct = pct;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_closing || _activeXfers == 0) return;
+            XferProgress.Value = Math.Clamp(pct, 0, 100);
+            StatusText.Text = $"Sending {name}… {pct}%";
+        });
+    }
+
+    private void OnFileCompleted(string name) => Dispatcher.UIThread.Post(() => EndTransfer($"{name} sent"));
+
+    private void OnFileFailed(string name, string error) =>
+        Dispatcher.UIThread.Post(() => EndTransfer($"{name}: {error}"));
+
+    private void EndTransfer(string status)
+    {
+        if (_closing) return;
+        StatusText.Text = status;
+        if (_activeXfers > 0) _activeXfers--;
+        if (_activeXfers == 0) ResetTransferUi();
+        else XferText.Text = XferLabel();
+    }
+
+    private string XferLabel() =>
+        _activeXfers > 1 ? $"{_xferName} (+{_activeXfers - 1})" : _xferName ?? "";
+
+    /// <summary>
+    /// Puts the transfer strip away. Called whenever the last transfer ends, and on every path that
+    /// kills the session or the agent: a guest that vanishes mid-transfer sends no final status, so
+    /// nothing else would ever take the bar down.
+    /// </summary>
+    private void ResetTransferUi()
+    {
+        _activeXfers = 0;
+        _lastXferPct = -1;
+        _xferName = null;
+        XferPanel.IsVisible = false;
+        XferProgress.Value = 0;
+    }
+
+    /// <summary>
+    /// Shows or hides the drop hint, and keeps the keyboard grab off while a drag is over the
+    /// console: X reports keys during a grab only to the grabbing client, so holding it would eat
+    /// the drag source's Esc-to-cancel.
+    /// </summary>
+    private void SetDragActive(bool active)
+    {
+        DropHint.IsVisible = active;
+        if (_dragActive == active) return;
+        _dragActive = active;
+        UpdateGrab();
     }
 
     // ---- USB redirection ------------------------------------------------
@@ -874,6 +1114,9 @@ public partial class ConsoleWindow : Window
     private void OnAgentStateChanged(bool connected) => Dispatcher.UIThread.Post(() =>
     {
         if (connected) ScheduleGuestResize();
+        // The agent can go (guest logout, vdagent restart) while the SPICE session lives on. Any
+        // in-flight transfer is then never acknowledged, so nothing would clear the bar.
+        else ResetTransferUi();
     });
 
     private void RequestGuestResize()
@@ -994,7 +1237,7 @@ public partial class ConsoleWindow : Window
     /// </summary>
     private void UpdateGrab()
     {
-        if (_windowActive && _connected && !_closing && Display.IsPointerOver)
+        if (_windowActive && _connected && !_closing && !_dragActive && Display.IsPointerOver)
         {
             if (!_grab.IsActive) _grab.Grab(this);
         }

@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 using VirtDeck.Avalonia.Services;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -81,6 +84,12 @@ public partial class VmEditWindow : Window
         MenuDiskEject.Click += (_, _) => EjectMedia();
         MenuDiskRemove.Click += async (_, _) => await RemoveDisksAsync();
         DiskMenu.Opening += (_, e) => { if (!PrepareDiskMenu()) e.Cancel = true; };
+
+        // An image dropped on a removable drive's row is staged as that drive's media.
+        DragDrop.SetAllowDrop(DiskList, true);
+        DiskList.AddHandler(DragDrop.DragEnterEvent, OnDiskDragOver);
+        DiskList.AddHandler(DragDrop.DragOverEvent, OnDiskDragOver);
+        DiskList.AddHandler(DragDrop.DropEvent, OnDiskDrop);
 
         AddNicButton.Click += async (_, _) => await AddNicAsync();
         RemoveNicButton.Click += (_, _) => RemoveNics();
@@ -353,10 +362,12 @@ public partial class VmEditWindow : Window
     {
         if (SelectedRemovable() is not { } d) { await Warn("Select a CD-ROM or floppy drive."); return; }
 
+        // The drive's current medium is a better starting point than the last directory used; the
+        // helper falls back to that only when the drive is empty.
         var initial = _mediaChanges.TryGetValue(d.Target, out var cur) ? (cur ?? "") : d.Source;
-        var dlg = new RemoteFileBrowserDialog(_virsh, initial, MediaFilter(d), false,
-            d.IsFloppy ? "Select floppy image" : "Select ISO image");
-        if (await dlg.ShowDialog<bool?>(this) is not true || dlg.SelectedPath is not { } iso) return;
+        var picked = await MediaLocations.BrowseServerAsync(this, _virsh,
+            d.IsFloppy ? "Select floppy image" : "Select ISO image", MediaFilter(d), initial);
+        if (picked is not { } iso) return;
 
         iso = iso.Trim();
         if (!PathRegex.IsMatch(iso)) { await Warn("Path contains invalid characters."); return; }
@@ -372,10 +383,16 @@ public partial class VmEditWindow : Window
     {
         if (SelectedRemovable() is not { } d) { await Warn("Select a CD-ROM or floppy drive."); return; }
 
-        var local = await FileDialogs.OpenFileAsync(this,
+        var local = await MediaLocations.OpenLocalAsync(this,
             d.IsFloppy ? "Select a floppy image on this PC" : "Select an ISO on this PC", MediaFilter(d));
         if (local == null) return;
 
+        await StageLocalMediaAsync(d, local);
+    }
+
+    /// <summary>Stages an image on this PC as <paramref name="d"/>'s media, streamed over SSH.</summary>
+    private async Task StageLocalMediaAsync(DiskInfo d, string local)
+    {
         string bus = string.IsNullOrEmpty(d.Bus) ? (d.IsFloppy ? "fdc" : "sata") : d.Bus;
 
         NbdServer server;
@@ -411,15 +428,52 @@ public partial class VmEditWindow : Window
         RebuildDiskList();
     }
 
-    private static string MediaFilter(DiskInfo d) => d.IsFloppy
-        ? "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*"
-        : "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
+    private static string MediaFilter(DiskInfo d) =>
+        d.IsFloppy ? MediaLocations.FloppyFilter : MediaLocations.IsoFilter;
 
     /// <summary>Disposes and forgets any pending local-media stream for a target.</summary>
     private void ClearStream(string target)
     {
         if (_mediaStreams.Remove(target, out var sm))
             try { sm.Server.Dispose(); } catch { /* ignore */ }
+    }
+
+    // ---- Media dropped onto a disk row ---------------------------------
+
+    /// <summary>
+    /// The removable drive under the pointer that could take this drop, or null. The row decides,
+    /// not the selection: dropping onto a row the user can see is unambiguous in a way that
+    /// "whatever happens to be selected" is not. The extension must match the drive kind, the same
+    /// pairing <see cref="MediaFilter"/> offers in the picker.
+    /// </summary>
+    private DiskInfo? MediaDropTarget(DragEventArgs e)
+    {
+        if (_readOnly) return null;
+
+        var files = DropFiles.LocalFiles(e);
+        if (files.Count != 1 || !DropFiles.IsRemovableMedia(files[0])) return null;
+
+        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is not DiskEditRow row)
+            return null;
+        if (row.Existing is not { IsRemovableMedia: true } d) return null;
+
+        return DropFiles.IsFloppyImage(files[0]) == d.IsFloppy ? d : null;
+    }
+
+    private void OnDiskDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = MediaDropTarget(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnDiskDrop(object? sender, DragEventArgs e)
+    {
+        if (MediaDropTarget(e) is not { } d) return;
+        e.Handled = true;
+
+        // Select the row that changed, so the list highlight matches what was just staged.
+        DiskList.SelectedItem = _diskRows.FirstOrDefault(r => r.Existing?.Target == d.Target);
+        await StageLocalMediaAsync(d, DropFiles.LocalFiles(e)[0]);
     }
 
     private DiskInfo? SelectedRemovable()

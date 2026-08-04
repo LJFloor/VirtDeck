@@ -89,11 +89,26 @@
     </Border>
 
     <Border DockPanel.Dock="Bottom" Padding="10,4"
+            MinHeight="{StaticResource JbStatusBarMinHeight}"
             Background="{DynamicResource JbToolBarBackground}"
             BorderBrush="{DynamicResource JbToolBarBorder}" BorderThickness="0,1,0,0">
       <DockPanel>
-        <TextBlock Name="GrabText" DockPanel.Dock="Right" Opacity="0.7" />
-        <TextBlock Name="StatusText" />
+        <!-- File transfers into the guest: one shared bar for a multi-file drop, hidden whenever
+             nothing is in flight. Declared first, so it docks to the far right and the grab label
+             below stays put instead of sliding sideways when a transfer starts. -->
+        <StackPanel Name="XferPanel" DockPanel.Dock="Right" Orientation="Horizontal"
+                    Spacing="8" IsVisible="False" VerticalAlignment="Center">
+          <TextBlock Name="XferText" Opacity="0.7" VerticalAlignment="Center" />
+          <ProgressBar Name="XferProgress" Width="160" Height="6" Minimum="0" Maximum="100"
+                       VerticalAlignment="Center" />
+          <Button Name="CancelXferButton" Content="Cancel" Theme="{StaticResource JbStatusBarButton}"
+                  ToolTip.Tip="Cancel the file transfers" />
+        </StackPanel>
+
+        <TextBlock Name="GrabText" DockPanel.Dock="Right" Opacity="0.7" VerticalAlignment="Center"
+                   Margin="8,0,0,0" />
+
+        <TextBlock Name="StatusText" VerticalAlignment="Center" />
       </DockPanel>
     </Border>
 
@@ -107,6 +122,21 @@
                      Foreground="#FFDBDEE1" FontSize="18" HorizontalAlignment="Center" />
           <Button Name="OverlayStartButton" Content="Start VM" HorizontalAlignment="Center" Classes="accent" />
         </StackPanel>
+      </Border>
+
+      <!--
+        Drag feedback. Last child so it draws over both the framebuffer and the off overlay, and
+        never hit-testable: a hit-testable hint would become the element under the pointer and
+        change the drag's source mid-drag.
+      -->
+      <Border Name="DropHint" IsVisible="False" IsHitTestVisible="False"
+              Background="#66000000" BorderThickness="2"
+              BorderBrush="{DynamicResource JbTabSelectedUnderline}">
+        <Border VerticalAlignment="Center" HorizontalAlignment="Center" CornerRadius="3" Padding="14,8"
+                Background="{DynamicResource JbToolBarBackground}"
+                BorderBrush="{DynamicResource JbToolBarBorder}" BorderThickness="1">
+          <TextBlock Name="DropHintText" Foreground="#FFDBDEE1" />
+        </Border>
       </Border>
     </Panel>
 

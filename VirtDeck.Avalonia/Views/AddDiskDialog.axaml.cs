@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Avalonia.Controls;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Models;
 using VirtDeck.Services;
 
@@ -85,15 +86,15 @@ public partial class AddDiskDialog : Window
         bool createZvol = zvol && ZvolBox.SelectedItem is string; // the sentinel item
 
         PathLabel.IsVisible = PathPicker.IsVisible = qcow2 || cdrom || floppy;
-        PathLabel.Text = cdrom ? "ISO path:" : floppy ? "VFD path:" : "Path:";
+        PathLabel.Text = cdrom ? "ISO path:" : floppy ? "Image path:" : "Path:";
         if (cdrom)
         {
-            PathPicker.Filter = "ISO images (*.iso)|*.iso|All files (*.*)|*.*";
+            PathPicker.Filter = MediaLocations.IsoFilter;
             PathPicker.DialogTitle = "Select ISO image";
         }
         else if (floppy)
         {
-            PathPicker.Filter = "Floppy images (*.vfd)|*.vfd|All files (*.*)|*.*";
+            PathPicker.Filter = MediaLocations.FloppyFilter;
             PathPicker.DialogTitle = "Select floppy image";
         }
         else

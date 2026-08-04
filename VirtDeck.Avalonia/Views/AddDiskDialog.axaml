@@ -21,7 +21,7 @@
         <RadioButton Name="Qcow2Radio" GroupName="Kind" Content="Qcow2" IsChecked="True" />
         <RadioButton Name="ZvolRadio" GroupName="Kind" Content="Zvol" />
         <RadioButton Name="CdromRadio" GroupName="Kind" Content="CD-ROM (ISO)" />
-        <RadioButton Name="FloppyRadio" GroupName="Kind" Content="Floppy (VFD)" />
+        <RadioButton Name="FloppyRadio" GroupName="Kind" Content="Floppy" />
       </StackPanel>
 
       <StackPanel Grid.Column="1" Spacing="4">

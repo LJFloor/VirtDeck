@@ -36,50 +36,48 @@
 
       <!-- Page 1: General -->
       <ScrollViewer Name="GeneralPage">
-        <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+        <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
               RowSpacing="10" ColumnSpacing="6">
 
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" />
           <TextBox   Grid.Row="0" Grid.Column="1" Name="NameBox" Width="320" HorizontalAlignment="Left" />
 
-          <TextBlock Grid.Row="1" Grid.Column="0" Text="vCPUs:" VerticalAlignment="Center" />
-          <NumericUpDown Grid.Row="1" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
+          <!-- The media comes before the OS type on purpose: identifying it fills that dropdown in, so
+               reading the page top down is also the order the fields depend on each other. -->
+          <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="Install media (optional):"
+                     Margin="0,10,0,0" />
+
+          <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="24">
+            <RadioButton Name="IsoStreamRadio" GroupName="IsoMode" Content="Stream from this PC" IsChecked="True" />
+            <RadioButton Name="IsoServerRadio" GroupName="IsoMode" Content="File on server" />
+          </StackPanel>
+
+          <!-- Both inputs share the same row; only one is visible at a time. -->
+          <c:RemotePathBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Name="IsoPicker" Margin="0,0,0,10" />
+          <DockPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Name="LocalIsoRow" Margin="0,0,0,10">
+            <Button DockPanel.Dock="Right" Name="BrowseLocalButton" Content="Browse…" Margin="6,0,0,0" />
+            <TextBox Name="LocalIsoBox" IsReadOnly="True" />
+          </DockPanel>
+
+          <TextBlock Grid.Row="4" Grid.Column="0" Text="vCPUs:" VerticalAlignment="Center" />
+          <NumericUpDown Grid.Row="4" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
                          Minimum="1" Maximum="256" Value="2" Increment="1" FormatString="0" />
 
-          <TextBlock Grid.Row="2" Grid.Column="0" Text="Memory:" VerticalAlignment="Center" />
-          <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <TextBlock Grid.Row="5" Grid.Column="0" Text="Memory:" VerticalAlignment="Center" />
+          <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="6">
             <NumericUpDown Name="MemBox" Width="150" Minimum="64" Maximum="1048576"
                            Value="4096" Increment="256" FormatString="0" />
             <TextBlock Text="MiB" VerticalAlignment="Center" />
           </StackPanel>
 
-          <TextBlock Grid.Row="3" Grid.Column="0" Text="OS type:" VerticalAlignment="Center" />
-          <ComboBox  Grid.Row="3" Grid.Column="1" Name="OsBox" Width="320" HorizontalAlignment="Left" />
+          <TextBlock Grid.Row="6" Grid.Column="0" Text="OS type:" VerticalAlignment="Center" />
+          <ComboBox  Grid.Row="6" Grid.Column="1" Name="OsBox" Width="320" HorizontalAlignment="Left" />
 
-          <TextBlock Grid.Row="4" Grid.Column="0" Text="Firmware:" VerticalAlignment="Center" />
-          <StackPanel Grid.Row="4" Grid.Column="1" Name="FirmwareRow" Orientation="Horizontal" Spacing="24">
+          <TextBlock Grid.Row="7" Grid.Column="0" Text="Firmware:" VerticalAlignment="Center" />
+          <StackPanel Grid.Row="7" Grid.Column="1" Name="FirmwareRow" Orientation="Horizontal" Spacing="24">
             <RadioButton Name="BiosRadio" GroupName="Firmware" Content="BIOS" IsChecked="True" />
             <RadioButton Name="UefiRadio" GroupName="Firmware" Content="UEFI" />
           </StackPanel>
-
-          <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Text="Install media (optional):"
-                     Margin="0,10,0,0" />
-
-          <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="24">
-            <RadioButton Name="IsoServerRadio" GroupName="IsoMode" Content="File on server" IsChecked="True" />
-            <RadioButton Name="IsoStreamRadio" GroupName="IsoMode" Content="Stream from this PC" />
-          </StackPanel>
-
-          <!-- Both inputs share the same row; only one is visible at a time. -->
-          <c:RemotePathBox Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Name="IsoPicker" />
-          <DockPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Name="LocalIsoRow">
-            <Button DockPanel.Dock="Right" Name="BrowseLocalButton" Content="Browse…" Margin="6,0,0,0" />
-            <TextBox Name="LocalIsoBox" IsReadOnly="True" />
-          </DockPanel>
-
-          <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Opacity="0.6" TextWrapping="Wrap"
-                     Margin="0,6,0,0"
-                     Text="Leave the media empty to set it up later. An .iso attaches as a CD-ROM and a .vfd as a floppy drive on the Storage page." />
         </Grid>
       </ScrollViewer>
 
@@ -149,6 +147,32 @@
               </ListBox.ItemTemplate>
             </ListBox>
           </DockPanel>
+        </Border>
+      </DockPanel>
+
+      <!-- Page 4: Summary -->
+      <DockPanel Name="SummaryPage" IsVisible="False">
+        <CheckBox DockPanel.Dock="Bottom" Name="StartAfterCreateCheck" Margin="0,12,0,0"
+                  Content="Start the VM after creation" IsChecked="True" />
+        <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+          <ScrollViewer Padding="12,10">
+            <ItemsControl Name="SummaryList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:SummaryRow">
+                  <Grid ColumnDefinitions="140,*" Margin="{Binding RowMargin}">
+                    <!-- A header spans both columns; the label/value pair takes one each. Only one
+                         of the two shapes is visible per row. -->
+                    <TextBlock Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Value}"
+                               FontWeight="SemiBold" IsVisible="{Binding IsHeader}" />
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Opacity="0.75"
+                               IsVisible="{Binding !IsHeader}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                               IsVisible="{Binding !IsHeader}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
         </Border>
       </DockPanel>
 

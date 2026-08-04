@@ -67,6 +67,9 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Input/PhysicalKeyMap`: Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent, more correct than a VK table, which reads through the host layout. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js, NOT `0xE0XX`. The key-up high bit is applied in `InputsChannel.SendKey`.
 - `Views/`: `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
 - `Services/FileDialogs`: the one place the WinForms filter string (`"ISO images (*.iso)|*.iso"`) is translated, into `IStorageProvider` picker types (XDG portal on Linux). Only local paths are accepted; everything downstream needs a real `FileStream`.
+- `Services/DropFiles`: the one place the drag-and-drop dialect is translated, the same way `FileDialogs` handles the filter string. Avalonia 12 replaced `IDataObject`/`DataFormats.FileDrop` with `IDataTransfer`/`DataFormat.File`, so Avalonia 11 snippets do not apply; `LocalFiles` filters a drop down to real local files (directories and portal handles are dropped) through the same `FileDialogs.LocalPathOf` the pickers use. **X11 drag-and-drop needs Avalonia 12.1+**: 12.0.x has no XDND in its X11 backend at all and raises no drop events on Linux, which is why the csproj pins 12.1 as the floor.
+  Drop targets: the console window (below), the Create-VM wizard's General page (an ISO or floppy image fills the install media and switches to "stream from this PC"), a removable-drive row in `VmEditWindow` (staged as that drive's media; the extension must match the drive kind), and `LoginWindow`'s key panel (adds and selects a private key). Not `RemotePathBox`: its path is on the *server*, so a local path there would be meaningless.
+- Console drops: any file is sent into the guest with `SpiceSession.SendFile` (the vdagent file-transfer channel; the guest agent picks where it lands), and the status bar shows one shared progress bar and Cancel for the whole drop, refcounted in `_activeXfers` and driven **only** by the session's file events, because `SendFile` returns silently for a missing file or a departed agent. A single ISO or floppy image dropped on a VM that has the matching drive **always asks** (`MessageDialog.Choose`) whether to insert it or send it; with no guest agent the send button is disabled with a reason rather than the drop silently mounting. Nothing is ever mounted unconfirmed, and a shut-off VM is a valid drop target (the drive targets are detected on the powered-off paths too, and the media change goes straight to the saved config).
 - `Controls/RemotePathBox`: textbox + "…" opening `RemoteFileBrowserDialog`. That browser badges files by extension instead of asking the OS for an icon (`ShellIcons`/`SHGetFileInfo` is deleted): these are the *server's* files, so a client-side association would be misleading anyway.
 - `Input/AsciiScancodes`: char → AT set-1 scancode + shift, for "Type clipboard". Replaces `VkKeyScan`, which read the *host* layout; scancodes are positional, so the guest's layout decides; a fixed US table is exactly as correct and equally approximate elsewhere.
 - Clipboard: Avalonia has no clipboard-change event, so `ConsoleWindow` polls the host text every 500 ms **while focused** and announces a SPICE grab only on change; that same comparison breaks the guest→host→guest loop. Screenshot saves a PNG rather than going to the clipboard (image clipboard transfer is unreliable through Avalonia on X11).
@@ -82,6 +85,73 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 | `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VmListWindow` |
 
 All checks default to `true`/available on SSH error to avoid false negatives, **except `VirtSparseAvailable`** which defaults to `false` (safe: prevents a silent no-op export).
+
+### Install media identification and device defaults
+
+The Create-VM wizard identifies the install media and picks the guest's disk bus and NIC model from it.
+
+- **Reading the ISO:** `Services/IsoIdentifier` reads the ISO 9660 volume descriptors, which ECMA-119
+  fixes at **sector 16 (byte offset 32768)**, so identifying an image is a 16 KiB read at a known offset
+  and never a download. Local files seek; server files get one
+  `dd if=… bs=2048 skip=16 count=8 | base64` through `RunSudoCommand` (sudo + base64'd path, the same
+  idiom as the rest of the host file access, so root-owned images under `/var/lib/libvirt/images` are
+  readable). It scans a few descriptors rather than assuming the Primary is first, because an El Torito
+  boot record can precede it. UDF-only images and floppy images have no PVD and answer **null**, which
+  callers must treat as unknown rather than as any particular OS.
+- **Matching:** `Services/GuestOsProfile.Match` runs the hand-curated `mediaPatterns` table from
+  `Data/osinfo-labels.json` against the volume id, first match wins (the table is ordered specific-first).
+  Same data file, same idea as libosinfo: osinfo-db's media entries are largely volume-id regexes too.
+- **Windows media does not carry its version, and the files that would say are unreachable.** Windows 10
+  and 11 both ship `CCCOMA_X64FRE_EN-US_DV9` and friends. `sources/install.wim` holds the build number in
+  its XML, but a retail Windows ISO exposes **only `README.TXT`** through ISO 9660 and puts the real tree
+  on the UDF side (verified against a 25H2 image: the ISO 9660 root has three entries), so reading it
+  would mean implementing UDF. Modern Windows therefore preselects **`win10`** and marks the pattern
+  `osAssumed: true`, which is what lets the **file name** break the tie: Microsoft's download tool names
+  its images `Win11_24H2_English_x64.iso`, so `fileNamePatterns` refines `win10` to `win11` (or the
+  Server releases) when the name says so. That refinement **only ever refines**: the volume id must have
+  identified the family first, and a file-name pattern is ignored unless its family agrees, because a
+  name is user-controlled and survives renaming while the descriptor is written at mastering time. An
+  exact volume-id match is never overridden. Only the legacy releases, whose volume ids *are* version-specific (`WXPVOL_EN`,
+  `WIN98`, …), preselect an exact OS. Patterns carry an `os` short id where the regex pins one (Ubuntu
+  and Debian capture their version into `ubuntu$1` / `debian$1`); the rest are family-only, which still
+  gets the devices right because the family is all the device choice needs.
+- **The policy** is `Services/GuestDevices`: Linux gets `virtio` (paravirtual, datapath stays in the host
+  kernel), BIOS-only guests get `ide` + `rtl8139`, and **everything else including unknown gets
+  `sata` + `e1000e`**, which every installer has drivers for. Unknown deliberately lands on the emulated
+  devices: a VM that installs slowly beats one that cannot see its disk or NIC at all. `OsFamily.Unknown`
+  is a real answer, not a missing one.
+- **The name box folds illegal characters as you type:** a domain name is `[a-zA-Z0-9_.-]+`, so
+  `CreateVmWizard.SanitizeName` replaces anything else with `_` on every `TextChanged` (space becomes
+  `_`, so "Windows 11" types itself into "Windows_11"). One character for one, so the caret keeps its
+  place; it is restored explicitly because assigning `Text` would otherwise jump it to the end mid-word,
+  and the assignment is reentrancy-guarded because it raises `TextChanged` again. `ValidateGeneralAsync`
+  keeps the regex check as the backstop that owns the rule, but only the empty name can now reach it.
+- **Media pickers remember where you were:** `Services/MediaLocations` is the single entry point for
+  every ISO/floppy picker (wizard, editor, console) and the one place the directory is stored.
+  `AppSettings.LastLocalMediaDir` and `LastServerMediaDir` are kept **separate**, because a path on this
+  PC means nothing to the host browser and the other way round; one shared value would send every other
+  picker somewhere useless. Only a confirmed pick is remembered, never a half-typed path: that is why
+  `RemotePathBox` raises `Browsed` (the browser returned a file) as well as `PathChanged` (per keystroke),
+  and why it takes a `StartDirectory` used only while the box is empty. A caller with something better
+  than history (the drive's current medium in `VmEditWindow`) passes it as the initial path and the
+  remembered directory is the fallback; the server fallback is `/var/lib/libvirt/images`.
+- **Page order follows the dependency:** the General page puts the install media directly under the name,
+  *above* vCPUs/memory/OS type/firmware, because identifying the media fills the OS type in, so reading
+  the page top down is the order the fields feed each other. The mode defaults to **stream from this PC**
+  (the local file is the common case; the server picker is the second option), and both media inputs use a
+  full "Browse…" button: `RemotePathBox.BrowseText` swaps its square "…" for a label and hands width and
+  padding back to the Button theme, so the two rows match. Other `RemotePathBox` users keep the "…".
+- **The last page is a summary**, built fresh on every entry (`BuildSummary`) by reading the pages
+  themselves, not the fields `FinishAsync` captures, so going Back and changing something is reflected.
+  Its **"Start the VM after creation"** checkbox is on by default and is the only thing that decides
+  whether Finish calls `StartVmAsync`; `VmStarted` reports what happened, and `VmListWindow` opens the
+  console only when it is true, because a defined-but-shut-off VM has no console to connect to.
+- **The OS dropdown is the source of truth**, not the ISO: `CreateVmWizard.GuestProfile()` reads the
+  selection and only falls back to the detected family while it still says "generic". Detection
+  preselects a profile **only until the user picks one themselves** (`_osUserPicked`; the programmatic
+  writes are fenced with `_osSelectionIsOurs` so they do not count as a pick). The seeded NIC and boot
+  disk stay adjustable until the user edits those lists (`_nicsTouched` / `_disksTouched`), so changing
+  the OS afterwards still moves the defaults and an explicit choice is never undone.
 
 ### Export VM (`Views/ExportVmDialog.axaml.cs`)
 
@@ -124,21 +194,35 @@ native `auto_glz` for better bandwidth, not required for correctness.
 
 ## Removable media (ISO / floppy)
 
-Optical (`.iso`, `device='cdrom'`) and floppy (`.vfd`, `device='floppy'` on the `fdc` bus, target `fda`) media
+Optical (`.iso`, `device='cdrom'`) and floppy (`device='floppy'` on the `fdc` bus, target `fda`) media
 share one pipeline. Each can be a **file on the server** or **streamed from this PC**: the
 local file is served by `Services/NbdServer` (a native C# NBD fixed-newstyle server, file-agnostic, used for
-both `.iso` and `.vfd`) over an SSH reverse-forward, and QEMU pulls it over its built-in **NBD client** from a
+both kinds) over an SSH reverse-forward, and QEMU pulls it over its built-in **NBD client** from a
 `<disk type='network' protocol='nbd'>` element (`VirshService.BuildNetworkMediaXml`). NBD is always compiled
 into QEMU, so streaming needs **no host package** (the old curl driver / `qemu-block-extra` dependency and its
 `QemuCurlAvailable` gate are gone). ISO is exported read-only (`<readonly/>`); **floppy is exported read-write,
 so guest writes persist back to the local file**. Change/eject reuse `virsh change-media`/`--eject` (generic by
-target). The streaming surfaces are: the Create-VM wizard (a single **install-media** picker: `.iso` →
-CD-ROM, `.vfd` → floppy, auto-detected by extension in `BuildInstallMediaOp` and added to the boot order),
+target). The streaming surfaces are: the Create-VM wizard (a single **install-media** picker: ISO →
+CD-ROM, floppy image → floppy, classified by `Services/FloppyImage` in `BuildInstallMediaOpAsync` and added
+to the boot order),
 the editor's disk context menu (Change ISO/floppy ▸ server/local, Eject), and the console's **CD/DVD** and
 **Floppy** toolbar dropdowns. The console's **Floppy** button is hidden unless the VM has a floppy drive, and
 the editor's boot-order list includes **Floppy** (`<boot dev='fd'/>`) so a manually-added floppy is bootable.
 Caveat: the `fdc` controller is native on `i440fx` (the BIOS-only XP F6-driver-floppy case) but may be
 unavailable on `q35`/UEFI.
+
+**A floppy is identified by size, not by extension** (`VirtDeck.Core/Services/FloppyImage`). QEMU never reads
+the extension (libvirt attaches the image as `<driver type='raw'/>`), so `.vfd`, `.ima` and `.flp` are the same
+bytes under different conventions and all three name a floppy and nothing else. **`.img` cannot be read off the
+name**: it is equally the convention for raw hard-disk images and hybrid ISOs, yet FreeDOS and friends ship
+their install sets as `.img`, so neither accepting nor refusing the extension outright is right. The tie-break
+is the file size against the standard PC geometries (160K through 2.88M), which is how QEMU itself picks the
+geometry to emulate (`fd_formats` in `hw/block/fdc.c`), so the client agrees with the thing that has to accept
+the image. An `.img` of any other size stays **unclassified** rather than guessed at: it is not a valid drop
+onto a drive (on the console it is simply sent to the guest), and the "All files" filter is the deliberate
+escape hatch for an exotic geometry. Because settling an `.img` on the server costs a `stat` over SSH,
+`CreateVmWizard` resolves it in the background detect pass and caches the verdict per path; drops are always
+local files, so `DropFiles` can stat inline.
 
 ## USB redirection
 

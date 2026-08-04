@@ -10,16 +10,29 @@ namespace VirtDeck.Avalonia.Services;
 /// </summary>
 public static class FileDialogs
 {
-    /// <summary>Opens one local file; null if cancelled.</summary>
-    public static async Task<string?> OpenFileAsync(Window owner, string title, string filter)
+    /// <summary>
+    /// Opens one local file; null if cancelled. <paramref name="startDirectory"/> is a hint: a directory
+    /// that has since been deleted or moved resolves to null and the picker falls back to its own
+    /// default, which is why the lookup failing is not an error.
+    /// </summary>
+    public static async Task<string?> OpenFileAsync(Window owner, string title, string filter,
+                                                    string? startDirectory = null)
     {
         var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = title,
             AllowMultiple = false,
             FileTypeFilter = ParseFilter(filter),
+            SuggestedStartLocation = await FolderOrNull(owner, startDirectory),
         });
-        return PathOf(files.FirstOrDefault());
+        return LocalPathOf(files.FirstOrDefault());
+    }
+
+    private static async Task<IStorageFolder?> FolderOrNull(Window owner, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return await owner.StorageProvider.TryGetFolderFromPathAsync(path); }
+        catch { return null; }
     }
 
     /// <summary>Chooses a save location; null if cancelled.</summary>
@@ -34,14 +47,15 @@ public static class FileDialogs
             DefaultExtension = defaultExtension,
             FileTypeChoices = ParseFilter(filter),
         });
-        return PathOf(file);
+        return LocalPathOf(file);
     }
 
     /// <summary>
     /// Only local paths are usable; everything downstream (NBD streaming, tar writing) works on
     /// <see cref="FileStream"/>, not on portal handles. A non-file URI reads as "nothing picked".
+    /// Shared with <see cref="DropFiles"/>, so a dropped item is filtered by the same rule.
     /// </summary>
-    private static string? PathOf(IStorageItem? item)
+    internal static string? LocalPathOf(IStorageItem? item)
     {
         var path = item?.TryGetLocalPath();
         return string.IsNullOrEmpty(path) ? null : path;

@@ -448,7 +448,9 @@ public partial class VmListWindow : Window
         }
         _mediaServers.AddRange(wizard.StreamingServers); // keep host media streams alive for the session
         await RefreshAsync();
-        if (wizard.CreatedVmName is { } name)
+        // Console only for a VM that is actually running: the summary page's checkbox may have left
+        // it defined but shut off, and there is nothing to connect to then.
+        if (wizard.CreatedVmName is { } name && wizard.VmStarted)
             OpenConsoleFor(name); // create + start + console (tracked for focus-on-reopen)
     }
 

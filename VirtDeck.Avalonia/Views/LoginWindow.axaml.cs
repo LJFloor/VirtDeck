@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using Avalonia.Media;
 using VirtDeck.Avalonia.Services;
 using VirtDeck.Services;
@@ -40,6 +41,13 @@ public partial class LoginWindow : Window
         KeyCombo.SelectionChanged += async (_, _) => await ProbePassphraseAsync();
         BrowseKeyButton.Click += async (_, _) => await BrowseForKeyAsync();
         ConnectButton.Click += async (_, _) => await ConnectAsync();
+
+        // Drop a key file onto the key panel. The panel is hidden in password mode, so this can
+        // only fire when key auth is showing.
+        DragDrop.SetAllowDrop(KeyPanel, true);
+        KeyPanel.AddHandler(DragDrop.DragEnterEvent, OnKeyDragOver);
+        KeyPanel.AddHandler(DragDrop.DragOverEvent, OnKeyDragOver);
+        KeyPanel.AddHandler(DragDrop.DropEvent, OnKeyDrop);
 
         Opened += async (_, _) =>
         {
@@ -106,7 +114,17 @@ public partial class LoginWindow : Window
         // The XDG portal hides dotfiles by default (Ctrl+H shows them); the dropdown is the usual way in.
         var path = await FileDialogs.OpenFileAsync(this, "Select private key", "All files (*.*)|*.*");
         if (path == null) return;
+        SelectKeyFile(path);
+    }
 
+    /// <summary>
+    /// Adds a key file to the dropdown (if it isn't already there) and selects it. Selecting is
+    /// what triggers <see cref="ProbePassphraseAsync"/>, so an encrypted key still reveals the
+    /// passphrase field. Dropping a file here is the shortest way to a key outside <c>~/.ssh</c>,
+    /// or to one the portal hides because it starts with a dot.
+    /// </summary>
+    private void SelectKeyFile(string path)
+    {
         var keys = (KeyCombo.ItemsSource as IEnumerable<SshKeyCandidate>)?.ToList() ?? [];
         var existing = keys.FirstOrDefault(k => k.Path == path);
         if (existing == null)
@@ -116,6 +134,24 @@ public partial class LoginWindow : Window
             KeyCombo.ItemsSource = keys;
         }
         KeyCombo.SelectedItem = existing;
+    }
+
+    // Private keys have no extension to filter on, so any single file is accepted; an unusable one
+    // fails at connect with the real error, which beats guessing here.
+    private static bool IsKeyDrop(DragEventArgs e) => DropFiles.LocalFiles(e).Count == 1;
+
+    private void OnKeyDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = IsKeyDrop(e) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnKeyDrop(object? sender, DragEventArgs e)
+    {
+        var files = DropFiles.LocalFiles(e);
+        if (files.Count != 1) return;
+        SelectKeyFile(files[0]);
+        e.Handled = true;
     }
 
     /// <summary>Shows the passphrase field only for keys that are actually encrypted.</summary>

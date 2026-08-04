@@ -319,6 +319,13 @@
   <Thickness x:Key="ToolTipBorderThemePadding">6,3,6,4</Thickness>
   <x:Double x:Key="TreeViewItemMinHeight">24</x:Double>
 
+  <!-- A status bar keeps this height whether it holds text alone or a progress bar and a button, so
+       nothing below it reflows. In the console that is not cosmetic: a status row that grows shrinks
+       the SPICE display, which fires SizeChanged and asks the guest for a mode set. 24 is a 16px
+       row (the tallest thing a status bar carries, see JbStatusBarButton) inside the usual 4px
+       vertical padding. -->
+  <x:Double x:Key="JbStatusBarMinHeight">24</x:Double>
+
   <!-- The tick is white on the accent fill in both themes, so it is not a per-theme brush. -->
   <SolidColorBrush x:Key="JbCheckBoxGlyph" Color="#FFFFFFFF" />
 
@@ -447,6 +454,15 @@
     <Style Selector="^:disabled">
       <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
     </Style>
+  </ControlTheme>
+
+  <!--
+    The same flat cell, shrunk to fit a status bar: 16px so the row it sits in is exactly
+    JbStatusBarMinHeight and the bar does not grow when a transfer's Cancel appears.
+  -->
+  <ControlTheme x:Key="JbStatusBarButton" TargetType="Button" BasedOn="{StaticResource JbToolButton}">
+    <Setter Property="MinHeight" Value="16" />
+    <Setter Property="Padding" Value="8,0" />
   </ControlTheme>
 
   <!--

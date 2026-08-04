@@ -12,6 +12,68 @@
     "win2k3r2",
     "winxp"
   ],
+
+  "familyPrefixes": {
+    "windows": [ "win" ],
+    "other": [
+      "freebsd", "openbsd", "netbsd", "dragonflybsd", "macosx", "macos", "osx",
+      "solaris", "opensolaris", "openindiana", "haiku", "msdos", "freedos",
+      "netware", "openserver", "unixware", "os2"
+    ]
+  },
+
+  "mediaPatterns": [
+    { "match": "^WXP|^WIN51|^GRTMPVOL|^VRMPVOL|^XRMP", "family": "windows", "os": "winxp", "label": "Windows XP" },
+    { "match": "^W2K[^0-9]|^WIN2000", "family": "windows", "os": "win2k", "label": "Windows 2000" },
+    { "match": "^WIN98", "family": "windows", "os": "win98", "label": "Windows 98" },
+    { "match": "^WIN95", "family": "windows", "os": "win95", "label": "Windows 95" },
+    { "match": "^WINME", "family": "windows", "os": "winme", "label": "Windows ME" },
+    { "match": "^GRMCUL|^GSP1RMCUL", "family": "windows", "os": "win7", "label": "Windows 7" },
+    { "match": "_X64FREE?_|_X86FREE?_|_ARM64FRE_|^CCCOMA|^CPBA|^SW_DVD[0-9]", "family": "windows", "os": "win10", "osAssumed": true, "label": "Windows installer media" },
+
+    { "match": "^Ubuntu[ _-](\\d+\\.\\d+)", "family": "linux", "os": "ubuntu$1", "label": "Ubuntu $1" },
+    { "match": "^Debian[ _-](\\d+)", "family": "linux", "os": "debian$1", "label": "Debian $1" },
+    { "match": "^Ubuntu", "family": "linux", "label": "Ubuntu" },
+    { "match": "^Debian", "family": "linux", "label": "Debian" },
+    { "match": "^Fedora", "family": "linux", "label": "Fedora" },
+    { "match": "^CentOS", "family": "linux", "label": "CentOS" },
+    { "match": "^AlmaLinux", "family": "linux", "label": "AlmaLinux" },
+    { "match": "^Rocky", "family": "linux", "label": "Rocky Linux" },
+    { "match": "^RHEL|^Red[ _]?Hat", "family": "linux", "label": "Red Hat Enterprise Linux" },
+    { "match": "^openSUSE|^SLE[SD]?[ _-]", "family": "linux", "label": "openSUSE / SLE" },
+    { "match": "^ARCH_", "family": "linux", "label": "Arch Linux" },
+    { "match": "^LINUX[ _]?MINT", "family": "linux", "label": "Linux Mint" },
+    { "match": "^Alpine", "family": "linux", "label": "Alpine Linux" },
+    { "match": "^MANJARO", "family": "linux", "label": "Manjaro" },
+    { "match": "^POP[ _-]?OS", "family": "linux", "label": "Pop!_OS" },
+    { "match": "^KALI", "family": "linux", "label": "Kali Linux" },
+    { "match": "^ZORIN", "family": "linux", "label": "Zorin OS" },
+    { "match": "^ELEMENTARY", "family": "linux", "label": "elementary OS" },
+    { "match": "^ENDEAVOUR", "family": "linux", "label": "EndeavourOS" },
+    { "match": "^NIXOS", "family": "linux", "label": "NixOS" },
+    { "match": "^GENTOO", "family": "linux", "label": "Gentoo" },
+    { "match": "^VOID", "family": "linux", "label": "Void Linux" },
+    { "match": "^MAGEIA", "family": "linux", "label": "Mageia" },
+    { "match": "^OPENMANDRIVA", "family": "linux", "label": "OpenMandriva" },
+    { "match": "^PROXMOX|^PVE", "family": "linux", "label": "Proxmox VE" },
+    { "match": "^ORACLE[ _]?LINUX|^OL[0-9]", "family": "linux", "label": "Oracle Linux" },
+
+    { "match": "^FreeBSD", "family": "other", "label": "FreeBSD" },
+    { "match": "^OpenBSD", "family": "other", "label": "OpenBSD" },
+    { "match": "^NetBSD", "family": "other", "label": "NetBSD" },
+    { "match": "^FreeDOS|^FDOS", "family": "other", "label": "FreeDOS" }
+  ],
+
+  "fileNamePatterns": [
+    { "match": "^Win11[ _.-]", "family": "windows", "os": "win11", "label": "Windows 11" },
+    { "match": "^Win10[ _.-]", "family": "windows", "os": "win10", "label": "Windows 10" },
+    { "match": "^Win8[ _.-]", "family": "windows", "os": "win8.1", "label": "Windows 8.1" },
+    { "match": "Server.*2025", "family": "windows", "os": "win2k25", "label": "Windows Server 2025" },
+    { "match": "Server.*2022", "family": "windows", "os": "win2k22", "label": "Windows Server 2022" },
+    { "match": "Server.*2019", "family": "windows", "os": "win2k19", "label": "Windows Server 2019" },
+    { "match": "Server.*2016", "family": "windows", "os": "win2k16", "label": "Windows Server 2016" }
+  ],
+
   "labels": {
     "almalinux-kitten10": "AlmaLinux Kitten 10",
     "almalinux10": "AlmaLinux 10",

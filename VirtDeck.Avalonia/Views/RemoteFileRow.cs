@@ -1,5 +1,6 @@
 using Avalonia.Media;
 using VirtDeck.Models;
+using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -30,6 +31,9 @@ public sealed class RemoteFileRow
             ? ("DIR", FolderBrush)
             : ext switch
             {
+                // Before the disk images, which ".img" otherwise falls in with: at a standard floppy
+                // geometry it is a floppy, and that is the only thing that tells the two apart.
+                "img" when FloppyImage.IsStandardSize(entry.Size) => ("FD", MediaBrush),
                 "qcow2" or "img" or "raw" or "qed" or "vmdk" or "vdi" or "vhd" or "vhdx" => (ext.ToUpperInvariant()[..3], DiskBrush),
                 "iso" => ("ISO", MediaBrush),
                 "vfd" or "flp" or "ima" => ("FD", MediaBrush),

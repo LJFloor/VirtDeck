@@ -37,6 +37,17 @@ namespace VirtDeck.Services
         /// and the sudo password are asked for every time and are not persisted.</summary>
         public string PrivateKeyPath { get; set; } = "";
 
+        /// <summary>
+        /// Directory of the last install medium picked **on this PC**, reopened by the local pickers.
+        /// Kept apart from <see cref="LastServerMediaDir"/> because the two are different filesystems:
+        /// one path is meaningless in the other's browser. ISO and floppy share it; they are picked from
+        /// the same places.
+        /// </summary>
+        public string LastLocalMediaDir { get; set; } = "";
+
+        /// <summary>Directory of the last install medium picked **on the SSH host**.</summary>
+        public string LastServerMediaDir { get; set; } = "";
+
         /// <summary>Per-VM console preferences, keyed by domain UUID.</summary>
         public Dictionary<string, VmSettings> Vms { get; set; } = new();
 
