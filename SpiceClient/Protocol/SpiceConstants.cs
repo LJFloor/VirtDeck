@@ -85,16 +85,29 @@ public static class SpiceConstants
     public const uint VD_AGENT_FILE_XFER_START = 10;
     public const uint VD_AGENT_FILE_XFER_STATUS = 11;
     public const uint VD_AGENT_FILE_XFER_DATA = 12;
+    public const uint VD_AGENT_MAX_CLIPBOARD = 14;
     public const int VD_AGENT_CAP_MOUSE_STATE = 0;
     public const int VD_AGENT_CAP_MONITORS_CONFIG = 1;
     public const int VD_AGENT_CAP_REPLY = 2;
     public const int VD_AGENT_CAP_CLIPBOARD = 3;
     public const int VD_AGENT_CAP_CLIPBOARD_BY_DEMAND = 5;
     public const int VD_AGENT_CAP_CLIPBOARD_SELECTION = 6;
+    public const int VD_AGENT_CAP_MAX_CLIPBOARD = 10;
 
-    // Clipboard data types + selection
+    // Clipboard data types + selection. Text and images only: a file copy is not shared, because
+    // the type that would carry it (FILE_LIST = 6) carries paths into a WebDAV share the client
+    // would have to host, not bytes. Files go into the guest over VD_AGENT_FILE_XFER_* instead.
+    //
+    // PNG is the baseline every agent implements; BMP is the safe second (vdagent-win maps
+    // CF_DIB to {PNG, BMP}, the Linux agent maps all four). TIFF and JPG are declared for
+    // completeness: a guest may offer them, so the receive side accepts them, but this client
+    // never advertises them.
     public const uint VD_AGENT_CLIPBOARD_NONE = 0;
     public const uint VD_AGENT_CLIPBOARD_UTF8_TEXT = 1;
+    public const uint VD_AGENT_CLIPBOARD_IMAGE_PNG = 2;
+    public const uint VD_AGENT_CLIPBOARD_IMAGE_BMP = 3;
+    public const uint VD_AGENT_CLIPBOARD_IMAGE_TIFF = 4;
+    public const uint VD_AGENT_CLIPBOARD_IMAGE_JPG = 5;
     public const byte VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD = 0;
 
     // File-transfer status results

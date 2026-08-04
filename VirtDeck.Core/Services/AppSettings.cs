@@ -61,6 +61,17 @@ namespace VirtDeck.Services
 
             /// <summary>Start with guest audio muted.</summary>
             public bool AudioMute { get; set; }
+
+            /// <summary>
+            /// Stop mirroring copied images between this PC and the guest.
+            ///
+            /// **Nothing reads or writes this any more**: image sharing is unconditional, and the
+            /// console's toggle for it is gone. Kept so old settings files stay valid and so
+            /// re-exposing the opt-out (if some desktop's clipboard turns out to need one) is a
+            /// menu item rather than a migration. Stored as the opt-out, like <see cref="AudioMute"/>:
+            /// a missing bool reads as false.
+            /// </summary>
+            public bool ClipboardImagesOff { get; set; }
         }
 
         /// <summary>Returns this VM's settings, creating them on first use.</summary>

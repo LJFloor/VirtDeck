@@ -24,6 +24,7 @@ public sealed class MainChannel : SpiceChannel
     private int _agentTokens;                       // client->server tokens; guarded by _agentLock
     private volatile bool _running = true;
     private volatile uint _guestCaps;               // capabilities the guest agent announced
+    private volatile int _guestMaxClipboard = -1;   // guest's clipboard size ceiling; -1 = unlimited
 
     // Capabilities we advertise to the guest agent.
     private const uint OurAgentCaps =
@@ -32,7 +33,8 @@ public sealed class MainChannel : SpiceChannel
         (1u << SpiceConstants.VD_AGENT_CAP_REPLY) |
         (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD) |
         (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) |
-        (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_SELECTION);
+        (1u << SpiceConstants.VD_AGENT_CAP_CLIPBOARD_SELECTION) |
+        (1u << SpiceConstants.VD_AGENT_CAP_MAX_CLIPBOARD);
 
     // When the guest supports SELECTION, every clipboard message carries a 4-byte selection header.
     private bool UseSelection =>
@@ -42,6 +44,11 @@ public sealed class MainChannel : SpiceChannel
         new(new ConcurrentQueue<byte[]>(), boundedCapacity: 8);
 
     private readonly List<byte> _agentInBuf = new();       // reassembly for incoming agent data
+
+    // Sanity ceiling on a single reassembled agent message. Clipboard images made this matter:
+    // the size field is a trusted u32, and before images nothing on this path was ever bigger
+    // than a few KiB. A screenshot-sized PNG is comfortably inside it.
+    private const int MaxAgentMessageBytes = 32 * 1024 * 1024;
 
     // File transfers
     private readonly object _xferLock = new();
@@ -197,7 +204,7 @@ public sealed class MainChannel : SpiceChannel
         Session.Log($"[main] monitors config {width}x{height}");
     }
 
-    // ---- Clipboard (text) ----------------------------------------------
+    // ---- Clipboard -----------------------------------------------------
 
     private static void WriteSelectionHeader(SpiceWriter w)
     {
@@ -205,27 +212,87 @@ public sealed class MainChannel : SpiceChannel
         w.U8(0); w.U8(0); w.U8(0); // reserved
     }
 
-    /// <summary>Announces to the guest that the host clipboard has UTF-8 text (host copied).</summary>
-    public void GrabClipboardText()
+    // Types this client will pull from the guest, best first. The guest offers a set; we ask for
+    // exactly one, so this is where "text beats image" is decided.
+    private static readonly uint[] PreferredTypes =
+    {
+        SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT,
+        SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_PNG,
+        SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_BMP,
+        SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_JPG,
+    };
+
+    /// <summary>
+    /// Announces to the guest which types the host clipboard now offers (host copied). The guest
+    /// pulls one of them with a REQUEST if and when the user pastes.
+    /// </summary>
+    public void GrabClipboard(params uint[] types)
     {
         lock (_agentLock) { if (!_agentConnected) return; }
-        var w = new SpiceWriter(UseSelection ? 8 : 4);
+        if (types.Length == 0) return;
+        var w = new SpiceWriter((UseSelection ? 4 : 0) + 4 * types.Length);
         if (UseSelection) WriteSelectionHeader(w);
-        w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+        foreach (var t in types) w.U32(t);
         EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD_GRAB, w.ToArray());
     }
 
-    /// <summary>Sends host clipboard text to the guest (reply to its REQUEST). Converts CRLF → LF.</summary>
-    public void SendClipboardText(string text)
+    /// <summary>Tells the guest the host clipboard no longer has anything it can paste.</summary>
+    public void ReleaseClipboard()
     {
         lock (_agentLock) { if (!_agentConnected) return; }
-        var bytes = Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n"));
-        var w = new SpiceWriter((UseSelection ? 8 : 4) + bytes.Length);
+        var w = new SpiceWriter(UseSelection ? 4 : 0);
         if (UseSelection) WriteSelectionHeader(w);
-        w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
-        w.Bytes(bytes);
-        EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD, w.ToArray());
+        EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD_RELEASE, w.ToArray());
     }
+
+    /// <summary>
+    /// Sends host clipboard data to the guest in reply to its REQUEST. An image payload is
+    /// megabytes, and <see cref="EnqueueAgentMessage"/> blocks on a full send queue, so the whole
+    /// thing is handed to a pool thread rather than run on the caller's (the UI) thread.
+    /// </summary>
+    public void SendClipboardData(uint type, byte[] data)
+    {
+        lock (_agentLock) { if (!_agentConnected) return; }
+
+        // The guest may cap what it will accept; over that it would silently drop the paste, so
+        // answer NONE instead and let it give up straight away.
+        int max = _guestMaxClipboard;
+        if (max >= 0 && data.Length > max)
+        {
+            Session.Log($"[main] clipboard payload {data.Length} B exceeds the guest limit {max} B");
+            SendClipboardNone();
+            return;
+        }
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                var w = new SpiceWriter((UseSelection ? 8 : 4) + data.Length);
+                if (UseSelection) WriteSelectionHeader(w);
+                w.U32(type);
+                w.Bytes(data);
+                EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD, w.ToArray());
+            }
+            catch (Exception ex)
+            {
+                if (_running) Session.Log($"[main] clipboard send failed: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>Sends host clipboard text to the guest (reply to its REQUEST). Converts CRLF → LF.</summary>
+    public void SendClipboardText(string text) =>
+        SendClipboardData(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT,
+                          Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n")));
+
+    /// <summary>
+    /// Answers a REQUEST we cannot serve. Not cosmetic: the Windows agent treats NONE as "give up"
+    /// and without it a paste the host can't satisfy stalls the guest clipboard for its full
+    /// three-second timeout.
+    /// </summary>
+    public void SendClipboardNone() =>
+        SendClipboardData(SpiceConstants.VD_AGENT_CLIPBOARD_NONE, Array.Empty<byte>());
 
     // ---- Agent send pipeline -------------------------------------------
 
@@ -297,6 +364,14 @@ public sealed class MainChannel : SpiceChannel
         {
             uint type = ReadU32(_agentInBuf, 4);
             uint size = ReadU32(_agentInBuf, 16);
+            if (size > MaxAgentMessageBytes)
+            {
+                // Resyncing mid-stream is not possible (the fragments carry no framing of their
+                // own), so drop what we have and let the next agent message start clean.
+                Session.Log($"[main] agent message of {size} B refused; dropping the agent buffer");
+                _agentInBuf.Clear();
+                return;
+            }
             int total = 20 + (int)size;
             if (_agentInBuf.Count < total) break;
 
@@ -333,26 +408,36 @@ public sealed class MainChannel : SpiceChannel
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_GRAB)
         {
-            // Guest copied something. If it offers UTF-8 text, pull it eagerly to mirror onto the host.
+            // Guest copied something and lists what it can produce. Pull the best of those eagerly
+            // so the host clipboard is already loaded when the user pastes; the alternative, host
+            // delayed rendering, would have to block a toolkit callback on a guest round trip.
             var r = new SpiceReader(data);
             if (UseSelection) r.U32(); // skip selection header
-            bool hasText = false;
-            while (r.Remaining >= 4)
-                if (r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT) { hasText = true; break; }
-            if (hasText)
+            var offered = new List<uint>();
+            while (r.Remaining >= 4) offered.Add(r.U32());
+
+            uint want = 0;
+            foreach (var p in PreferredTypes)
+                if (offered.Contains(p)) { want = p; break; }
+
+            if (want != 0)
             {
                 var w = new SpiceWriter(UseSelection ? 8 : 4);
                 if (UseSelection) WriteSelectionHeader(w);
-                w.U32(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+                w.U32(want);
+                // On the read thread → must not block (see EnqueueAgentMessage).
                 EnqueueAgentMessage(SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST, w.ToArray(), blocking: false);
             }
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD)
         {
-            // Guest sent clipboard data (our REQUEST's reply). Decode UTF-8 text → host.
+            // Guest sent clipboard data (our REQUEST's reply).
             var r = new SpiceReader(data);
             if (UseSelection) r.U32();
-            if (r.Remaining >= 4 && r.U32() == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT)
+            if (r.Remaining < 4) return;
+            uint clipType = r.U32();
+
+            if (clipType == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT)
             {
                 // The agent sends LF; normalise to the host's own line ending so pasted text
                 // isn't single-line on Windows or full of stray CRs on Linux.
@@ -360,14 +445,39 @@ public sealed class MainChannel : SpiceChannel
                 if (Environment.NewLine != "\n") text = text.Replace("\n", Environment.NewLine);
                 Session.ClipboardTextFromGuestRaise(text);
             }
+            else if (IsImageType(clipType))
+            {
+                // Handed over as encoded bytes: the UI decodes, because that is where the host
+                // clipboard lives and its toolkit already reads PNG, BMP and JPEG.
+                Session.ClipboardImageFromGuestRaise(clipType, r.Rest());
+            }
         }
         else if (type == SpiceConstants.VD_AGENT_CLIPBOARD_REQUEST)
         {
-            // Guest is pasting and wants the host clipboard; the form supplies it via SendClipboardText.
-            Session.ClipboardRequestedByGuestRaise();
+            // Guest is pasting and wants one specific type; the console answers with
+            // SendClipboardData, or SendClipboardNone when it no longer holds that type.
+            var r = new SpiceReader(data);
+            if (UseSelection && r.Remaining >= 4) r.U32();
+            Session.ClipboardRequestedByGuestRaise(r.Remaining >= 4 ? r.U32() : SpiceConstants.VD_AGENT_CLIPBOARD_NONE);
+        }
+        else if (type == SpiceConstants.VD_AGENT_MAX_CLIPBOARD)
+        {
+            var r = new SpiceReader(data);
+            if (r.Remaining >= 4)
+            {
+                _guestMaxClipboard = unchecked((int)r.U32());
+                Session.Log($"[main] guest clipboard limit {_guestMaxClipboard} B");
+            }
         }
         // VD_AGENT_CLIPBOARD_RELEASE: nothing to do.
     }
+
+    /// <summary>True for the vdagent clipboard types that carry an encoded image.</summary>
+    public static bool IsImageType(uint clipType) =>
+        clipType is SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_PNG
+                 or SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_BMP
+                 or SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_TIFF
+                 or SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_JPG;
 
     private static uint ReadU32(List<byte> b, int at) =>
         (uint)(b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24));

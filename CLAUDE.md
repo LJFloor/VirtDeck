@@ -72,7 +72,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - Console drops: any file is sent into the guest with `SpiceSession.SendFile` (the vdagent file-transfer channel; the guest agent picks where it lands), and the status bar shows one shared progress bar and Cancel for the whole drop, refcounted in `_activeXfers` and driven **only** by the session's file events, because `SendFile` returns silently for a missing file or a departed agent. A single ISO or floppy image dropped on a VM that has the matching drive **always asks** (`MessageDialog.Choose`) whether to insert it or send it; with no guest agent the send button is disabled with a reason rather than the drop silently mounting. Nothing is ever mounted unconfirmed, and a shut-off VM is a valid drop target (the drive targets are detected on the powered-off paths too, and the media change goes straight to the saved config).
 - `Controls/RemotePathBox`: textbox + "…" opening `RemoteFileBrowserDialog`. That browser badges files by extension instead of asking the OS for an icon (`ShellIcons`/`SHGetFileInfo` is deleted): these are the *server's* files, so a client-side association would be misleading anyway.
 - `Input/AsciiScancodes`: char → AT set-1 scancode + shift, for "Type clipboard". Replaces `VkKeyScan`, which read the *host* layout; scancodes are positional, so the guest's layout decides; a fixed US table is exactly as correct and equally approximate elsewhere.
-- Clipboard: Avalonia has no clipboard-change event, so `ConsoleWindow` polls the host text every 500 ms **while focused** and announces a SPICE grab only on change; that same comparison breaks the guest→host→guest loop. Screenshot saves a PNG rather than going to the clipboard (image clipboard transfer is unreliable through Avalonia on X11).
+- Clipboard: **text and images, both ways**; see "Clipboard sharing" below for the whole story. `Services/HostClipboard` is the one place the Avalonia clipboard dialect is translated, the way `DropFiles` is for drag-and-drop.
 - `Input/IKeyboardGrab`: `X11KeyboardGrab` (`XGrabKeyboard`) on Linux so Alt+Tab/Super reach the guest; no-op elsewhere. **Best-effort by design**; the console must work without it. The grab **must** be issued on Avalonia's own X display connection (dug out of `Window.PlatformImpl` by reflection): X reports key events during an active grab only to the grabbing *client*, and a client is a connection; a grab on a private `XOpenDisplay` takes every key away from Avalonia and the console goes deaf while grabbed. If the display can't be resolved, report unsupported (no grab) rather than falling back to a private connection.
 
 ### Host capability checks
@@ -170,6 +170,80 @@ SSH (sudo dd) → Pipe.Writer → KnownLengthStream → TarWriter → FileStream
 - Checkbox disabled (with tooltip + hint label) when the VM is running or when virt-sparsify is not installed
 
 The **save picker** is shown first (from `Opened`), while the VM config fetch and the virt-sparsify availability check run in the background; both SSH calls complete while the user is browsing for a save location.
+
+## Clipboard sharing
+
+Text and images are mirrored both ways through the guest agent. **Files are not clipboard content
+here**: they go into the guest by dropping them on the console (see "Console drops" above), over
+`VD_AGENT_FILE_XFER`.
+
+**Typed, not text-only.** `MainChannel.GrabClipboard(types)` announces what the host offers,
+`SendClipboardData(type, bytes)` answers the guest's request, and `SpiceSession` raises
+`ClipboardTextFromGuest` / `ClipboardImageFromGuest(type, bytes)` / `ClipboardRequestedByGuest(type)`.
+The client advertises **PNG + BMP** and always sends PNG: the Windows agent maps `CF_DIB` to either,
+the Linux agent maps all four, and PNG is the one every agent implements. Incoming PNG/BMP/JPEG all
+decode through `Avalonia.Media.Imaging.Bitmap`, so there is no format switch on the receive side.
+
+**A request that cannot be served must be answered with `VD_AGENT_CLIPBOARD_NONE`**, never with
+silence: the Windows agent blocks its paste for a full three seconds waiting for a reply.
+
+**Large payloads changed two invariants in `MainChannel`.** `SendClipboardData` hands the encode and
+enqueue to a pool thread, because `EnqueueAgentMessage` blocks on the 8-deep send queue and the
+caller is the UI thread. `HandleIncomingAgentData` caps a reassembled message at
+`MaxAgentMessageBytes` (32 MiB); before images nothing on that path was ever bigger than a few KiB
+and the `u32` size field was simply trusted.
+
+**The host poll is two-tier** (`ConsoleWindow.PollHostClipboardAsync`). Every 500 ms it asks only
+which formats are on offer (`GetDataFormatsAsync`: a TARGETS round trip on X11,
+`EnumClipboardFormats` on Windows). It pulls the actual bytes only when that set changed or when
+something set `_clipboardReadPending`. Reading a multi-megabyte bitmap out of the X11 selection
+twice a second is not an option. The cost: **two images copied in a row from the same app offer an
+identical format set and are not noticed**, which is why `Activated` forces a re-read; alt-tabbing to
+the console before pasting is the workflow people actually have.
+
+**The guest→host→guest loop is broken by a re-read, not by the bytes sent** (`SeedAfterGuestWriteAsync`).
+The baseline has to be whatever the *next poll* will read, and that is not the bytes handed to
+`SetImageAsync`: the image goes onto the clipboard as a decoded `Bitmap` and comes back PNG-encoded by
+us. Hashing what the guest sent would not match, the poll would call it a new host copy, and the guest
+would get its own image back.
+
+**A `Bitmap` on the clipboard must outlive the call, and one read back is not yours to dispose.**
+Both halves of this crashed the app (`ObjectDisposedException` on `Ref<IBitmapImpl>` inside
+`Avalonia.X11.Selections.SelectionDataProvider`, on the X11 event loop, where no `catch` of ours can
+reach it), and a clipboard manager makes it immediate: those request the contents on every ownership
+change.
+
+- Clipboard ownership is **lazy**: the bytes are produced when something asks for the selection, and
+  Avalonia produces them by calling `Bitmap.Save` on the instance it was given, then. So
+  `HostClipboard.SetImageAsync` parks it in `_offered` and retires it only when a later set replaces
+  it, instead of the obvious `using`. Retiring is safe because selection requests are served on the
+  UI thread, the same thread that sets; it is deliberately **not** released when a console closes,
+  since the clipboard outlives the window and `_offered` is shared across consoles.
+- A read while we still own the clipboard is **not a round trip**:
+  `X11ClipboardImpl.TryGetDataAsync` returns the stored `IAsyncDataTransfer` unchanged when the
+  selection owner is itself, so `TryGetBitmapAsync` hands back the very instance we put up, still
+  live. `ReadImageAsync` therefore disposes only a bitmap that is not `_offered`; those the clipboard
+  decodes for a foreign owner are created per read and are ours to free.
+
+**Why files are not pasted.** The vdagent type that would carry them,
+`VD_AGENT_CLIPBOARD_FILE_LIST`, carries **paths, not bytes**: the guest resolves them against a
+WebDAV share the client itself would have to host (`dav://localhost:9843` via gvfs on Linux,
+`\\localhost@9843\DavWWWRoot` via the mini-redirector on Windows), which also needs an
+`org.spice-space.webdav.0` spiceport device on the domain and `spice-webdavd` running in the guest.
+That whole route was implemented and then removed; drag-and-drop covers the same need with nothing
+to install. So the client never announces `FILE_LIST`, and a host file copy is announced as whatever
+text comes with it, or as nothing at all. Guest→host file copy does not exist in this protocol
+either (`vdagent x11.c`: "we don't support file copying in this direction yet").
+
+**Sharing is unconditional, so the console has no Clipboard menu at all.** There was a per-VM
+"Share images" toggle; it gated only the last step (announce, serve, mirror) while the costly parts
+ran regardless, because `HostClipboard.ReadAsync` decodes before the switch and `MainChannel`'s grab
+handler requests image types from `PreferredTypes` with no UI gate. So it bought nothing and is
+gone, and with it the menu that held it. `AppSettings.VmSettings.ClipboardImagesOff` stays in the
+model, written by nobody, so old settings files remain valid and re-exposing the opt-out is a menu
+item rather than a migration. The keystroke fallback **"Type clipboard"** (`Input/AsciiScancodes`)
+lives under **Keyboard** and is **always there**, never hidden or re-homed on agent state: a command
+that comes and goes with something the user cannot see reads as a bug, not as a hint.
 
 ## Cursor rule (the key requirement)
 

@@ -75,6 +75,7 @@
             <MenuItem Name="ShowHostCursorItem" Header="Show host cursor" ToggleType="CheckBox" />
             <Separator />
             <MenuItem Name="ScreenshotItem" Header="Save screenshot…" />
+            <MenuItem Name="CopyScreenItem" Header="Copy screen to clipboard" />
           </MenuItem>
 
           <!-- Hidden unless the VM has a <sound> device, like Floppy: with no sound device there

@@ -88,8 +88,9 @@ public sealed class SpiceSession : IDisposable
     public event Action<string, string>? FileFailed;
 
     // Clipboard (via guest agent)
-    public event Action<string>? ClipboardTextFromGuest;   // guest copied text → set host clipboard
-    public event Action? ClipboardRequestedByGuest;        // guest is pasting → send host clipboard
+    public event Action<string>? ClipboardTextFromGuest;       // guest copied text → set host clipboard
+    public event Action<uint, byte[]>? ClipboardImageFromGuest; // guest copied an image → (vdagent type, encoded bytes)
+    public event Action<uint>? ClipboardRequestedByGuest;      // guest is pasting → send that type, or NONE
 
     private readonly List<SpiceChannel> _channels = new();
 
@@ -140,7 +141,13 @@ public sealed class SpiceSession : IDisposable
             SpiceConstants.CHANNEL_USBREDIR => CreateUsbChannel(id),
             _ => null
         };
-        if (ch == null) return;
+        if (ch == null)
+        {
+            // Worth a line: "the VM offered a channel this build does not open" is otherwise
+            // indistinguishable from "the VM never offered it".
+            Log($"[session] channel type {type} id {id} offered but not opened");
+            return;
+        }
         if (ch is InputsChannel inp) Inputs = inp;
         if (ch is DisplayChannel disp) Display = disp;
         lock (_channels) _channels.Add(ch);
@@ -205,16 +212,29 @@ public sealed class SpiceSession : IDisposable
     internal void FileTransferCompleted(string name) => FileCompleted?.Invoke(name);
     internal void FileTransferFailed(string name, string error) => FileFailed?.Invoke(name, error);
 
-    // ---- Clipboard (text) ----------------------------------------------
+    // ---- Clipboard -------------------------------------------------------
 
-    /// <summary>Tell the guest the host clipboard changed (host has UTF-8 text). No-op without the agent.</summary>
-    public void GrabClipboardText() => _main?.GrabClipboardText();
+    /// <summary>
+    /// Tell the guest which vdagent clipboard types the host now offers (host copied). The guest
+    /// pulls one of them only when the user actually pastes. No-op without the agent.
+    /// </summary>
+    public void GrabClipboard(params uint[] types) => _main?.GrabClipboard(types);
+
+    /// <summary>Tell the guest the host clipboard has nothing it can paste.</summary>
+    public void ReleaseClipboard() => _main?.ReleaseClipboard();
+
+    /// <summary>Send host clipboard data of one vdagent type to the guest (reply to its request).</summary>
+    public void SendClipboardData(uint type, byte[] data) => _main?.SendClipboardData(type, data);
 
     /// <summary>Send the host clipboard text to the guest (in reply to its paste request).</summary>
     public void SendClipboardText(string text) => _main?.SendClipboardText(text);
 
+    /// <summary>Answer a paste request this client cannot serve, so the guest stops waiting.</summary>
+    public void SendClipboardNone() => _main?.SendClipboardNone();
+
     internal void ClipboardTextFromGuestRaise(string text) => ClipboardTextFromGuest?.Invoke(text);
-    internal void ClipboardRequestedByGuestRaise() => ClipboardRequestedByGuest?.Invoke();
+    internal void ClipboardImageFromGuestRaise(uint type, byte[] data) => ClipboardImageFromGuest?.Invoke(type, data);
+    internal void ClipboardRequestedByGuestRaise(uint type) => ClipboardRequestedByGuest?.Invoke(type);
 
     // ---- Multimedia clock (for video stream timing/reports) ------------
 

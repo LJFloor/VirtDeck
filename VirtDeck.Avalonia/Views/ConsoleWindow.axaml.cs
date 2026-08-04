@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -7,6 +8,7 @@ using Avalonia.Threading;
 using SpiceClient;
 using SpiceClient.Channels;
 using SpiceClient.Imaging;
+using SpiceClient.Protocol;
 using SpiceClient.Usb;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Input;
@@ -62,9 +64,14 @@ public partial class ConsoleWindow : Window
     private string? _xferName;
 
     // Clipboard sharing. Avalonia has no clipboard-change notification, so the host side is polled
-    // while this window is focused; _lastHostClipboard is what suppresses the self-triggered round trip.
+    // while this window is focused. The poll is two-tier: _lastFormatSignature is the cheap check
+    // that runs every tick, _lastFingerprint is what suppresses the self-triggered round trip once
+    // the contents have actually been read. See PollHostClipboardAsync.
     private readonly DispatcherTimer _clipboardPoll;
-    private string? _lastHostClipboard;
+    private string? _lastFormatSignature;
+    private string? _lastFingerprint;
+    private bool _clipboardReadPending = true;   // force a full read on the next tick
+    private HostClipboardSnapshot _hostClipboard = HostClipboardSnapshot.Empty;
 
     // Auto-reconnect. There is no Reconnect button: a console whose session drops (or whose connect
     // fails) while the guest is still running retries itself. The VM-list poll is a 30 s backstop,
@@ -134,7 +141,10 @@ public partial class ConsoleWindow : Window
             if (!_closing) await TryConnectOrShowStatus();
         };
 
-        Activated += (_, _) => { _windowActive = true; UpdateGrab(); _clipboardPoll.Start(); };
+        // Re-reading on activation is not belt-and-braces, it is what makes the poll correct: two
+        // images copied in a row from the same app offer an identical format set, so the cheap tier
+        // cannot see the change. Alt-tabbing to the console before pasting is the actual workflow.
+        Activated += (_, _) => { _windowActive = true; _clipboardReadPending = true; UpdateGrab(); _clipboardPoll.Start(); };
         Deactivated += (_, _) => { _windowActive = false; UpdateGrab(); _clipboardPoll.Stop(); };
 
         // The grab follows the pointer, not just focus; see UpdateGrab. PointerMoved is the
@@ -201,6 +211,7 @@ public partial class ConsoleWindow : Window
 
         FitWindowItem.Click += (_, _) => FitToResolution(restoreIfMaximized: true);
         ScreenshotItem.Click += async (_, _) => await SaveScreenshotAsync();
+        CopyScreenItem.Click += async (_, _) => await CopyScreenAsync();
 
         CdServerItem.Click += async (_, _) => await InsertMediaFromServerAsync(cdrom: true);
         CdLocalItem.Click += async (_, _) => await InsertMediaFromLocalAsync(cdrom: true);
@@ -305,6 +316,7 @@ public partial class ConsoleWindow : Window
             _session.Disconnected += OnSessionDisconnected;
             _session.StatusMessage += OnSessionStatus;
             _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
+            _session.ClipboardImageFromGuest += OnClipboardImageFromGuest;
             _session.ClipboardRequestedByGuest += OnClipboardRequestedByGuest;
             _session.AgentStateChanged += OnAgentStateChanged;
             _session.FileStarted += OnFileStarted;
@@ -382,6 +394,13 @@ public partial class ConsoleWindow : Window
         _guestResizeTimer.Stop();
         _requestedGuestSize = null;
         ResetTransferUi();   // every way a session ends comes through here
+
+        // The next session must re-announce the clipboard from scratch.
+        _hostClipboard = HostClipboardSnapshot.Empty;
+        _lastFormatSignature = null;
+        _lastFingerprint = null;
+        _clipboardReadPending = true;
+
         UpdateToolbarState();
         UpdateGrab();   // a console with no session must not keep holding the desktop's keyboard
 
@@ -952,9 +971,19 @@ public partial class ConsoleWindow : Window
     // ---- Clipboard sharing ---------------------------------------------
 
     /// <summary>
-    /// Host → guest. Avalonia has no equivalent of <c>WM_CLIPBOARDUPDATE</c>, so the text is polled
-    /// while the console has focus and a SPICE grab is announced only when it actually changed;
-    /// that comparison is also what stops the guest→host mirror below from looping back.
+    /// Host → guest. Avalonia has no equivalent of <c>WM_CLIPBOARDUPDATE</c>, so the host side is
+    /// polled while the console has focus, in two tiers.
+    ///
+    /// The cheap tier runs every tick and asks only which formats are on offer. The expensive tier,
+    /// which actually pulls the bytes, runs only when that set changed or when something set
+    /// <see cref="_clipboardReadPending"/> (window activation, a settings change, a fresh connect).
+    /// Reading a multi-megabyte bitmap out of the X11 selection twice a second is not an option, and
+    /// polling formats is a TARGETS round trip on X11 or EnumClipboardFormats on Windows.
+    ///
+    /// The cost of that is real and worth knowing: copying image A then image B in the same app,
+    /// with the console already focused, offers an identical format set and is not noticed. The
+    /// activation re-read covers the workflow people actually have (copy over there, come back here,
+    /// paste), and the menu's toggle forces a re-read too.
     /// </summary>
     private async Task PollHostClipboardAsync()
     {
@@ -962,34 +991,128 @@ public partial class ConsoleWindow : Window
         if (_session is not { AgentConnected: true } session) return;
         try
         {
-            var text = await cb.TryGetTextAsync();
-            if (string.IsNullOrEmpty(text) || text == _lastHostClipboard) return;
-            _lastHostClipboard = text;
-            session.GrabClipboardText();
+            var signature = await HostClipboard.FormatSignatureAsync(cb);
+            bool forced = _clipboardReadPending;
+            if (!forced && signature == _lastFormatSignature) return;
+            _clipboardReadPending = false;
+            _lastFormatSignature = signature;
+
+            var snapshot = await HostClipboard.ReadAsync(cb);
+            if (_closing) return;
+
+            // A forced read announces even when nothing changed, which is the whole point of the
+            // things that force one: a reconnected agent has heard no grab, and a console that was
+            // just activated has to offer what is already sitting on the clipboard.
+            if (!forced && snapshot.Fingerprint == _lastFingerprint) return;
+            _lastFingerprint = snapshot.Fingerprint;
+            _hostClipboard = snapshot;
+
+            switch (snapshot.Kind)
+            {
+                case HostClipboardKind.Image:
+                    // PNG is what we hold and what every agent implements; BMP is offered because
+                    // the Windows agent asks for CF_DIB as either, and we can answer both.
+                    session.GrabClipboard(SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_PNG,
+                                          SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_BMP);
+                    break;
+
+                case HostClipboardKind.Text:
+                    session.GrabClipboard(SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT);
+                    break;
+
+                default:
+                    session.ReleaseClipboard();
+                    break;
+            }
         }
         catch { /* clipboard busy or owned by a dying app */ }
     }
 
-    /// <summary>Guest copied → mirror onto the host clipboard.</summary>
+    /// <summary>Guest copied text → mirror onto the host clipboard.</summary>
     private void OnClipboardTextFromGuest(string text) => Dispatcher.UIThread.Post(async () =>
     {
         if (_closing || Clipboard is not { } cb) return;
         try
         {
-            _lastHostClipboard = text; // pre-seed so the poll doesn't grab our own write straight back
             if (string.IsNullOrEmpty(text)) await cb.ClearAsync();
             else await cb.SetTextAsync(text);
+            await SeedAfterGuestWriteAsync(cb);
         }
         catch { /* clipboard busy */ }
     });
 
-    /// <summary>Guest is pasting → hand it the current host clipboard text.</summary>
-    private void OnClipboardRequestedByGuest() => Dispatcher.UIThread.Post(async () =>
+    /// <summary>Guest copied an image → mirror onto the host clipboard.</summary>
+    private void OnClipboardImageFromGuest(uint type, byte[] data) => Dispatcher.UIThread.Post(async () =>
     {
-        if (_closing || _session is not { } session) return;
-        try { session.SendClipboardText(Clipboard is { } cb ? await cb.TryGetTextAsync() ?? "" : ""); }
+        if (_closing || Clipboard is not { } cb) return;
+        try
+        {
+            // Reported rather than swallowed: putting an image on the clipboard is the step most
+            // likely to be refused on X11, and a silent failure looks like the guest never copied.
+            bool ok = await HostClipboard.SetImageAsync(cb, data);
+            StatusText.Text = ok
+                ? "Image copied from the guest"
+                : "The guest image could not be placed on this PC's clipboard";
+            if (ok) await SeedAfterGuestWriteAsync(cb);
+        }
         catch { /* clipboard busy */ }
     });
+
+    /// <summary>
+    /// Re-reads the clipboard straight after mirroring guest content onto it, and takes that as the
+    /// baseline the poll compares against.
+    ///
+    /// It has to be a re-read, not the bytes we just wrote. An image makes a round trip through the
+    /// platform clipboard and comes back re-encoded, so hashing what we sent would not match what
+    /// the next poll sees; the poll would call it a new host copy, grab it, and hand the guest its
+    /// own image back, which the guest would then set and grab in turn.
+    /// </summary>
+    private async Task SeedAfterGuestWriteAsync(IClipboard cb)
+    {
+        _hostClipboard = await HostClipboard.ReadAsync(cb);
+        _lastFingerprint = _hostClipboard.Fingerprint;
+        _lastFormatSignature = await HostClipboard.FormatSignatureAsync(cb);
+        _clipboardReadPending = false;
+    }
+
+    /// <summary>
+    /// Guest is pasting and asked for one specific type. Answering with something else is not an
+    /// option, and neither is silence: the Windows agent blocks its paste for three seconds waiting,
+    /// so anything we cannot serve gets an explicit NONE.
+    /// </summary>
+    private void OnClipboardRequestedByGuest(uint type) => Dispatcher.UIThread.Post(() =>
+    {
+        if (_closing || _session is not { } session) return;
+        try
+        {
+            var snapshot = _hostClipboard;
+            if (type == SpiceConstants.VD_AGENT_CLIPBOARD_UTF8_TEXT && snapshot.Text is { } text)
+                session.SendClipboardText(text);
+            else if (MainChannel.IsImageType(type) && snapshot.Png is { } png)
+                // Sent as PNG whichever image type was asked for: the guest agents that ask for BMP
+                // ask for it as an alternative to PNG for the same CF_DIB, never as the only option.
+                session.SendClipboardData(SpiceConstants.VD_AGENT_CLIPBOARD_IMAGE_PNG, png);
+            else
+                session.SendClipboardNone();
+        }
+        catch { session.SendClipboardNone(); }
+    });
+
+    /// <summary>Copies the current guest screen onto this PC's clipboard.</summary>
+    private async Task CopyScreenAsync()
+    {
+        if (_session?.Framebuffer is not { } fb || Clipboard is not { } cb) return;
+        var bgra = fb.SnapshotBgra(out int w, out int h);
+        if (bgra == null || w <= 0 || h <= 0) return;
+        if (BgraImage.EncodePng(bgra, w, h) is not { } png)
+        {
+            StatusText.Text = "Screen could not be encoded";
+            return;
+        }
+        StatusText.Text = await HostClipboard.SetImageAsync(cb, png)
+            ? "Screen copied to the clipboard"
+            : "The screen could not be placed on this PC's clipboard";
+    }
 
     /// <summary>
     /// Synthesizes the clipboard text as keystrokes. For guests without the agent, where the real
@@ -1037,8 +1160,9 @@ public partial class ConsoleWindow : Window
     // ---- Screenshot -----------------------------------------------------
 
     /// <summary>
-    /// Saves the framebuffer as a PNG. The WinForms build put the image straight on the clipboard;
-    /// image clipboard transfer isn't reliable through Avalonia on X11, so this writes a file instead.
+    /// Saves the framebuffer as a PNG. Kept alongside "Copy screen to clipboard" rather than
+    /// replaced by it: image clipboard transfer isn't reliable through Avalonia on X11, so a file
+    /// is the outcome that always works.
     /// </summary>
     private async Task SaveScreenshotAsync()
     {
@@ -1117,6 +1241,12 @@ public partial class ConsoleWindow : Window
         // The agent can go (guest logout, vdagent restart) while the SPICE session lives on. Any
         // in-flight transfer is then never acknowledged, so nothing would clear the bar.
         else ResetTransferUi();
+
+        // A fresh agent has heard no grab, so the clipboard must be re-announced rather than wait
+        // for the next host copy; a departed one leaves nowhere to send it.
+        _clipboardReadPending = true;
+        if (!connected) _hostClipboard = HostClipboardSnapshot.Empty;
+        UpdateToolbarState();
     });
 
     private void RequestGuestResize()
