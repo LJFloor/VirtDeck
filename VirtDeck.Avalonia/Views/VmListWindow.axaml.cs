@@ -7,6 +7,7 @@ using SpiceClient;
 using VirtDeck.Imaging;
 using VirtDeck.Models;
 using VirtDeck.Services;
+using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -492,7 +493,11 @@ public partial class VmListWindow : Window
             foreach (var name in vmNames)
             {
                 var cfg = await Task.Run(() => _virsh.GetVmConfig(name));
-                foreach (var d in cfg.Disks.Where(d => !d.IsCdrom && d.SourceType == "file" && d.Source.Length > 0))
+                // ISOs are the user's own media and are never offered, with one exception: an answer
+                // disc VirtDeck generated for this VM is ours, and leaving it behind would leave an
+                // orphan in the image directory.
+                foreach (var d in cfg.Disks.Where(d => d.SourceType == "file" && d.Source.Length > 0 &&
+                                                       (!d.IsCdrom || UnattendMedia.IsAnswerIso(d.Source))))
                 {
                     fileDisks.Add(d);
                     owners.Add(name);

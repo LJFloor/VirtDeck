@@ -62,10 +62,10 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 
 ### VirtDeck.Avalonia (cross-platform UI)
 - `Controls/SpiceDisplay`: Avalonia `Control`. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; `Render` does a 1:1 `DrawImage` with interpolation `None`. Owns the exactly-one-cursor state machine, built from `Cursor(Bitmap, PixelPoint)` and `StandardCursorType.None`.
-- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem`, `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
+- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
   **One font baseline: 12.** A bare `TextBlock` defaults to 12 while every Fluent `ControlTheme` sets its own size from `ControlContentThemeFontSize` (14), so labels and the fields beside them rendered two points apart; each retemplated control here drops that setter and falls back to the inherited 12, which widened the gap further. The dictionary pulls the key down to 12, and every metric in it (24px fields and buttons, 22px tool buttons, a 14px check/radio box, `12,4` table rows) is sized for that. **Fields and buttons share one height (24)** (same 1px border, same 3px vertical inset), so a text box, dropdown or spinner lines up with the button next to it; `App.axaml` pins `ButtonSpinner`/`NumericUpDown` to the same key because Fluent sizes those outside `TextControl*`. Views should not set a local `FontSize` or `Height` to line controls up; fix the baseline instead. Headings (wizard title 15, login 16) are the deliberate exceptions.
 - `Input/PhysicalKeyMap`: Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent, more correct than a VK table, which reads through the host layout. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js, NOT `0xE0XX`. The key-up high bit is applied in `InputsChannel.SendKey`.
-- `Views/`: `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
+- `Views/`: `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` (+ its per-tab `UserControl`s), the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
 - `Services/FileDialogs`: the one place the WinForms filter string (`"ISO images (*.iso)|*.iso"`) is translated, into `IStorageProvider` picker types (XDG portal on Linux). Only local paths are accepted; everything downstream needs a real `FileStream`.
 - `Services/DropFiles`: the one place the drag-and-drop dialect is translated, the same way `FileDialogs` handles the filter string. Avalonia 12 replaced `IDataObject`/`DataFormats.FileDrop` with `IDataTransfer`/`DataFormat.File`, so Avalonia 11 snippets do not apply; `LocalFiles` filters a drop down to real local files (directories and portal handles are dropped) through the same `FileDialogs.LocalPathOf` the pickers use. **X11 drag-and-drop needs Avalonia 12.1+**: 12.0.x has no XDND in its X11 backend at all and raises no drop events on Linux, which is why the csproj pins 12.1 as the floor.
   Drop targets: the console window (below), the Create-VM wizard's General page (an ISO or floppy image fills the install media and switches to "stream from this PC"), a removable-drive row in `VmEditWindow` (staged as that drive's media; the extension must match the drive kind), and `LoginWindow`'s key panel (adds and selects a private key). Not `RemotePathBox`: its path is on the *server*, so a local path there would be meaningless.
@@ -297,6 +297,74 @@ onto a drive (on the console it is simply sent to the guest), and the "All files
 escape hatch for an exotic geometry. Because settling an `.img` on the server costs a `stat` over SSH,
 `CreateVmWizard` resolves it in the background detect pass and caches the verdict per path; drops are always
 local files, so `DropFiles` can stat inline.
+
+## Unattended Windows setup (autounattend.xml)
+
+The Create-VM wizard's **Customize Windows setup…** button (General page, under the install media)
+opens `Views/Unattend/UnattendWindow`: sections on the left, page on the right, one `TabItem` per
+section. Only **User accounts** exists so far; the rest of the answer file (regional settings,
+partitioning, bloatware) is more tabs. The UI follows the sections of schneegans.de's generator, which
+is the reference for what an answer file usefully exposes.
+
+**How the machine gets its first account is one radio group of three, not a table plus two
+checkboxes** (`AccountCreationMode`): OOBE asks for a Microsoft account (the default), or OOBE asks
+for a local one, or the answer file names the accounts itself. They are alternatives, and the two that
+hand the job to OOBE come first because they need nothing else said; the accounts table, the nested
+**First logon** box and the Base64 checkbox all hang off one panel under the third option and grey out
+together. The generator ignores the table outright in the other two modes, but the UI keeps
+what was typed there, so flipping between options does not empty it. A row's group defaults to
+**Users**, which makes "logon to the first administrator account created above" answerable only if a
+row says otherwise; `LocalAccountRow` therefore raises change notification (the only row view model in
+the app that is written to rather than rendered from) so that option can say when it would do nothing
+instead of silently producing no autologon.
+
+**The answer file reaches Setup on a second CD-ROM, not inside the install ISO.** Windows Setup runs
+an implicit answer-file search at the start of every configuration pass, and one entry in it is the
+root of removable read-only media, so a separate disc is consumed with no command line and no
+keystroke. Editing the install ISO is not an alternative: a retail Windows image serves its real tree
+from **UDF**, and the ISO 9660 side of a 25H2 image holds three entries, so a file added there is
+invisible to Setup. `Services/Iso9660Builder` therefore writes a ~53 KB single-file image (Level 2 for
+the 18-character `AUTOUNATTEND.XML;1`, plus Joliet because `mkisofs -J`/`oscdimg` is what every
+answer disc in the wild is made with, and **no El Torito record** so the firmware falls through it to
+the install medium). It is the inverse of `IsoIdentifier`, which parses the same descriptors.
+
+**The disc is written to the host, never streamed over NBD.** An unattended install spans several
+reboots, and libvirt refuses `startupPolicy` on network sources (see `AttachNetworkCdrom`), so a disc
+that died with the VirtDeck session would leave a domain that will not start at all. `VirshService.WriteFile`
+uploads it with the same base64 idiom as the rest of the host file access, chunked because the payload
+rides on a command line. It lands at `/var/lib/libvirt/images/<vm>-unattend.iso`; `UnattendMedia` owns
+that naming rule, and `VmListWindow`'s delete path uses `UnattendMedia.IsAnswerIso` to offer it for
+deletion alongside the disk images. It is the one CD-ROM `DeleteVmDialog` will delete, because it is
+the one VirtDeck generated.
+
+**Element order in the XML is not cosmetic** (`Unattend/UnattendXmlBuilder`): the unattend schema
+declares each component's children as a sequence, so the builder emits the order WSIM itself does
+(`Password` first inside `LocalAccount` and `AutoLogon`, `Name` last). Passwords are Base64 in the
+Windows sense: UTF-16LE of the password with **the name of the element it sits in** appended, which is
+why that suffix is a parameter. Policies Windows has no unattend element for (password expiry, account
+lockout) become `net accounts` calls in `FirstLogonCommands`, which therefore do not run at all under
+"Do not logon" until somebody signs in.
+
+**Import/Export (bottom left of the window) exchange the answer file itself with a file on *this PC***,
+through `FileDialogs`, never through `RemotePathBox`: an install ISO lives on the server because the VM
+reads it, but an answer file is authored here and only ever reaches the host as the generated disc.
+Export writes exactly what the disc would carry (`UnattendXmlBuilder.Build` of what the pages say, so
+OK and Export read the same config), passwords included and obscured exactly as the checkbox says.
+Import parses through `Unattend/UnattendXmlReader`, the inverse of the builder and deliberately only
+that far: the window models one section of one pass, so a foreign file's other passes, other
+components, unknown elements, foreign `FirstLogonCommands` and groups outside Administrators/Users
+come back as **warnings** and the import is put as a question, because importing is the moment that
+content stops existing in anything the window will write. A file that is not an answer file at all is
+**rejected** with the pages untouched. The reader matches element names ignoring namespaces and reads
+`PlainText` **per element** rather than trusting the file-wide checkbox; a builder-written file
+round-trips byte-identically (verified for all three account modes).
+
+**The button is disabled with a reason, never hidden**: not Windows, or an OS that predates
+`autounattend.xml` (XP and earlier are scripted with `winnt.sif`, a different file in a different
+format). Windows-ness comes from `GuestProfile()`, so the OS dropdown stays the source of truth and
+detection only fills in while it says generic, exactly as the device defaults do. Anything already
+configured **survives an OS change** and is simply not written, which the status line beside the
+button says out loud; discarding the user's work on a dropdown change would be worse than carrying it.
 
 ## USB redirection
 

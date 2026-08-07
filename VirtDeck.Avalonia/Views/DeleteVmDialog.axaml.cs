@@ -12,7 +12,8 @@ public sealed class DeletableDiskRow
 
 /// <summary>
 /// Confirms deleting a VM and lets the user pick which file-backed disk images to also remove
-/// (all checked by default). Non-file disks (zvol/block) and ISOs are never offered for deletion.
+/// (all checked by default). Non-file disks (zvol/block) are never offered, and neither are ISOs
+/// apart from an answer disc VirtDeck generated for the VM itself.
 /// </summary>
 public partial class DeleteVmDialog : Window
 {

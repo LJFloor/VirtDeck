@@ -508,6 +508,33 @@ namespace VirtDeck.Services
             _ssh.RunSudoCommand($"p=$(echo {b64} | base64 -d); rm -f -- \"$p\"");
         }
 
+        /// <summary>
+        /// Writes a small generated file to the host, through the same base64 idiom as the rest of the
+        /// host file access. Chunked because the whole payload rides on a command line: the first chunk
+        /// truncates, the rest append, so no single command comes near an argument limit. For generated
+        /// files only (the answer disc is ~50 KB); this is not a file transfer path.
+        /// </summary>
+        public void WriteFile(string path, byte[] data)
+        {
+            var pathB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+
+            // 36 KiB of raw data is ~48 KiB of base64, comfortably inside any shell's limit.
+            const int chunkSize = 36 * 1024;
+            bool first = true;
+
+            for (int offset = 0; offset < data.Length || first; offset += chunkSize)
+            {
+                int count = Math.Min(chunkSize, data.Length - offset);
+                var chunk = Convert.ToBase64String(data, offset, count);
+                var redirect = first ? ">" : ">>";
+                _ssh.RunSudoCommand(
+                    $"p=$(echo {pathB64} | base64 -d); echo {chunk} | base64 -d {redirect} \"$p\"");
+                first = false;
+            }
+
+            _ssh.RunSudoCommand($"p=$(echo {pathB64} | base64 -d); chmod 0644 \"$p\"");
+        }
+
         // ---- Storage -------------------------------------------------------
 
         public void CreateQcow2(string path, int sizeGiB) =>

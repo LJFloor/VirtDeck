@@ -3,9 +3,11 @@ using System.Text.RegularExpressions;
 using Avalonia.Controls;
 using Avalonia.Input;
 using VirtDeck.Avalonia.Services;
+using VirtDeck.Avalonia.Views.Unattend;
 using VirtDeck.Diagnostics;
 using VirtDeck.Models;
 using VirtDeck.Services;
+using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -55,6 +57,12 @@ public partial class CreateVmWizard : Window
     // identification pass and the disk op ask.
     private readonly Dictionary<string, bool> _floppyVerdicts = new();
 
+    // ---- Windows setup customization -----------------------------------
+    // What the "Customize Windows setup" window collected, if anything. Kept even while the selected
+    // OS is not Windows (changing the dropdown must not throw the user's work away); whether it is
+    // actually written is decided by UnattendApplies at Finish.
+    private UnattendConfig? _unattend;
+
     // The seeded defaults stay ours to adjust until the user edits the list themselves.
     private readonly NicAddOp _defaultNic = new() { Type = "network", Source = "default", Model = "e1000e" };
     private DiskAddOp? _bootDisk;
@@ -69,6 +77,8 @@ public partial class CreateVmWizard : Window
     private string _osVariant = "generic";
     private string _soundModel = "ich9";
     private bool _startAfterCreate = true;
+    private UnattendConfig? _unattendToWrite;
+    private string _cdromBus = "sata";
 
     /// <summary>Name of the VM created on success, else null.</summary>
     public string? CreatedVmName { get; private set; }
@@ -109,6 +119,8 @@ public partial class CreateVmWizard : Window
         IsoStreamRadio.IsCheckedChanged += (_, _) => { UpdateIsoMode(); QueueMediaDetect(); };
         IsoPicker.PathChanged += (_, _) => QueueMediaDetect();
         LocalIsoBox.TextChanged += (_, _) => QueueMediaDetect();
+
+        UnattendButton.Click += async (_, _) => await CustomizeWindowsSetupAsync();
 
         BrowseLocalButton.Click += async (_, _) =>
         {
@@ -247,6 +259,67 @@ public partial class CreateVmWizard : Window
                 RebuildDiskList();
             }
         }
+
+        // The customize button keys off the same signal (which guest this is), so it is refreshed
+        // here rather than at each of this method's call sites.
+        UpdateUnattendAvailability();
+    }
+
+    // ---- Windows setup customization -----------------------------------
+
+    /// <summary>
+    /// Whether an answer disc would do anything for this guest. autounattend.xml is a Vista-and-later
+    /// mechanism; XP and earlier are scripted with winnt.sif, which is a different file in a different
+    /// format and is not what this generates.
+    /// </summary>
+    private bool UnattendApplies() =>
+        GuestProfile().family == OsFamily.Windows && !IsBiosOnlyOsSelected();
+
+    private async Task CustomizeWindowsSetupAsync()
+    {
+        var dlg = new UnattendWindow(_unattend);
+        if (await dlg.ShowDialog<bool?>(this) is true && dlg.Result is { } config)
+        {
+            _unattend = config;
+            UpdateUnattendAvailability();
+        }
+    }
+
+    /// <summary>
+    /// Enables the button for a Windows guest and says why it is off otherwise, rather than hiding it:
+    /// a command that comes and goes reads as a bug. Anything already configured survives an OS change
+    /// and is simply not written, which the status line says out loud.
+    /// </summary>
+    private void UpdateUnattendAvailability()
+    {
+        var (family, _) = GuestProfile();
+        string? reason =
+            family != OsFamily.Windows
+                ? "Select Windows install media, or pick a Windows OS type, to customize Setup."
+                : IsBiosOnlyOsSelected()
+                    ? "Windows XP and earlier are configured with winnt.sif, not autounattend.xml."
+                    : null;
+
+        UnattendButton.IsEnabled = reason == null;
+        ToolTip.SetTip(UnattendButton, reason);
+
+        UnattendStatus.Text = _unattend == null
+            ? "not configured"
+            : reason == null
+                ? DescribeUnattend(_unattend)
+                : "configured, but not written for this OS";
+    }
+
+    private static string DescribeUnattend(UnattendConfig config)
+    {
+        var accounts = config.UserAccounts;
+        if (accounts.AccountCreation == AccountCreationMode.MicrosoftAccountInteractive)
+            return "configured, Microsoft account added during Setup";
+        if (accounts.AccountCreation == AccountCreationMode.LocalAccountInteractive)
+            return "configured, local account added during Setup";
+
+        int count = accounts.Accounts.Count(a => !a.IsEmpty);
+        return count == 1 ? "configured, 1 local account" : $"configured, {count} local accounts";
     }
 
     // ---- Install media (General page) ----------------------------------
@@ -635,6 +708,13 @@ public partial class CreateVmWizard : Window
             ? "(none)"
             : $"{source} ({(mode == "file" ? "file on server" : "streamed from this PC")})");
 
+        // Only worth a line when there is something to say; a Linux VM should not carry a row about
+        // Windows setup at all.
+        if (_unattend != null)
+            Item("Windows setup:", UnattendApplies()
+                ? $"{DescribeUnattend(_unattend)}, answered from a generated CD-ROM"
+                : "customized, but not written (the selected OS is not Windows)");
+
         Header("Network");
         if (_nics.Count == 0) Item("", "(none)");
         foreach (var nic in _nics) Item(nic.Model, $"{nic.Type}: {nic.Source}");
@@ -667,6 +747,8 @@ public partial class CreateVmWizard : Window
         _osVariant = (OsBox.SelectedItem as OsVariant)?.ShortId ?? "generic";
         _soundModel = IsBiosOnlyOsSelected() ? "ac97" : "ich9"; // XP and earlier lack ich9 (HD Audio) drivers
         _startAfterCreate = StartAfterCreateCheck.IsChecked == true;
+        _unattendToWrite = UnattendApplies() ? _unattend : null;
+        _cdromBus = GuestDevices.CdromBus(IsBiosOnlyOsSelected());
 
         SetBusy(true);
         var errors = new List<string>();
@@ -715,10 +797,25 @@ public partial class CreateVmWizard : Window
         foreach (var nic in _nics)
             Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic.Type, nic.Source, nic.Model));
 
+        bool answerDisc = false;
+        if (_unattendToWrite is { } unattend)
+            Try("Answer disc", () =>
+            {
+                // Written to the host rather than streamed: the install spans several reboots, and a
+                // network source that goes away with this session would leave a domain that cannot
+                // start. Fifty kilobytes over SSH is a fair price for that.
+                var path = UnattendMedia.RemotePath(_name);
+                _virsh.WriteFile(path, UnattendMedia.BuildIso(unattend));
+                _virsh.AttachCdrom(_name, path, AllocTarget(_cdromBus), _cdromBus);
+                answerDisc = true;
+            });
+
         // Disk first, then cdrom: on a fresh install the empty disk isn't bootable so
         // firmware falls through to the ISO; after install the disk boots, no more ISO loop.
+        // The answer disc counts here too: it carries no El Torito record, so the firmware skips
+        // over it, but without a cdrom entry a VM whose only optical drive is that disc has none.
         var boot = new List<string> { "hd" };
-        if (_disks.Any(d => d.IsCdrom)) boot.Add("cdrom");
+        if (_disks.Any(d => d.IsCdrom) || answerDisc) boot.Add("cdrom");
         if (_disks.Any(d => d.IsFloppy)) boot.Add("fd");
         Try("Boot order", () => _virsh.SetBootOrder(_name, boot));
     }

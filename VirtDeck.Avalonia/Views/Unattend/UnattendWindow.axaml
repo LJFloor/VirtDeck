@@ -1,0 +1,38 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
+        x:Class="VirtDeck.Avalonia.Views.Unattend.UnattendWindow"
+        Title="Customize Windows setup"
+        Width="880" Height="660" MinWidth="700" MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <!-- Import/Export move an autounattend.xml between this window and a file on this PC; they
+             are not an alternative to OK, so they sit away from the accept pair. -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+          <Button Name="ImportButton" Content="Import..." MinWidth="88"
+                  ToolTip.Tip="Fill these pages in from an existing autounattend.xml on this PC." />
+          <Button Name="ExportButton" Content="Export..." MinWidth="88"
+                  ToolTip.Tip="Save what these pages describe as an autounattend.xml on this PC." />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+          <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Sections on the left, page on the right. Each tab brings its own ScrollViewer so a page is
+         free to fill the height instead (a future partition table, say). -->
+    <TabControl Theme="{StaticResource JbSideTabControl}">
+      <TabItem Header="User accounts">
+        <u:UserAccountsTab Name="AccountsTab" />
+      </TabItem>
+    </TabControl>
+
+  </DockPanel>
+</Window>

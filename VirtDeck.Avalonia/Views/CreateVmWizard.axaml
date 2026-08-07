@@ -36,7 +36,7 @@
 
       <!-- Page 1: General -->
       <ScrollViewer Name="GeneralPage">
-        <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+        <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
               RowSpacing="10" ColumnSpacing="6">
 
           <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" />
@@ -59,22 +59,29 @@
             <TextBox Name="LocalIsoBox" IsReadOnly="True" />
           </DockPanel>
 
-          <TextBlock Grid.Row="4" Grid.Column="0" Text="vCPUs:" VerticalAlignment="Center" />
-          <NumericUpDown Grid.Row="4" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
+          <!-- Directly under the media it depends on: the answer file is only meaningful once the
+               media (or the OS dropdown below) says the guest is Windows. -->
+          <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8">
+            <Button Name="UnattendButton" Content="Customize Windows setup…" />
+            <TextBlock Name="UnattendStatus" Text="not configured" Opacity="0.75" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <TextBlock Grid.Row="5" Grid.Column="0" Text="vCPUs:" VerticalAlignment="Center" />
+          <NumericUpDown Grid.Row="5" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
                          Minimum="1" Maximum="256" Value="2" Increment="1" FormatString="0" />
 
-          <TextBlock Grid.Row="5" Grid.Column="0" Text="Memory:" VerticalAlignment="Center" />
-          <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <TextBlock Grid.Row="6" Grid.Column="0" Text="Memory:" VerticalAlignment="Center" />
+          <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Spacing="6">
             <NumericUpDown Name="MemBox" Width="150" Minimum="64" Maximum="1048576"
                            Value="4096" Increment="256" FormatString="0" />
             <TextBlock Text="MiB" VerticalAlignment="Center" />
           </StackPanel>
 
-          <TextBlock Grid.Row="6" Grid.Column="0" Text="OS type:" VerticalAlignment="Center" />
-          <ComboBox  Grid.Row="6" Grid.Column="1" Name="OsBox" Width="320" HorizontalAlignment="Left" />
+          <TextBlock Grid.Row="7" Grid.Column="0" Text="OS type:" VerticalAlignment="Center" />
+          <ComboBox  Grid.Row="7" Grid.Column="1" Name="OsBox" Width="320" HorizontalAlignment="Left" />
 
-          <TextBlock Grid.Row="7" Grid.Column="0" Text="Firmware:" VerticalAlignment="Center" />
-          <StackPanel Grid.Row="7" Grid.Column="1" Name="FirmwareRow" Orientation="Horizontal" Spacing="24">
+          <TextBlock Grid.Row="8" Grid.Column="0" Text="Firmware:" VerticalAlignment="Center" />
+          <StackPanel Grid.Row="8" Grid.Column="1" Name="FirmwareRow" Orientation="Horizontal" Spacing="24">
             <RadioButton Name="BiosRadio" GroupName="Firmware" Content="BIOS" IsChecked="True" />
             <RadioButton Name="UefiRadio" GroupName="Firmware" Content="UEFI" />
           </StackPanel>

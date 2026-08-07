@@ -706,6 +706,93 @@
   </ControlTheme>
 
   <!--
+    Side tabs: the same strip stood on its end, for a settings window whose section list is long
+    enough that a top strip would wrap. A sibling of the pair above rather than an edit to it,
+    because that template deliberately does not handle TabStripPlacement.
+
+    The differences from the top-placed pair: the items panel is vertical, the hairline moves from
+    under the strip to its right edge, the selected marker moves from a 2px underline to a 2px bar
+    on the left, and items stretch to the strip's width so the selection fill is a full row. The
+    strip scrolls: the tab count is expected to grow.
+  -->
+  <ControlTheme x:Key="JbSideTabItem" TargetType="TabItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource JbButtonForeground}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Root"
+                Background="{TemplateBinding Background}"
+                BorderBrush="Transparent"
+                BorderThickness="2,0,0,0">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Header}"
+                            ContentTemplate="{TemplateBinding HeaderTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbTabHoverBackground}" />
+    </Style>
+
+    <Style Selector="^:selected /template/ Border#Root">
+      <Setter Property="Background" Value="{DynamicResource JbTabSelectedBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource JbTabSelectedUnderline}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Foreground" Value="{DynamicResource JbButtonForegroundDisabled}" />
+    </Style>
+  </ControlTheme>
+
+  <ControlTheme x:Key="JbSideTabControl" TargetType="TabControl">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="ItemContainerTheme" Value="{StaticResource JbSideTabItem}" />
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <StackPanel Orientation="Vertical" />
+      </ItemsPanelTemplate>
+    </Setter>
+
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}">
+          <DockPanel>
+            <Border DockPanel.Dock="Left"
+                    MinWidth="160"
+                    Background="{DynamicResource JbTabStripBackground}"
+                    BorderBrush="{DynamicResource JbToolBarBorder}"
+                    BorderThickness="0,0,1,0">
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+              </ScrollViewer>
+            </Border>
+            <ContentPresenter Name="PART_SelectedContentHost"
+                              Content="{TemplateBinding SelectedContent}"
+                              ContentTemplate="{TemplateBinding SelectedContentTemplate}"
+                              Margin="{TemplateBinding Padding}" />
+          </DockPanel>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <!--
     Table row: the tight, square, full-width row a DataGrip/Rider grid draws, ~20px, no corner
     radius, no inset selection pill. Keyed rather than implicit so ordinary pick-lists elsewhere
     (dialogs, the file browser) keep Fluent's roomier item.

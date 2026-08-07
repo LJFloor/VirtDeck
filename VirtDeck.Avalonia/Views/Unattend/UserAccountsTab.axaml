@@ -1,0 +1,175 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.UserAccountsTab">
+
+  <UserControl.Styles>
+    <!-- The note under a radio button: indented to the radio's label, quieter than it. -->
+    <Style Selector="TextBlock.note">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Margin" Value="21,0,0,0" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <!-- Everything that belongs to a radio option rather than standing on its own. -->
+    <Style Selector="StackPanel.under">
+      <Setter Property="Margin" Value="21,0,0,0" />
+      <Setter Property="Spacing" Value="8" />
+    </Style>
+    <Style Selector="TextBlock.columnheader">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer Padding="16">
+    <StackPanel Spacing="12">
+
+      <!-- User accounts -->
+      <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
+            <TextBlock Text="User accounts" FontWeight="SemiBold" />
+          </Border>
+          <StackPanel Margin="12,10" Spacing="8">
+
+            <!-- The three ways a machine can get its first account are alternatives, not options
+                 that stack, so they are one group. The two that hand the job to OOBE come first
+                 because they need nothing else said; everything the third one needs is nested
+                 under it. -->
+            <RadioButton Name="MicrosoftAccountRadio" GroupName="AccountMode" IsChecked="True"
+                         Content="Add a Microsoft (&quot;online&quot;) user account interactively during Windows Setup" />
+            <RadioButton Name="LocalAccountRadio" GroupName="AccountMode"
+                         Content="Add a local (&quot;offline&quot;) user account interactively during Windows Setup" />
+
+            <RadioButton Name="AccountsTableRadio" GroupName="AccountMode"
+                         Content="Let Windows Setup create the following local (&quot;offline&quot;) accounts:" />
+
+            <StackPanel Name="AccountsTablePanel" Classes="under">
+              <Grid ColumnDefinitions="*,*,*,150" ColumnSpacing="6">
+                <TextBlock Grid.Column="0" Classes="columnheader" Text="Account name" />
+                <TextBlock Grid.Column="1" Classes="columnheader" Text="Display name" />
+                <TextBlock Grid.Column="2" Classes="columnheader" Text="Password" />
+                <TextBlock Grid.Column="3" Classes="columnheader" Text="Group" />
+              </Grid>
+
+              <!-- ItemsControl, not ListBox: these rows are form fields, not a pick-list, so row
+                   selection would only fight the editors inside them for focus. -->
+              <ItemsControl Name="AccountList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="u:LocalAccountRow">
+                    <Grid ColumnDefinitions="*,*,*,150" ColumnSpacing="6" Margin="0,0,0,4">
+                      <TextBox Grid.Column="0" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                      <TextBox Grid.Column="1" Text="{Binding DisplayName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                      <TextBox Grid.Column="2" Text="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                      <ComboBox Grid.Column="3" HorizontalAlignment="Stretch"
+                                ItemsSource="{Binding Groups}"
+                                SelectedItem="{Binding Group, Mode=TwoWay}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <TextBlock Opacity="0.7" TextWrapping="Wrap"
+                         Text="Leave Display name empty unless you want it to be different from Account name." />
+
+              <!-- First logon -->
+              <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+                <DockPanel>
+                  <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
+                    <TextBlock Text="First logon" FontWeight="SemiBold" />
+                  </Border>
+                  <StackPanel Margin="12,10" Spacing="6">
+                    <TextBlock Opacity="0.7" TextWrapping="Wrap"
+                               Text="Several settings are only applied once an administrator has logged on, so let Windows log you on to an administrator account once; this does not affect later logons. Choose which account to use for it:" />
+
+                    <RadioButton Name="LogonFirstAdminRadio" GroupName="FirstLogon" IsChecked="True"
+                                 Content="Logon to the first administrator account created above" />
+                    <!-- Shown only when that option would do nothing: the group defaults to Users, so
+                         a filled-in table with no administrator in it is easy to end up with. -->
+                    <TextBlock Name="NoAdminNote" Classes="note" IsVisible="False"
+                               Text="No account above is in the Administrators group, so nobody would be logged on." />
+
+                    <RadioButton Name="LogonAdministratorRadio" GroupName="FirstLogon"
+                                 Content="Activate built-in account &quot;Administrator&quot;, logon to this account and set its password to:" />
+                    <TextBox Name="AdminPasswordBox" Width="220" HorizontalAlignment="Left" Margin="21,0,0,0" />
+
+                    <RadioButton Name="LogonNoneRadio" GroupName="FirstLogon" Content="Do not logon" />
+                    <TextBlock Classes="note"
+                               Text="The installation ends with the sign-in screen being shown. Not recommended." />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <CheckBox Name="ObscurePasswordsCheck"
+                        Content="Obscure all account passwords in your autounattend.xml file with Base64" />
+            </StackPanel>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Password expiration -->
+      <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
+            <TextBlock Text="Password expiration" FontWeight="SemiBold" />
+          </Border>
+          <StackPanel Margin="12,10" Spacing="6">
+            <RadioButton Name="PasswordNeverRadio" GroupName="PasswordExpiry" IsChecked="True"
+                         Content="Passwords do not expire" />
+            <TextBlock Classes="note"
+                       Text="This is in accordance with NIST guidelines, which no longer recommend password expiration." />
+
+            <RadioButton Name="PasswordDefaultRadio" GroupName="PasswordExpiry" Content="Use Windows default" />
+            <TextBlock Classes="note" Text="Passwords expire after 42 days." />
+
+            <RadioButton Name="PasswordCustomRadio" GroupName="PasswordExpiry"
+                         Content="Use custom password expiration:" />
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="21,0,0,0">
+              <TextBlock Text="Passwords expire after" VerticalAlignment="Center" />
+              <NumericUpDown Name="PasswordDaysBox" Width="110" Minimum="1" Maximum="999"
+                             Value="42" Increment="1" FormatString="0" />
+              <TextBlock Text="days." VerticalAlignment="Center" />
+            </StackPanel>
+
+            <TextBlock Opacity="0.7" TextWrapping="Wrap" Margin="0,6,0,0"
+                       Text="These settings only apply to local accounts, and the password of the built-in account &quot;Administrator&quot; never expires." />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Account lockout -->
+      <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
+            <TextBlock Text="Account lockout policy" FontWeight="SemiBold" />
+          </Border>
+          <StackPanel Margin="12,10" Spacing="6">
+            <RadioButton Name="LockoutDefaultRadio" GroupName="Lockout" IsChecked="True"
+                         Content="Use default policy" />
+            <TextBlock Classes="note"
+                       Text="Windows locks an account after 10 failed logon attempts (the threshold) within 10 minutes (the window). After 10 minutes (the duration) it is unlocked automatically." />
+
+            <RadioButton Name="LockoutDisabledRadio" GroupName="Lockout" Content="Disable policy" />
+            <TextBlock Classes="note"
+                       Text="Disabling account lockout leaves the machine open to brute-force password guessing." />
+
+            <RadioButton Name="LockoutCustomRadio" GroupName="Lockout" Content="Use custom policy:" />
+            <!-- One sentence with the numbers in it, so it wraps rather than needing a label column. -->
+            <WrapPanel Margin="21,0,0,0">
+              <TextBlock Text="Lock out an account after" VerticalAlignment="Center" Margin="0,2,5,2" />
+              <NumericUpDown Name="LockoutThresholdBox" Width="100" Margin="0,2,5,2"
+                             Minimum="1" Maximum="999" Value="10" Increment="1" FormatString="0" />
+              <TextBlock Text="failed logon attempts within" VerticalAlignment="Center" Margin="0,2,5,2" />
+              <NumericUpDown Name="LockoutWindowBox" Width="100" Margin="0,2,5,2"
+                             Minimum="1" Maximum="99999" Value="10" Increment="1" FormatString="0" />
+              <TextBlock Text="minutes. After" VerticalAlignment="Center" Margin="0,2,5,2" />
+              <NumericUpDown Name="LockoutDurationBox" Width="100" Margin="0,2,5,2"
+                             Minimum="1" Maximum="99999" Value="10" Increment="1" FormatString="0" />
+              <TextBlock Text="minutes, unlock the account automatically." VerticalAlignment="Center" Margin="0,2,5,2" />
+            </WrapPanel>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
