@@ -16,6 +16,7 @@ namespace VirtDeck.Unattend
         public int Version { get; set; } = UnattendPreset.CurrentVersion;
 
         public RegionLanguageConfig RegionLanguage { get; set; } = new();
+        public WindowsPeConfig WindowsPe { get; set; } = new();
         public SetupConfig Setup { get; set; } = new();
         public ActivationConfig Activation { get; set; } = new();
         public ComputerConfig Computer { get; set; } = new();
@@ -29,6 +30,8 @@ namespace VirtDeck.Unattend
         public AccessibilityConfig Accessibility { get; set; } = new();
         public PersonalizationConfig Personalization { get; set; } = new();
         public BloatwareConfig Bloatware { get; set; } = new();
+        public ScriptsConfig Scripts { get; set; } = new();
+        public AdvancedConfig Advanced { get; set; } = new();
 
         /// <summary>
         /// A deep copy, so the window can edit freely and Cancel can simply throw the copy away.

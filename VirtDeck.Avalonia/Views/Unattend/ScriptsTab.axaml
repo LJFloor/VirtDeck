@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.ScriptsTab">
+
+  <DockPanel>
+
+    <!-- Fixed above the list: with several scripts open the Add button would otherwise be somewhere
+         far below the last one. -->
+    <StackPanel DockPanel.Dock="Top" Margin="16,16,16,8" Spacing="8">
+      <TextBlock Classes="note"
+                 Text="Scripts are embedded in the answer file itself and extracted to C:\Windows\Setup\Scripts before they run, so there is nothing to copy onto the install media and nothing to fetch from the network." />
+      <TextBlock Classes="note"
+                 Text="Each one writes its output to a log file beside itself, so a script that failed can be read back afterwards." />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="AddScriptButton" Content="Add script" />
+        <TextBlock Name="ScriptCount" VerticalAlignment="Center" Opacity="0.7" />
+      </StackPanel>
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Bottom" Margin="16,0,16,16">
+      <CheckBox Name="RestartExplorerCheck"
+                Content="Restart Explorer once the first-logon scripts have run" />
+      <TextBlock Classes="subnote"
+                 Text="Explorer reads several of its settings only when it starts, so this applies them without a reboot. Worth having on its own, even with no scripts here." />
+    </StackPanel>
+
+    <ScrollViewer Padding="16,0,16,8">
+      <ItemsControl Name="ScriptList">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="u:ScriptRow">
+            <!-- One bordered block per script, because a bare column of text boxes gives no clue
+                 where one script ends and the next begins. -->
+            <Border BorderBrush="{StaticResource JbGroupBoxBorder}" BorderThickness="1"
+                    Margin="0,0,0,8" Padding="8">
+              <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="Auto,*,Auto,180,Auto" ColumnSpacing="6">
+                  <TextBlock Grid.Column="0" Text="Runs:" VerticalAlignment="Center" />
+                  <ComboBox Grid.Column="1" HorizontalAlignment="Stretch"
+                            ItemsSource="{Binding Stages}"
+                            SelectedItem="{Binding Stage, Mode=TwoWay}" />
+                  <TextBlock Grid.Column="2" Text="Written in:" VerticalAlignment="Center" />
+                  <ComboBox Grid.Column="3" HorizontalAlignment="Stretch"
+                            ItemsSource="{Binding Kinds}"
+                            SelectedItem="{Binding Kind, Mode=TwoWay}" />
+                  <Button Grid.Column="4" Content="Remove" Click="RemoveScript" />
+                </Grid>
+                <TextBox Classes="script"
+                         Text="{Binding Content, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+  </DockPanel>
+</UserControl>

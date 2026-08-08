@@ -313,8 +313,10 @@ section" into a UI page plus a mapper arm, instead of implementing a piece of Wi
 the update procedure; **read it before touching that directory**, because the assembly name is baked
 into `Bloatware.json`'s `$type` discriminators and the repo's no-em-dash rule does not apply there.
 
-`Views/Unattend/UnattendWindow` is sections on the left, page on the right, one `TabItem` per section,
-ordered by where the reference tool puts the first section each page covers. **The window never names
+`Views/Unattend/UnattendWindow` is sections on the left, page on the right, ordered by where the
+reference tool puts the first section each page covers. **Seventeen pages cover its twenty-seven
+sections**: where two or three belong together they are group boxes on one page, each keeping the web
+tool's exact heading so the mapping back to schneegans.de stays legible. **The window never names
 its pages**: it walks its `TabControl`'s items and calls `IUnattendTab.Load`/`Apply` on whichever
 implement it, so adding a section is a `TabItem` in the markup plus the page, with no line to maintain
 anywhere else. Both methods take the whole `UnattendConfig` rather than the group the page owns,
@@ -348,12 +350,38 @@ folders on Start, visual effects). They share `CheckRow` and a single `DataTempl
 a set of overrides: the mapper expands it to on/off pairs across the entire table, because Windows
 replaces its own list rather than merging.
 
+**Two pages are add/remove lists instead** (`ScriptRow`, `ComponentXmlRow`), because neither has a
+natural number of entries and each entry needs a text box rather than a cell. Both rows notify for the
+same reason: **one of their own cells narrows another**. A script that edits the default user's
+registry hive can only be `.reg`, `.cmd` or `.ps1`, and a component only has settings in some passes,
+so choosing the first cell shortens the second cell's list. The row coerces its selection *before*
+announcing either change, or the `ComboBox` sees a moment where its selection is not in its items and
+clears itself. The narrowing is a courtesy; the rule lives in the generator
+(`ScriptExtensions.GetAllowedTypes`, `Component.Passes`) and the mapper lets it refuse, because
+quietly running somebody's VBScript through a different interpreter is worse than saying no.
+
 **The pickers are `ComboBox`es filled through `Views/Unattend/OptionBox`**, which selects and reads
 back by id so no page repeats the find-by-id pair. `UnattendOption.ToString` is what lets them work
 with no `DataTemplate`. An id the catalog does not have clears the box rather than falling back to its
 first entry, so an unanswered picker is visibly unanswered. `UserLocales` is 686 entries and
 `GeoLocations` 267; a plain `ComboBox` copes but scrolls poorly, and swapping in `AutoCompleteBox` is
 a known refinement, not a correctness problem.
+
+**The Windows PE page's destructive option is not its default, deliberately.** Under
+`WindowsPeMode.Generate` the generator replaces `setup.exe` with a .cmd script that runs diskpart and
+dism, which wipes the target disk with no confirmation. That is exactly right for the blank virtual
+disk the wizard has just created and exactly wrong for a VM later pointed at existing storage, and the
+same window is reachable from both, so the page keeps upstream's `DefaultPESettings` and spells the
+wipe out beside the opt-in. Two things follow from that page. The **Windows 11 requirements bypass**
+is a property of `setup.exe`'s own check, so upstream models it as part of `DefaultPESettings` and it
+ceases to exist once Setup is replaced; VirtDeck keeps the checkbox on the **Setup** page, where
+somebody installing Windows 11 in a VM without a vTPM looks for it, and `UnattendConfigMapper.PESettings`
+puts the two halves back together rather than the two pages ordering their `Apply` calls. And the
+generated disk assertions **deviate from upstream's record defaults on purpose**: the 100/4000 GiB
+size bounds exist to stop a script wiping somebody's external drive, and a virtual disk is routinely
+smaller than the lower one, so leaving them on would halt Setup on a machine that is perfectly fine.
+The empty-disk check is on instead, and the page says why. This does not touch the byte-identity
+tripwire below, which only ever exercises `DefaultPESettings`.
 
 **How the machine gets its first account is one radio group of three, not a table plus two
 checkboxes** (`AccountCreationMode`): OOBE asks for a Microsoft account (the default), or OOBE asks
@@ -405,8 +433,11 @@ Two typing rules follow, and the line between them is **open set or closed set**
 library happens to have called it.
 
 An **open** set is stored as **ids**: a lookup-table entry (locale, keyboard, geo, edition, time
-zone, bloatware, desktop icon, start folder, component) keeps its `IKeyed.Id` string, and so does a
-large enum nobody renders as a fixed row of controls. A preset then stays readable, and an entry that
+zone, bloatware, desktop icon, start folder, component) keeps its `IKeyed.Id` string, and so does an
+enum nobody renders as a fixed row of controls. `ComponentXml.Pass` is the clearest case of the
+second: which passes are valid is per-component data the catalog answers (`UnattendCatalog.PassesOf`),
+not something VirtDeck reasons about, and `specialize` is exactly the word the generated XML uses, so
+the picker shows the name and the model stores it. A preset then stays readable, and an entry that
 upstream drops degrades to "skipped" instead of a load failure. Never hand an unchecked id to
 `Lookup<T>`, which throws about internal types: check the table first. Where the id is one required
 value rather than a member of a set, an unknown one is an **error naming it**, not a quiet fallback,
@@ -428,7 +459,10 @@ interface and the other an enum, so the model should not make the UI care. Mirro
 breakage in the right place: if upstream renames a member, the **mapper** stops compiling, which is
 found immediately, while presets keep loading because they hold VirtDeck's name. Where a name would
 collide across the two namespaces the mapper imports, VirtDeck's is the one that changes
-(`ExpressMode` for `ExpressSettingsMode`, `LockKeyState` for `LockKeyInitial`).
+(`ExpressMode` for `ExpressSettingsMode`, `LockKeyState` for `LockKeyInitial`, `ScriptStage` and
+`ScriptKind` for `ScriptPhase` and `ScriptType`). `ScriptStage`/`ScriptKind` are mirrored despite being
+per-row dropdowns rather than a radio group, because the rule tying them together is VirtDeck's to
+express in the UI and magic strings would be the alternative.
 
 **Anything not yet exposed keeps `Configuration.Default`'s value**, so the answer file only ever
 differs from the reference generator's by what the user actually set. There is one deliberate
@@ -446,12 +480,22 @@ humans. The window builds once on OK, off the UI thread, and **stays open** with
 because the alternative is a wizard that defines the VM, creates its disks, and only then reports that
 the answer disc could not be written. `CreateVm`'s `Try("Answer disc", ...)` stays as the backstop.
 
-One cross-tab constraint is resolved in the mapper rather than in the UI: the library refuses
+Two constraints are resolved in the mapper rather than by ordering `Apply` calls. The library refuses
 `KeepSensitiveFiles = false` together with "do not logon", because deleting the answer file is a
-first-logon command and there would be nobody to run it. `UnattendConfigMapper.KeepSensitiveFiles`
+first-logon command and there would be nobody to run it; `UnattendConfigMapper.KeepSensitiveFiles`
 keeps the files in that combination instead of letting the accounts page produce a config that cannot
-generate. Note also that the library runs the account policies in the **specialize** pass, not in
-`FirstLogonCommands`, so unlike the old writer they apply even under "do not logon".
+generate. And it refuses disk assertions together with hand partitioning, because the checks exist to
+decide whether the script may go ahead unattended and there is nothing to decide with somebody at the
+console; `DiskAssertionSettings` drops them, and the page greys the group out with the reason so OK is
+not where the user first hears it. Note also that the library runs the account policies in the
+**specialize** pass, not in `FirstLogonCommands`, so unlike the old writer they apply even under "do
+not logon".
+
+What the mapper deliberately does **not** resolve is raw `windowsPE` markup on the Advanced page
+combined with a generated or custom PE script: that script replaces Windows Setup and with it
+everything the answer file would have told Setup to do, so upstream refuses the pair by name and its
+message points at `$WinPEDriver$` and `drvload.exe`. Dropping either side would be silently discarding
+what the user typed, so the refusal is passed through and both pages say so.
 
 **The three file buttons are Load preset / Save preset / Export XML, and they are not one pair over
 one format.** All three exchange a file with *this PC* through `FileDialogs`, never through

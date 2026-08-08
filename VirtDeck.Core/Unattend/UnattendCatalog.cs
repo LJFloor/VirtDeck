@@ -87,6 +87,17 @@ namespace VirtDeck.Unattend
         public static IReadOnlyList<UnattendOption> Components => Loaded.Value.Components;
 
         /// <summary>
+        /// The configuration passes <paramref name="componentId"/> has settings in, named the way the
+        /// answer file names them. Empty for an id this build does not have.
+        ///
+        /// A component is only valid in some passes, and the wrong pairing fails schema validation at
+        /// OK with a message about the document rather than about the choice, so the picker narrows
+        /// itself from this instead.
+        /// </summary>
+        public static IReadOnlyList<string> PassesOf(string componentId) =>
+            Loaded.Value.ComponentPasses.TryGetValue(componentId, out var passes) ? passes : [];
+
+        /// <summary>
         /// The seventeen switches behind Windows' "Performance Options" dialog, in the order the
         /// reference tool lists them.
         ///
@@ -117,6 +128,10 @@ namespace VirtDeck.Unattend
                 StartFolders = Project(Generator.StartFolders, x => x.DisplayName);
                 // A component has no display name; its id is what the Microsoft docs call it.
                 Components = Project(Generator.Components, x => x.Id);
+                ComponentPasses = Generator.Components.Values.ToDictionary(
+                    c => c.Id,
+                    c => (IReadOnlyList<string>)c.Passes.Select(p => p.ToString()).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
                 // The invisible editions are the ones with no generic key to offer.
                 WindowsEditions = Project(
                     Generator.WindowsEditions.Values.Where(e => e.Visible), x => x.DisplayName);
@@ -139,6 +154,7 @@ namespace VirtDeck.Unattend
             internal IReadOnlyList<UnattendOption> DesktopIcons { get; }
             internal IReadOnlyList<UnattendOption> StartFolders { get; }
             internal IReadOnlyList<UnattendOption> Components { get; }
+            internal IReadOnlyDictionary<string, IReadOnlyList<string>> ComponentPasses { get; }
             internal IReadOnlyList<UnattendOption> Effects { get; }
 
             /// <summary>

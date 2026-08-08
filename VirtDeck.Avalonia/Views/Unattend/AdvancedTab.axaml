@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.AdvancedTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="AppLocker">
+        <StackPanel Classes="options">
+
+          <CheckBox Name="AppLockerCheck" Content="Apply this AppLocker policy:" />
+          <StackPanel Name="AppLockerPanel" Classes="under">
+            <TextBox Name="AppLockerXmlBox" Classes="script" />
+            <TextBlock Classes="note"
+                       Text="Export one from a machine that already has the rules you want with Get-AppLockerPolicy -Effective -Xml, or write one by hand. It is checked against AppLocker's own schema, so a truncated or wrong document is reported here rather than being ignored on the installed system." />
+            <TextBlock Classes="note"
+                       Text="The Application Identity service is set to start automatically and started, since AppLocker does nothing without it." />
+          </StackPanel>
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="XML markup for more components">
+        <StackPanel Classes="options">
+
+          <TextBlock Classes="note"
+                     Text="The escape hatch for every unattend setting no page here exposes. Each block is placed inside the component and configuration pass you name, so what you write is elements only, never a settings or component element of your own." />
+          <TextBlock Classes="note"
+                     Text="The pass list narrows to the passes the chosen component actually has settings in, which is the pairing Microsoft's documentation gives for it." />
+          <TextBlock Classes="note"
+                     Text="Markup for the windowsPE pass cannot be combined with a generated or custom script on the Windows PE page: that script replaces Windows Setup, and with it everything the answer file would have told Setup to do. Load drivers from a $WinPEDriver$ folder or with drvload.exe instead." />
+
+          <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+            <Button Name="AddComponentButton" Content="Add component" />
+          </StackPanel>
+
+          <ItemsControl Name="ComponentList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="u:ComponentXmlRow">
+                <Border BorderBrush="{StaticResource JbGroupBoxBorder}" BorderThickness="1"
+                        Margin="0,8,0,0" Padding="8">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto,160,Auto" ColumnSpacing="6">
+                      <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                                ItemsSource="{Binding Catalog}"
+                                SelectedItem="{Binding Component, Mode=TwoWay}" />
+                      <TextBlock Grid.Column="1" Text="in pass:" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="2" HorizontalAlignment="Stretch"
+                                ItemsSource="{Binding Passes}"
+                                SelectedItem="{Binding Pass, Mode=TwoWay}" />
+                      <Button Grid.Column="3" Content="Remove" Click="RemoveComponent" />
+                    </Grid>
+                    <TextBox Classes="script"
+                             Text="{Binding Xml, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

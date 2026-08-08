@@ -55,12 +55,10 @@ namespace VirtDeck.Unattend
                 // Region and language
                 LanguageSettings = LanguageSettings(config.RegionLanguage, generator),
 
+                // Windows PE stage
+                PESettings = PESettings(config, generator),
+
                 // Setup
-                PESettings = new DefaultPESettings(
-                    // The edition Setup installs belongs to the Windows PE page, which does not exist
-                    // yet; until it does, Setup asks.
-                    EditionSettings: new InteractiveEditionSettings(),
-                    BypassRequirementsCheck: setup.BypassRequirementsCheck),
                 BypassNetworkCheck = setup.BypassNetworkCheck,
                 UseConfigurationSet = setup.UseConfigurationSet,
                 HidePowerShellWindows = setup.HidePowerShellWindows,
@@ -154,7 +152,211 @@ namespace VirtDeck.Unattend
 
                 // Bloatware
                 Bloatwares = Bloatwares(config.Bloatware, generator),
+
+                // Custom scripts
+                ScriptSettings = ScriptSettings(config.Scripts),
+
+                // AppLocker and the raw-markup escape hatch
+                AppLockerSettings = AppLockerSettings(config.Advanced),
+                Components = Components(config.Advanced, generator),
             };
+        }
+
+        /// <summary>
+        /// What runs in the Windows PE stage, and under the default option what edition it installs.
+        ///
+        /// The Windows 11 requirements bypass is read from the <b>Setup</b> page here: it is a property
+        /// of <c>setup.exe</c>'s own check, so upstream models it as part of the default PE settings and
+        /// it simply does not exist once Setup is replaced by a script. VirtDeck keeps the checkbox on
+        /// the Setup page, where somebody installing Windows 11 in a VM without a vTPM will look for it,
+        /// and puts the two halves back together here rather than by ordering two pages' Apply calls.
+        /// </summary>
+        private static IPESettings PESettings(UnattendConfig config, UnattendGenerator generator)
+        {
+            var pe = config.WindowsPe;
+
+            return pe.Mode switch
+            {
+                WindowsPeMode.Default => new DefaultPESettings(
+                    EditionSettings: EditionSettings(pe, generator),
+                    BypassRequirementsCheck: config.Setup.BypassRequirementsCheck),
+
+                WindowsPeMode.Script => new ScriptPESetttings(Required(pe.Script, "Windows PE script")),
+
+                WindowsPeMode.Generate => new GeneratePESettings(
+                    PartitionSettings: PartitionSettings(pe),
+                    DiskAssertionSettings: DiskAssertionSettings(pe),
+                    InstallFromSettings: InstallFromSettings(pe, generator),
+                    DisableDefender: pe.DisableDefender,
+                    Disable8Dot3Names: pe.Disable8Dot3Names,
+                    PauseBeforeFormatting: pe.PauseBeforeFormatting,
+                    PauseBeforeReboot: pe.PauseBeforeReboot,
+                    CompactOs: pe.CompactOs,
+                    SkipIntegrityCheck: pe.SkipIntegrityCheck),
+
+                _ => throw new NotSupportedException($"Unknown Windows PE mode '{pe.Mode}'."),
+            };
+        }
+
+        private static IEditionSettings EditionSettings(WindowsPeConfig pe, UnattendGenerator generator) =>
+            pe.Edition switch
+            {
+                EditionMode.Interactive => new InteractiveEditionSettings(),
+                EditionMode.Firmware => new FirmwareEditionSettings(),
+                EditionMode.Edition => new UnattendedEditionSettings(
+                    Lookup<WindowsEdition>(generator.WindowsEditions, pe.EditionId, "Windows edition")),
+                EditionMode.ProductKey => new CustomEditionSettings(new ProductKey(pe.EditionProductKey)),
+                _ => throw new NotSupportedException($"Unknown edition mode '{pe.Edition}'."),
+            };
+
+        private static IPartitionSettings PartitionSettings(WindowsPeConfig pe) =>
+            pe.Partitions switch
+            {
+                PartitionMode.Interactive => new InteractivePartitionSettings(),
+                PartitionMode.Script => new CustomPartitionSettings(
+                    Required(pe.PartitionScript, "diskpart script")),
+                PartitionMode.Unattended => new UnattendedPartitionSettings(
+                    TargetDisk: pe.TargetDisk,
+                    PartitionLayout: Layout(pe.PartitionLayout),
+                    RecoveryMode: pe.Recovery == RecoveryPartitionMode.None
+                        ? RecoveryMode.None
+                        : RecoveryMode.Partition,
+                    SystemSize: pe.SystemPartitionSize,
+                    RecoverySize: pe.RecoveryPartitionSize),
+                _ => throw new NotSupportedException($"Unknown partitioning mode '{pe.Partitions}'."),
+            };
+
+        private static PartitionLayout Layout(PartitionLayoutMode mode) =>
+            mode switch
+            {
+                PartitionLayoutMode.Gpt => PartitionLayout.GPT,
+                PartitionLayoutMode.Mbr => PartitionLayout.MBR,
+                PartitionLayoutMode.Automatic => PartitionLayout.Automatic,
+                _ => throw new NotSupportedException($"Unknown partition layout '{mode}'."),
+            };
+
+        /// <summary>
+        /// What the generated script checks before it wipes the disk.
+        ///
+        /// Assertions and hand partitioning cannot be combined: the checks exist to decide whether the
+        /// script may go ahead, and with a human at the console there is nothing to decide. The page
+        /// greys the whole group out; this is the backstop for a preset saved before that, or edited by
+        /// hand, which would otherwise be refused outright over a setting that has no effect.
+        /// </summary>
+        private static IDiskAssertionSettings DiskAssertionSettings(WindowsPeConfig pe)
+        {
+            if (pe.Partitions == PartitionMode.Interactive) return new SkipDiskAssertionSettings();
+
+            return pe.DiskAssertions switch
+            {
+                DiskAssertionMode.Skip => new SkipDiskAssertionSettings(),
+                DiskAssertionMode.Script => new ScriptDiskAssertionsSettings(
+                    Required(pe.DiskAssertionScript, "disk assertion script")),
+                DiskAssertionMode.Generated => new GeneratedDiskAssertionsSettings(
+                    // Null is what upstream reads as "do not check this bound", so an unticked box
+                    // drops the check and leaves the number in the model for when it is ticked again.
+                    MinSizeGiB: pe.AssertMinSize ? pe.MinSizeGiB : null,
+                    MaxSizeGiB: pe.AssertMaxSize ? pe.MaxSizeGiB : null,
+                    AssertNoPartitions: pe.AssertNoPartitions,
+                    AssertInterfaceType: pe.AssertInterfaceType,
+                    AssertMediaType: pe.AssertMediaType),
+                _ => throw new NotSupportedException($"Unknown disk assertion mode '{pe.DiskAssertions}'."),
+            };
+        }
+
+        private static IInstallFromSettings InstallFromSettings(WindowsPeConfig pe, UnattendGenerator generator) =>
+            pe.InstallFrom switch
+            {
+                InstallFromMode.Interactive => new InteractiveInstallFromSettings(),
+                InstallFromMode.Index => new IndexInstallFromSettings(pe.InstallFromIndex),
+                InstallFromMode.Name => new NameInstallFromSettings(
+                    Required(pe.InstallFromName, "image name")),
+                InstallFromMode.Edition => new EditionInstallFromSettings(
+                    Lookup<WindowsEdition>(generator.WindowsEditions, pe.InstallFromEditionId,
+                                           "Windows edition to install")),
+                _ => throw new NotSupportedException($"Unknown install-from mode '{pe.InstallFrom}'."),
+            };
+
+        /// <summary>
+        /// The custom scripts, in page order. A script with no content is an unused row rather than an
+        /// empty file to embed.
+        ///
+        /// A stage the script's language cannot serve is left to the generator to refuse: the page only
+        /// offers the valid pairings, so getting here means a hand-edited preset, and running somebody's
+        /// VBScript through a different interpreter would be worse than saying no.
+        /// </summary>
+        private static ScriptSettings ScriptSettings(ScriptsConfig config) => new(
+            Scripts: config.Scripts
+                           .Where(s => s.Content.Trim().Length > 0)
+                           .Select(s => new Script(s.Content, Phase(s.Stage), Type(s.Kind)))
+                           .ToList(),
+            RestartExplorer: config.RestartExplorer);
+
+        private static ScriptPhase Phase(ScriptStage stage) =>
+            stage switch
+            {
+                ScriptStage.System => ScriptPhase.System,
+                ScriptStage.FirstLogon => ScriptPhase.FirstLogon,
+                ScriptStage.UserOnce => ScriptPhase.UserOnce,
+                ScriptStage.DefaultUser => ScriptPhase.DefaultUser,
+                _ => throw new NotSupportedException($"Unknown script stage '{stage}'."),
+            };
+
+        private static ScriptType Type(ScriptKind kind) =>
+            kind switch
+            {
+                ScriptKind.Cmd => ScriptType.Cmd,
+                ScriptKind.Ps1 => ScriptType.Ps1,
+                ScriptKind.Reg => ScriptType.Reg,
+                ScriptKind.Vbs => ScriptType.Vbs,
+                ScriptKind.Js => ScriptType.Js,
+                _ => throw new NotSupportedException($"Unknown script kind '{kind}'."),
+            };
+
+        private static IAppLockerSettings AppLockerSettings(AdvancedConfig config) =>
+            config.ConfigureAppLocker
+                ? new ConfigureAppLockerSettings(Required(config.AppLockerPolicyXml, "AppLocker policy"))
+                : new SkipAppLockerSettings();
+
+        /// <summary>
+        /// The raw-markup blocks, keyed by component and pass.
+        ///
+        /// Upstream holds these in a dictionary, so two rows naming the same pair would quietly collapse
+        /// into whichever was applied last. Both were typed on purpose, so the collision is reported
+        /// rather than resolved.
+        /// </summary>
+        private static ImmutableDictionary<ComponentAndPass, string> Components(
+            AdvancedConfig config, UnattendGenerator generator)
+        {
+            var markup = ImmutableDictionary.CreateBuilder<ComponentAndPass, string>();
+
+            foreach (var entry in config.Components)
+            {
+                // No markup is an unused row, the same way an account row with no name is.
+                if (entry.Xml.Trim().Length == 0) continue;
+
+                var component = Lookup<Component>(generator.Components, entry.ComponentId,
+                                                  "answer file component");
+
+                if (!Enum.TryParse<Pass>(entry.Pass, ignoreCase: true, out var pass))
+                    throw new ConfigurationException(
+                        $"'{entry.Pass}' is not one of the answer file's configuration passes.");
+
+                if (!component.Passes.Contains(pass))
+                    throw new ConfigurationException(
+                        $"Component '{component.Id}' has no settings in the '{pass}' pass. " +
+                        $"It can be used in: {string.Join(", ", component.Passes)}.");
+
+                var key = new ComponentAndPass(component.Id, pass);
+                if (markup.ContainsKey(key))
+                    throw new ConfigurationException(
+                        $"There is more than one block of XML markup for component '{component.Id}' " +
+                        $"in the '{pass}' pass. Put them in one block.");
+
+                markup[key] = entry.Xml;
+            }
+
+            return markup.ToImmutable();
         }
 
         /// <summary>
@@ -228,7 +430,7 @@ namespace VirtDeck.Unattend
             {
                 LayoutMode.Default => new DefaultTaskbarIcons(),
                 LayoutMode.Empty => new EmptyTaskbarIcons(),
-                LayoutMode.Custom => new CustomTaskbarIcons(Required(config.TaskbarIconsXml, "taskbar icon")),
+                LayoutMode.Custom => new CustomTaskbarIcons(Required(config.TaskbarIconsXml, "taskbar icon layout")),
                 _ => throw new NotSupportedException($"Unknown taskbar icons mode '{config.TaskbarIcons}'."),
             };
 
@@ -237,7 +439,7 @@ namespace VirtDeck.Unattend
             {
                 LayoutMode.Default => new DefaultStartPinsSettings(),
                 LayoutMode.Empty => new EmptyStartPinsSettings(),
-                LayoutMode.Custom => new CustomStartPinsSettings(Required(config.StartPinsJson, "Start pins")),
+                LayoutMode.Custom => new CustomStartPinsSettings(Required(config.StartPinsJson, "Start pins layout")),
                 _ => throw new NotSupportedException($"Unknown Start pins mode '{config.StartPins}'."),
             };
 
@@ -246,16 +448,16 @@ namespace VirtDeck.Unattend
             {
                 LayoutMode.Default => new DefaultStartTilesSettings(),
                 LayoutMode.Empty => new EmptyStartTilesSettings(),
-                LayoutMode.Custom => new CustomStartTilesSettings(Required(config.StartTilesXml, "Start tiles")),
+                LayoutMode.Custom => new CustomStartTilesSettings(Required(config.StartTilesXml, "Start tiles layout")),
                 _ => throw new NotSupportedException($"Unknown Start tiles mode '{config.StartTiles}'."),
             };
 
         /// <summary>An empty document would reach the generator as a parse error about markup the user
-        /// never wrote, so say what is actually missing.</summary>
+        /// never wrote, so say what is actually missing. Callers name the noun.</summary>
         private static string Required(string document, string what) =>
             document.Trim().Length > 0
                 ? document
-                : throw new ConfigurationException($"No {what} layout was pasted in.");
+                : throw new ConfigurationException($"No {what} was entered.");
 
         private static IStartFolderSettings StartFolders(StartTaskbarConfig config, UnattendGenerator generator) =>
             config.StartFolders == StartFoldersMode.Custom

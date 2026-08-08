@@ -1,0 +1,215 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.WindowsPeTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Windows PE stage">
+        <StackPanel Classes="options">
+
+          <TextBlock Classes="note"
+                     Text="Everything that happens before the machine first boots into the installed system: partitioning the disk, copying Windows onto it and making it bootable." />
+
+          <RadioButton Name="PeDefaultRadio" GroupName="PeMode" IsChecked="True"
+                       Content="Let Windows Setup do it" />
+          <StackPanel Name="PeDefaultPanel" Classes="under">
+            <TextBlock Classes="note"
+                       Text="setup.exe runs as it does from any install disc, so it asks where to install Windows unless you answer that below." />
+
+            <TextBlock Text="Which edition to install:" Margin="0,4,0,0" />
+
+            <RadioButton Name="EditionInteractiveRadio" GroupName="PeEdition" IsChecked="True"
+                         Content="Ask during Windows Setup" />
+
+            <RadioButton Name="EditionPickRadio" GroupName="PeEdition" Content="Install this edition:" />
+            <ComboBox Name="EditionBox" Width="320" HorizontalAlignment="Left" Margin="21,0,0,0" />
+            <TextBlock Classes="subnote"
+                       Text="Uses the edition's generic key, which selects it but does not activate it. Set a real key on the Activation page." />
+
+            <RadioButton Name="EditionFirmwareRadio" GroupName="PeEdition"
+                         Content="Use the product key stored in this machine's firmware" />
+            <TextBlock Classes="subnote"
+                       Text="For real hardware that came with Windows. A VM has no such key, so Setup would fall back to asking." />
+
+            <RadioButton Name="EditionKeyRadio" GroupName="PeEdition"
+                         Content="Use this product key, which also decides the edition:" />
+            <TextBox Name="EditionKeyBox" Width="260" HorizontalAlignment="Left" Margin="21,0,0,0"
+                     PlaceholderText="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" />
+
+            <TextBlock Classes="note" Margin="0,4,0,0"
+                       Text="The bypass of the Windows 11 requirements check is on the Setup page. It is part of setup.exe's own check, so it applies to this option only." />
+          </StackPanel>
+
+          <RadioButton Name="PeGenerateRadio" GroupName="PeMode"
+                       Content="Replace Windows Setup with a script generated from the settings below" />
+          <TextBlock Classes="subnote"
+                     Text="diskpart lays the target disk out, dism applies the image, bcdboot makes it bootable. Faster than Setup and completely unattended, and it wipes the target disk without asking, so the settings below are what stand between it and the wrong disk." />
+
+          <RadioButton Name="PeScriptRadio" GroupName="PeMode"
+                       Content="Replace Windows Setup with this script:" />
+          <TextBox Name="PeScriptBox" Classes="script" Margin="21,0,0,0" />
+          <TextBlock Classes="subnote"
+                     Text="A .cmd file run inside the PE session. It is on its own from there: nothing below applies to it." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <!-- The generated script's own settings. Greyed out rather than hidden under the option that
+           owns them, because there are four group boxes of them and folding the page in half as the
+           radio moves would be worse than leaving them visible and inert. -->
+      <StackPanel Name="GeneratePanel" Classes="page">
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Partitioning">
+          <StackPanel Classes="options">
+
+            <RadioButton Name="PartUnattendedRadio" GroupName="PePartition" IsChecked="True"
+                         Content="Wipe the target disk and lay it out like this:" />
+            <Grid Name="PartUnattendedPanel" Classes="under"
+                  ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="6" RowSpacing="4">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Target disk:" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="TargetDiskBox" Width="100" Minimum="0" Maximum="99"
+                               Value="0" Increment="1" FormatString="0" />
+                <TextBlock Classes="note" VerticalAlignment="Center"
+                           Text="A VM made by this wizard has one disk, which is 0." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Partition layout:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="LayoutBox" Width="280" HorizontalAlignment="Left">
+                <ComboBoxItem Content="Match the firmware (GPT on UEFI, MBR on BIOS)" />
+                <ComboBoxItem Content="GPT" />
+                <ComboBoxItem Content="MBR" />
+              </ComboBox>
+
+              <CheckBox Grid.Row="2" Grid.Column="1" Name="RecoveryCheck"
+                        Content="Create a recovery partition" />
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="System partition size:" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="SystemSizeBox" Width="120" Minimum="100" Maximum="10000"
+                               Value="300" Increment="50" FormatString="0" />
+                <TextBlock Text="MB" VerticalAlignment="Center" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="4" Grid.Column="0" Name="RecoverySizeLabel"
+                         Text="Recovery partition size:" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Name="RecoverySizePanel"
+                          Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="RecoverySizeBox" Width="120" Minimum="100" Maximum="10000"
+                               Value="1000" Increment="100" FormatString="0" />
+                <TextBlock Text="MB" VerticalAlignment="Center" />
+              </StackPanel>
+            </Grid>
+
+            <RadioButton Name="PartInteractiveRadio" GroupName="PePartition"
+                         Content="Stop and let me partition the disk by hand" />
+            <TextBlock Classes="subnote"
+                       Text="The script pauses so diskpart can be run from the PE console. The Windows partition must end up as W: and the system partition as S:, which is what the rest of the script expects." />
+
+            <RadioButton Name="PartScriptRadio" GroupName="PePartition"
+                         Content="Run this diskpart script:" />
+            <TextBox Name="PartScriptBox" Classes="script" Margin="21,0,0,0" />
+            <TextBlock Classes="subnote"
+                       Text="It must assign the letters W: and S: to the Windows and system partitions, and name the disk with a line such as SELECT DISK=0." />
+
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Disk assertions">
+          <StackPanel Classes="options">
+
+            <TextBlock Classes="note"
+                       Text="Checked before anything is wiped. A failed check halts the script with a message instead of formatting a disk that is not the one you meant." />
+
+            <TextBlock Name="AssertInteractiveNote" Classes="note" IsVisible="False"
+                       Text="Not available while the disk is partitioned by hand: the checks exist to decide whether the script may go ahead on its own, and there you are the one deciding." />
+
+            <StackPanel Name="AssertPanel" Classes="options">
+              <RadioButton Name="AssertGeneratedRadio" GroupName="PeAssert" IsChecked="True"
+                           Content="Check that the target disk is:" />
+              <StackPanel Name="AssertGeneratedPanel" Classes="under">
+                <CheckBox Name="AssertNoPartitionsCheck" Content="Empty, with no partitions on it yet" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <CheckBox Name="AssertMinSizeCheck" Content="At least" VerticalAlignment="Center" />
+                  <NumericUpDown Name="MinSizeBox" Width="110" Minimum="1" Maximum="99999"
+                                 Value="100" Increment="10" FormatString="0" />
+                  <TextBlock Text="GiB" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <CheckBox Name="AssertMaxSizeCheck" Content="At most" VerticalAlignment="Center" />
+                  <NumericUpDown Name="MaxSizeBox" Width="110" Minimum="1" Maximum="99999"
+                                 Value="4000" Increment="100" FormatString="0" />
+                  <TextBlock Text="GiB" VerticalAlignment="Center" />
+                </StackPanel>
+                <CheckBox Name="AssertInterfaceCheck" Content="Attached over IDE or SCSI" />
+                <CheckBox Name="AssertMediaCheck" Content="Fixed media rather than removable" />
+                <TextBlock Classes="note"
+                           Text="The two size bounds are off by default here, unlike in the reference generator: they are there to stop a script wiping somebody's external drive, and a virtual disk is routinely smaller than the lower bound, which would halt Setup on a machine that is perfectly fine." />
+              </StackPanel>
+
+              <RadioButton Name="AssertSkipRadio" GroupName="PeAssert" Content="Check nothing" />
+
+              <RadioButton Name="AssertScriptRadio" GroupName="PeAssert" Content="Run this script:" />
+              <TextBox Name="AssertScriptBox" Classes="script" Margin="21,0,0,0" />
+              <TextBlock Classes="subnote"
+                         Text="VBScript, run with cscript.exe. Exit with a non-zero code to halt Setup." />
+            </StackPanel>
+
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Install from">
+          <StackPanel Classes="options">
+
+            <TextBlock Classes="note"
+                       Text="An install.wim usually holds several editions. This is which one dism applies." />
+
+            <RadioButton Name="InstallInteractiveRadio" GroupName="PeInstallFrom" IsChecked="True"
+                         Content="List them and ask during the PE stage" />
+
+            <RadioButton Name="InstallEditionRadio" GroupName="PeInstallFrom"
+                         Content="The image for this edition:" />
+            <ComboBox Name="InstallEditionBox" Width="320" HorizontalAlignment="Left" Margin="21,0,0,0" />
+            <TextBlock Classes="subnote"
+                       Text="Matched by name, and the Windows version in that name comes from the PE session, so one answer file covers Windows 10 and 11." />
+
+            <RadioButton Name="InstallIndexRadio" GroupName="PeInstallFrom"
+                         Content="The image at this index:" />
+            <NumericUpDown Name="InstallIndexBox" Width="110" Minimum="1" Maximum="99"
+                           Value="1" Increment="1" FormatString="0"
+                           HorizontalAlignment="Left" Margin="21,0,0,0" />
+
+            <RadioButton Name="InstallNameRadio" GroupName="PeInstallFrom"
+                         Content="The image with this exact name:" />
+            <TextBox Name="InstallNameBox" Width="320" HorizontalAlignment="Left" Margin="21,0,0,0"
+                     PlaceholderText="Windows 11 Pro" />
+
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Generated script options">
+          <StackPanel Classes="options">
+            <CheckBox Name="DisableDefenderCheck" Content="Disable Windows Defender" />
+            <TextBlock Classes="subnote"
+                       Text="Its services are switched off in the installed image before it ever runs, which is the only point at which that can be done without tamper protection undoing it." />
+
+            <CheckBox Name="Disable8Dot3Check" Content="Disable 8.3 file names on the Windows partition" />
+            <CheckBox Name="CompactOsCheck" Content="Install Windows compressed (Compact OS)" />
+
+            <CheckBox Name="SkipIntegrityCheck" Content="Skip verifying the image while applying it" />
+            <TextBlock Classes="subnote" Text="Quicker, at the cost of not noticing a corrupt image." />
+
+            <CheckBox Name="PauseFormatCheck" Content="Pause before partitioning the disk" />
+            <CheckBox Name="PauseRebootCheck" Content="Pause before rebooting into the installed system" />
+            <TextBlock Classes="subnote"
+                       Text="Both are for watching the script work; either one stops it being unattended." />
+          </StackPanel>
+        </HeaderedContentControl>
+
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

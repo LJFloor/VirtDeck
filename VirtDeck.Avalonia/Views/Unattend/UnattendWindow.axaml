@@ -37,6 +37,7 @@
          implement IUnattendTab, so a new section is a TabItem here and nothing else. -->
     <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
       <TabItem Header="Region and language"><u:RegionLanguageTab /></TabItem>
+      <TabItem Header="Windows PE"><u:WindowsPeTab /></TabItem>
       <TabItem Header="Activation"><u:ActivationTab /></TabItem>
       <TabItem Header="Setup"><u:SetupTab /></TabItem>
       <TabItem Header="Computer"><u:ComputerTab /></TabItem>
@@ -50,6 +51,8 @@
       <TabItem Header="Accessibility"><u:AccessibilityTab /></TabItem>
       <TabItem Header="Personalization"><u:PersonalizationTab /></TabItem>
       <TabItem Header="Bloatware"><u:BloatwareTab /></TabItem>
+      <TabItem Header="Scripts"><u:ScriptsTab /></TabItem>
+      <TabItem Header="Advanced"><u:AdvancedTab /></TabItem>
     </TabControl>
 
   </DockPanel>
