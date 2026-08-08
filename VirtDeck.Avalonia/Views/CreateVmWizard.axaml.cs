@@ -310,20 +310,8 @@ public partial class CreateVmWizard : Window
         UnattendStatus.Text = _unattend == null
             ? "not configured"
             : reason == null
-                ? DescribeUnattend(_unattend)
+                ? "configured"
                 : "configured, but not written for this OS";
-    }
-
-    private static string DescribeUnattend(UnattendConfig config)
-    {
-        var accounts = config.UserAccounts;
-        if (accounts.AccountCreation == AccountCreationMode.MicrosoftAccountInteractive)
-            return "configured, Microsoft account added during Setup";
-        if (accounts.AccountCreation == AccountCreationMode.LocalAccountInteractive)
-            return "configured, local account added during Setup";
-
-        int count = accounts.Accounts.Count(a => !a.IsEmpty);
-        return count == 1 ? "configured, 1 local account" : $"configured, {count} local accounts";
     }
 
     // ---- Install media (General page) ----------------------------------
@@ -716,7 +704,7 @@ public partial class CreateVmWizard : Window
         // Windows setup at all.
         if (_unattend != null)
             Item("Windows setup:", UnattendApplies()
-                ? $"{DescribeUnattend(_unattend)}, answered from a generated CD-ROM"
+                ? "customized, answered from a generated CD-ROM"
                 : "customized, but not written (the selected OS is not Windows)");
 
         Header("Network");

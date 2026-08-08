@@ -87,6 +87,17 @@ namespace VirtDeck.Unattend
         public static IReadOnlyList<UnattendOption> Components => Loaded.Value.Components;
 
         /// <summary>
+        /// The seventeen switches behind Windows' "Performance Options" dialog, in the order the
+        /// reference tool lists them.
+        ///
+        /// Unlike every other list here the labels are **VirtDeck's**: the generator models these as a
+        /// bare C# enum with no display names, because its own front end holds the wording. The list is
+        /// still built by walking that enum rather than from the table below, so an effect added
+        /// upstream shows up here under its member name instead of silently disappearing from the page.
+        /// </summary>
+        public static IReadOnlyList<UnattendOption> Effects => Loaded.Value.Effects;
+
+        /// <summary>
         /// The generator plus every projection of its tables, built together so that no property can
         /// race another into a half-built cache.
         /// </summary>
@@ -109,6 +120,12 @@ namespace VirtDeck.Unattend
                 // The invisible editions are the ones with no generic key to offer.
                 WindowsEditions = Project(
                     Generator.WindowsEditions.Values.Where(e => e.Visible), x => x.DisplayName);
+
+                Effects = Enum.GetValues<Effect>()
+                              .Select(e => new UnattendOption(
+                                  e.ToString(),
+                                  EffectLabels.GetValueOrDefault(e.ToString(), e.ToString())))
+                              .ToList();
             }
 
             internal UnattendGenerator Generator { get; }
@@ -122,6 +139,32 @@ namespace VirtDeck.Unattend
             internal IReadOnlyList<UnattendOption> DesktopIcons { get; }
             internal IReadOnlyList<UnattendOption> StartFolders { get; }
             internal IReadOnlyList<UnattendOption> Components { get; }
+            internal IReadOnlyList<UnattendOption> Effects { get; }
+
+            /// <summary>
+            /// Windows' own wording for each visual effect, keyed by the generator's enum member name.
+            /// A member missing from here falls back to its own name rather than being dropped.
+            /// </summary>
+            private static readonly Dictionary<string, string> EffectLabels = new()
+            {
+                ["ControlAnimations"] = "Animate controls and elements inside windows",
+                ["AnimateMinMax"] = "Animate windows when minimizing and maximizing",
+                ["TaskbarAnimations"] = "Animations in the taskbar",
+                ["DWMAeroPeekEnabled"] = "Enable Peek",
+                ["MenuAnimation"] = "Fade or slide menus into view",
+                ["TooltipAnimation"] = "Fade or slide ToolTips into view",
+                ["SelectionFade"] = "Fade out menu items after clicking",
+                ["DWMSaveThumbnailEnabled"] = "Save taskbar thumbnail previews",
+                ["CursorShadow"] = "Show shadows under the mouse pointer",
+                ["ListviewShadow"] = "Use drop shadows for icon labels on the desktop",
+                ["ThumbnailsOrIcon"] = "Show thumbnails instead of icons",
+                ["ListviewAlphaSelect"] = "Show a translucent selection rectangle",
+                ["DragFullWindows"] = "Show window contents while dragging",
+                ["ComboBoxAnimation"] = "Slide open combo boxes",
+                ["FontSmoothing"] = "Smooth edges of screen fonts",
+                ["ListBoxSmoothScrolling"] = "Smooth-scroll list boxes",
+                ["DropShadow"] = "Show shadows under windows",
+            };
 
             private static IReadOnlyList<UnattendOption> Project<T>(
                 IImmutableDictionary<string, T> table, Func<T, string> label) where T : IKeyed =>

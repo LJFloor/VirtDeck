@@ -47,8 +47,14 @@ namespace VirtDeck.Unattend
             var vm = config.VirtualMachines;
             var explorer = config.FileExplorer;
 
+            var start = config.StartTaskbar;
+            var icons = config.EffectsIcons;
+
             return Configuration.Default with
             {
+                // Region and language
+                LanguageSettings = LanguageSettings(config.RegionLanguage, generator),
+
                 // Setup
                 PESettings = new DefaultPESettings(
                     // The edition Setup installs belongs to the Windows PE page, which does not exist
@@ -117,11 +123,240 @@ namespace VirtDeck.Unattend
                 VirtIoGuestTools = vm.VirtIoGuestTools,
                 ParallelsTools = vm.ParallelsTools,
 
+                // Start menu, taskbar and the folders beside the power button
+                TaskbarSearch = TaskbarSearch(start),
+                TaskbarIcons = TaskbarIcons(start),
+                StartPinsSettings = StartPins(start),
+                StartTilesSettings = StartTiles(start),
+                StartFolderSettings = StartFolders(start, generator),
+                DisableWidgets = start.DisableWidgets,
+                LeftTaskbar = start.LeftTaskbar,
+                HideTaskViewButton = start.HideTaskViewButton,
+                ShowAllTrayIcons = start.ShowAllTrayIcons,
+                DisableBingResults = start.DisableBingResults,
+
+                // Visual effects and desktop icons
+                Effects = Effects(icons),
+                DesktopIcons = DesktopIcons(icons, generator),
+                DeleteEdgeDesktopIcon = icons.DeleteEdgeDesktopIcon,
+
+                // Wi-Fi
+                WifiSettings = WifiSettings(config.Wifi),
+
                 // Accessibility
                 LockKeySettings = LockKeySettings(config.Accessibility),
                 StickyKeysSettings = StickyKeysSettings(config.Accessibility),
+
+                // Personalization
+                ColorSettings = ColorSettings(config.Personalization),
+                WallpaperSettings = WallpaperSettings(config.Personalization),
+                LockScreenSettings = LockScreenSettings(config.Personalization),
+
+                // Bloatware
+                Bloatwares = Bloatwares(config.Bloatware, generator),
             };
         }
+
+        /// <summary>
+        /// The three language slots. Only the first is required; the other two are optional in the
+        /// record and are dropped when their check box is off or their pair is incomplete.
+        /// </summary>
+        private static ILanguageSettings LanguageSettings(RegionLanguageConfig config, UnattendGenerator generator)
+        {
+            if (config.Mode != LanguageMode.Unattended) return new InteractiveLanguageSettings();
+
+            return new UnattendedLanguageSettings(
+                ImageLanguage: Lookup<ImageLanguage>(generator.ImageLanguages, config.ImageLanguageId,
+                                                     "display language"),
+                LocaleAndKeyboard: Pair(config.First, "first language")!,
+                LocaleAndKeyboard2: config.UseSecond ? Pair(config.Second, "second language") : null,
+                // A third preference with no second is a gap in an ordered list, which Windows has no
+                // way to express. The page greys the third slot out; this is the backstop for a preset
+                // that was hand-edited, or one saved before the second slot was turned off.
+                LocaleAndKeyboard3: config.UseSecond && config.UseThird
+                    ? Pair(config.Third, "third language")
+                    : null,
+                GeoLocation: Lookup<GeoLocation>(generator.GeoLocations, config.GeoLocationId,
+                                                 "home location"));
+
+            LocaleAndKeyboard Pair(LanguageAndKeyboard pair, string what) => new(
+                Lookup<UserLocale>(generator.UserLocales, pair.LocaleId, what),
+                Lookup<KeyboardIdentifier>(generator.KeyboardIdentifiers, pair.KeyboardId,
+                                           what + " keyboard layout"));
+        }
+
+        /// <summary>
+        /// Resolves one required id, refusing an empty or unknown one by name. The counterpart for a
+        /// *set* of ids is <see cref="Known{T}"/>, which drops what it does not recognise instead;
+        /// the difference is that losing one entry from a set is recoverable and silently choosing a
+        /// different single value is not.
+        /// </summary>
+        private static T Lookup<T>(IImmutableDictionary<string, T> table, string id, string what)
+            where T : class, IKeyed
+        {
+            if (id.Length == 0)
+                throw new ConfigurationException($"No {what} is selected.");
+
+            if (!table.TryGetValue(id, out var value))
+                throw new ConfigurationException(
+                    $"The {what} '{id}' is not one this version of VirtDeck knows. Pick one from the list.");
+
+            return value;
+        }
+
+        /// <summary>
+        /// The entries of <paramref name="ids"/> this build still recognises, in catalog order. An id
+        /// an updated generator has dropped is skipped rather than failing the whole answer file.
+        /// </summary>
+        private static IEnumerable<T> Known<T>(IImmutableDictionary<string, T> table, List<string> ids)
+            where T : class, IKeyed =>
+            ids.Select(id => table.TryGetValue(id, out var value) ? value : null)
+               .OfType<T>();
+
+        private static Schneegans.Unattend.TaskbarSearchMode TaskbarSearch(StartTaskbarConfig config) =>
+            config.TaskbarSearch switch
+            {
+                TaskbarSearchStyle.Box => Schneegans.Unattend.TaskbarSearchMode.Box,
+                TaskbarSearchStyle.Label => Schneegans.Unattend.TaskbarSearchMode.Label,
+                TaskbarSearchStyle.Icon => Schneegans.Unattend.TaskbarSearchMode.Icon,
+                TaskbarSearchStyle.Hide => Schneegans.Unattend.TaskbarSearchMode.Hide,
+                _ => throw new NotSupportedException($"Unknown taskbar search style '{config.TaskbarSearch}'."),
+            };
+
+        private static ITaskbarIcons TaskbarIcons(StartTaskbarConfig config) =>
+            config.TaskbarIcons switch
+            {
+                LayoutMode.Default => new DefaultTaskbarIcons(),
+                LayoutMode.Empty => new EmptyTaskbarIcons(),
+                LayoutMode.Custom => new CustomTaskbarIcons(Required(config.TaskbarIconsXml, "taskbar icon")),
+                _ => throw new NotSupportedException($"Unknown taskbar icons mode '{config.TaskbarIcons}'."),
+            };
+
+        private static IStartPinsSettings StartPins(StartTaskbarConfig config) =>
+            config.StartPins switch
+            {
+                LayoutMode.Default => new DefaultStartPinsSettings(),
+                LayoutMode.Empty => new EmptyStartPinsSettings(),
+                LayoutMode.Custom => new CustomStartPinsSettings(Required(config.StartPinsJson, "Start pins")),
+                _ => throw new NotSupportedException($"Unknown Start pins mode '{config.StartPins}'."),
+            };
+
+        private static IStartTilesSettings StartTiles(StartTaskbarConfig config) =>
+            config.StartTiles switch
+            {
+                LayoutMode.Default => new DefaultStartTilesSettings(),
+                LayoutMode.Empty => new EmptyStartTilesSettings(),
+                LayoutMode.Custom => new CustomStartTilesSettings(Required(config.StartTilesXml, "Start tiles")),
+                _ => throw new NotSupportedException($"Unknown Start tiles mode '{config.StartTiles}'."),
+            };
+
+        /// <summary>An empty document would reach the generator as a parse error about markup the user
+        /// never wrote, so say what is actually missing.</summary>
+        private static string Required(string document, string what) =>
+            document.Trim().Length > 0
+                ? document
+                : throw new ConfigurationException($"No {what} layout was pasted in.");
+
+        private static IStartFolderSettings StartFolders(StartTaskbarConfig config, UnattendGenerator generator) =>
+            config.StartFolders == StartFoldersMode.Custom
+                ? new CustomStartFolderSettings(Selection(generator.StartFolders, config.StartFolderIds))
+                : new DefaultStartFolderSettings();
+
+        private static IDesktopIconSettings DesktopIcons(EffectsIconsConfig config, UnattendGenerator generator) =>
+            config.DesktopIcons == DesktopIconsMode.Custom
+                ? new CustomDesktopIconSettings(Selection(generator.DesktopIcons, config.VisibleDesktopIcons))
+                : new DefaultDesktopIconSettings();
+
+        /// <summary>
+        /// The whole table as on/off pairs, because these settings replace Windows' list rather than
+        /// adding to it: anything the user did not tick has to arrive as an explicit "off", not as an
+        /// absent key.
+        /// </summary>
+        private static Dictionary<T, bool> Selection<T>(IImmutableDictionary<string, T> table, List<string> on)
+            where T : class, IKeyed =>
+            table.Values.ToDictionary(v => v, v => on.Contains(v.Id, StringComparer.OrdinalIgnoreCase));
+
+        private static IEffects Effects(EffectsIconsConfig config) =>
+            config.Effects switch
+            {
+                EffectsMode.Default => new DefaultEffects(),
+                EffectsMode.BestAppearance => new BestAppearanceEffects(),
+                EffectsMode.BestPerformance => new BestPerformanceEffects(),
+                EffectsMode.Custom => new CustomEffects(
+                    Enum.GetValues<Effect>().ToImmutableDictionary(
+                        e => e,
+                        e => config.EnabledEffects.Contains(e.ToString(), StringComparer.OrdinalIgnoreCase))),
+                _ => throw new NotSupportedException($"Unknown visual effects mode '{config.Effects}'."),
+            };
+
+        private static IWifiSettings WifiSettings(WifiConfig config) =>
+            config.Mode switch
+            {
+                WifiMode.Interactive => new InteractiveWifiSettings(),
+                WifiMode.Skip => new SkipWifiSettings(),
+                WifiMode.FromProfile => new XmlWifiSettings(Required(config.ProfileXml, "WLAN profile")),
+                WifiMode.Unattended => new ParameterizedWifiSettings(
+                    Name: config.Name.Length > 0
+                        ? config.Name
+                        : throw new ConfigurationException("No Wi-Fi network name was entered."),
+                    Password: config.Password,
+                    ConnectAutomatically: config.ConnectAutomatically,
+                    Authentication: config.Authentication switch
+                    {
+                        WifiAuthenticationMode.Open => WifiAuthentications.Open,
+                        WifiAuthenticationMode.WPA2PSK => WifiAuthentications.WPA2PSK,
+                        WifiAuthenticationMode.WPA3SAE => WifiAuthentications.WPA3SAE,
+                        _ => throw new NotSupportedException($"Unknown Wi-Fi authentication '{config.Authentication}'."),
+                    },
+                    NonBroadcast: config.NonBroadcast),
+                _ => throw new NotSupportedException($"Unknown Wi-Fi mode '{config.Mode}'."),
+            };
+
+        private static IColorSettings ColorSettings(PersonalizationConfig config) =>
+            config.Colors == ColorMode.Custom
+                ? new CustomColorSettings(
+                    SystemTheme: config.SystemTheme == ThemeChoice.Light ? ColorTheme.Light : ColorTheme.Dark,
+                    AppsTheme: config.AppsTheme == ThemeChoice.Light ? ColorTheme.Light : ColorTheme.Dark,
+                    EnableTransparency: config.EnableTransparency,
+                    AccentColorOnStart: config.AccentColorOnStart,
+                    AccentColorOnBorders: config.AccentColorOnBorders,
+                    AccentColor: Color(config.AccentColor, "accent colour"))
+                : new DefaultColorSettings();
+
+        private static IWallpaperSettings WallpaperSettings(PersonalizationConfig config) =>
+            config.Wallpaper switch
+            {
+                WallpaperMode.Default => new DefaultWallpaperSettings(),
+                WallpaperMode.Solid => new SolidWallpaperSettings(Color(config.WallpaperColor, "wallpaper colour")),
+                WallpaperMode.Script => new ScriptWallpaperSettings(Required(config.WallpaperScript, "wallpaper script")),
+                _ => throw new NotSupportedException($"Unknown wallpaper mode '{config.Wallpaper}'."),
+            };
+
+        private static ILockScreenSettings LockScreenSettings(PersonalizationConfig config) =>
+            config.LockScreen == LockScreenMode.Script
+                ? new ScriptLockScreenSettings(Required(config.LockScreenScript, "lock screen script"))
+                : new DefaultLockScreenSettings();
+
+        /// <summary>
+        /// The model stores colours as text so a preset stays readable and hand-editable; this is where
+        /// that text has to be a colour. ColorTranslator throws several different exception types for
+        /// bad input, so they all become one message naming the value.
+        /// </summary>
+        private static System.Drawing.Color Color(string value, string what)
+        {
+            try
+            {
+                return System.Drawing.ColorTranslator.FromHtml(value);
+            }
+            catch (Exception)
+            {
+                throw new ConfigurationException(
+                    $"The {what} '{value}' is not a colour. Use the form #RRGGBB.");
+            }
+        }
+
+        private static ImmutableList<Bloatware> Bloatwares(BloatwareConfig config, UnattendGenerator generator) =>
+            ImmutableList.CreateRange(Known(generator.Bloatwares, config.RemoveIds));
 
         private static Schneegans.Unattend.ExpressSettingsMode ExpressSettings(SetupConfig config) =>
             config.ExpressSettings switch

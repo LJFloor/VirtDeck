@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.WifiTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="WLAN / Wi-Fi setup">
+        <StackPanel Classes="options">
+
+          <TextBlock Classes="note"
+                     Text="A VM created by this wizard has a wired virtual network adapter and no wireless hardware, so this matters only for an answer file you intend to carry to real hardware." />
+
+          <RadioButton Name="WifiInteractiveRadio" GroupName="WifiMode" IsChecked="True"
+                       Content="Configure Wi-Fi interactively during Windows Setup" />
+
+          <RadioButton Name="WifiSkipRadio" GroupName="WifiMode"
+                       Content="Skip Wi-Fi configuration" />
+          <TextBlock Classes="subnote"
+                     Text="Choose this when there is a wired connection, which is the case for a VM." />
+
+          <RadioButton Name="WifiUnattendedRadio" GroupName="WifiMode"
+                       Content="Connect to this network:" />
+          <StackPanel Name="WifiFieldsPanel" Classes="under">
+            <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="6" RowSpacing="4">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Network name (SSID):" VerticalAlignment="Center" />
+              <TextBox Grid.Row="0" Grid.Column="1" Name="WifiNameBox" Width="280" HorizontalAlignment="Left" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Authentication:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="WifiAuthBox" Width="280" HorizontalAlignment="Left">
+                <ComboBoxItem Content="Open (no password)" />
+                <ComboBoxItem Content="WPA2-Personal AES" />
+                <ComboBoxItem Content="WPA3-Personal AES" />
+              </ComboBox>
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Name="WifiPasswordLabel" Text="Password:" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" Name="WifiPasswordBox" Width="280" HorizontalAlignment="Left" />
+            </Grid>
+            <CheckBox Name="WifiAutoCheck" Content="Connect automatically" />
+            <CheckBox Name="WifiNonBroadcastCheck" Content="Connect even if the network is not broadcasting its name" />
+          </StackPanel>
+
+          <RadioButton Name="WifiProfileRadio" GroupName="WifiMode"
+                       Content="Use a WLAN profile exported from another machine:" />
+          <TextBox Name="WifiXmlBox" Classes="script" Margin="21,0,0,0" />
+          <TextBlock Classes="subnote"
+                     Text="Produced by netsh.exe wlan export profile key=clear. It is checked against the WLAN profile schema, so a truncated or wrong file is reported here rather than failing silently during Setup." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

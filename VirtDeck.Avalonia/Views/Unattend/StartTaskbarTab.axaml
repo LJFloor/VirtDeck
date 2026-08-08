@@ -1,0 +1,80 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.StartTaskbarTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Taskbar">
+        <StackPanel Classes="options">
+          <TextBlock Text="How the search box is displayed:" />
+          <StackPanel Classes="under" Spacing="4">
+            <RadioButton Name="SearchBoxRadio" GroupName="TaskbarSearch" IsChecked="True" Content="Full search box" />
+            <RadioButton Name="SearchLabelRadio" GroupName="TaskbarSearch" Content="Icon and label" />
+            <RadioButton Name="SearchIconRadio" GroupName="TaskbarSearch" Content="Icon only" />
+            <RadioButton Name="SearchHideRadio" GroupName="TaskbarSearch" Content="Hidden" />
+          </StackPanel>
+
+          <CheckBox Name="DisableWidgetsCheck" Content="Disable widgets"
+                    ToolTip.Tip="Hides the news and weather widget from the taskbar." />
+          <CheckBox Name="LeftTaskbarCheck" Content="Left-align the taskbar in Windows 11" />
+          <CheckBox Name="HideTaskViewCheck" Content="Hide the Task view button" />
+          <CheckBox Name="ShowAllTrayIconsCheck" Content="Always show all tray icons" />
+          <CheckBox Name="DisableBingResultsCheck"
+                    Content="Do not show Bing results when searching in the Start menu or search box" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Taskbar icons">
+        <StackPanel Classes="options">
+          <RadioButton Name="TaskbarIconsDefaultRadio" GroupName="TaskbarIcons" IsChecked="True"
+                       Content="Use the default icons" />
+          <RadioButton Name="TaskbarIconsEmptyRadio" GroupName="TaskbarIcons" Content="Remove all icons" />
+          <RadioButton Name="TaskbarIconsCustomRadio" GroupName="TaskbarIcons"
+                       Content="Pin these icons, from a TaskbarLayoutModification document:" />
+          <TextBox Name="TaskbarIconsXmlBox" Classes="script" Margin="21,0,0,0" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Windows 11 Start menu">
+        <StackPanel Classes="options">
+          <RadioButton Name="PinsDefaultRadio" GroupName="StartPins" IsChecked="True" Content="Use the default pins" />
+          <RadioButton Name="PinsEmptyRadio" GroupName="StartPins" Content="Remove all pins" />
+          <RadioButton Name="PinsCustomRadio" GroupName="StartPins"
+                       Content="Use these pins, from JSON produced by Export-StartLayout:" />
+          <TextBox Name="StartPinsJsonBox" Classes="script" Margin="21,0,0,0" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Windows 10 Start menu">
+        <StackPanel Classes="options">
+          <RadioButton Name="TilesDefaultRadio" GroupName="StartTiles" IsChecked="True" Content="Use the default tiles" />
+          <RadioButton Name="TilesEmptyRadio" GroupName="StartTiles" Content="Remove all tiles" />
+          <RadioButton Name="TilesCustomRadio" GroupName="StartTiles"
+                       Content="Use these tiles, from XML produced by Export-StartLayout:" />
+          <TextBox Name="StartTilesXmlBox" Classes="script" Margin="21,0,0,0" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Folders on Start">
+        <StackPanel Classes="options">
+          <RadioButton Name="FoldersDefaultRadio" GroupName="StartFolders" IsChecked="True"
+                       Content="Show the default folders next to the Power button" />
+          <RadioButton Name="FoldersCustomRadio" GroupName="StartFolders" Content="Show these folders:" />
+
+          <ItemsControl Name="StartFoldersList" Classes="under">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel Orientation="Horizontal" ItemWidth="200" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+
+          <TextBlock Classes="note"
+                     Text="Windows 11 only; it has no effect on Windows 10. Unticked means hidden, not left alone." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

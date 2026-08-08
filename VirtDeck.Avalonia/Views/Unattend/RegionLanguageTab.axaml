@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.RegionLanguageTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Region and language settings">
+        <StackPanel Classes="options">
+
+          <RadioButton Name="LanguageInteractiveRadio" GroupName="RegionLanguage" IsChecked="True"
+                       Content="Select language settings interactively during Windows Setup" />
+
+          <RadioButton Name="LanguageUnattendedRadio" GroupName="RegionLanguage"
+                       Content="Install Windows using these language settings:" />
+
+          <StackPanel Name="LanguagePanel" Classes="under">
+
+            <Grid ColumnDefinitions="150,*" RowDefinitions="Auto" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Text="Windows display language:" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="1" Name="ImageLanguageBox" Width="320" HorizontalAlignment="Left" />
+            </Grid>
+
+            <TextBlock Classes="note"
+                       Text="Then choose one to three input languages, in order of preference. The first is the one Windows starts with." />
+
+            <Grid ColumnDefinitions="150,*" ColumnSpacing="6" RowSpacing="4"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+              <TextBlock Grid.Row="0" Grid.Column="0" Classes="columnheader" Text="First language" />
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Language:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="Locale1Box" Width="320" HorizontalAlignment="Left" />
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Keyboard layout:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="2" Grid.Column="1" Name="Keyboard1Box" Width="320" HorizontalAlignment="Left" />
+
+              <CheckBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Name="UseSecondCheck"
+                        Content="Specify a second language and keyboard layout" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="4" Grid.Column="0" Name="Locale2Label" Text="Language:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="4" Grid.Column="1" Name="Locale2Box" Width="320" HorizontalAlignment="Left" />
+              <TextBlock Grid.Row="5" Grid.Column="0" Name="Keyboard2Label" Text="Keyboard layout:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="5" Grid.Column="1" Name="Keyboard2Box" Width="320" HorizontalAlignment="Left" />
+
+              <CheckBox Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Name="UseThirdCheck"
+                        Content="Specify a third language and keyboard layout" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="7" Grid.Column="0" Name="Locale3Label" Text="Language:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="7" Grid.Column="1" Name="Locale3Box" Width="320" HorizontalAlignment="Left" />
+            </Grid>
+
+            <Grid ColumnDefinitions="150,*" ColumnSpacing="6" RowSpacing="4" RowDefinitions="Auto,Auto">
+              <TextBlock Grid.Row="0" Grid.Column="0" Name="Keyboard3Label" Text="Keyboard layout:" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="0" Grid.Column="1" Name="Keyboard3Box" Width="320" HorizontalAlignment="Left" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Home location:" VerticalAlignment="Center" Margin="0,8,0,0" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="GeoLocationBox" Width="320"
+                        HorizontalAlignment="Left" Margin="0,8,0,0" />
+            </Grid>
+
+            <TextBlock Classes="note"
+                       Text="Home location is a country rather than a language: it decides which regional content and device setup options Windows offers, and it is set separately from the display language." />
+
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

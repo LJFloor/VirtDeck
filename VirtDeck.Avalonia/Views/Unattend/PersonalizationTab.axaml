@@ -1,0 +1,72 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.PersonalizationTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Colors">
+        <StackPanel Classes="options">
+          <RadioButton Name="ColorsDefaultRadio" GroupName="PersonalColors" IsChecked="True"
+                       Content="Use the default color theme" />
+          <RadioButton Name="ColorsCustomRadio" GroupName="PersonalColors"
+                       Content="Use a custom color theme:" />
+
+          <StackPanel Name="ColorsPanel" Classes="under">
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="6" RowSpacing="4">
+              <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"
+                         Text="Taskbar and Start menu:" />
+              <ComboBox Grid.Row="0" Grid.Column="1" Name="SystemThemeBox" Width="140" HorizontalAlignment="Left">
+                <ComboBoxItem Content="Dark" />
+                <ComboBoxItem Content="Light" />
+              </ComboBox>
+
+              <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Apps:" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="AppsThemeBox" Width="140" HorizontalAlignment="Left">
+                <ComboBoxItem Content="Dark" />
+                <ComboBoxItem Content="Light" />
+              </ComboBox>
+
+              <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Accent color:" />
+              <TextBox Grid.Row="2" Grid.Column="1" Name="AccentColorBox" Width="140"
+                       HorizontalAlignment="Left" PlaceholderText="#0078D4" />
+            </Grid>
+
+            <CheckBox Name="AccentOnStartCheck" Content="Show the accent color on the Start menu and taskbar" />
+            <CheckBox Name="AccentOnBordersCheck" Content="Show the accent color on title bars and window borders" />
+            <CheckBox Name="TransparencyCheck" Content="Windows and surfaces appear translucent" />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Desktop wallpaper">
+        <StackPanel Classes="options">
+          <RadioButton Name="WallpaperDefaultRadio" GroupName="PersonalWallpaper" IsChecked="True"
+                       Content="Use the default wallpaper" />
+
+          <RadioButton Name="WallpaperSolidRadio" GroupName="PersonalWallpaper"
+                       Content="Use a solid color background:" />
+          <TextBox Name="WallpaperColorBox" Width="140" HorizontalAlignment="Left"
+                   Margin="21,0,0,0" PlaceholderText="#008080" />
+
+          <RadioButton Name="WallpaperScriptRadio" GroupName="PersonalWallpaper"
+                       Content="Run a PowerShell script that loads a wallpaper image:" />
+          <TextBox Name="WallpaperScriptBox" Classes="script" Margin="21,0,0,0" />
+          <TextBlock Classes="subnote"
+                     Text="An image cannot be carried inside an answer file, so a wallpaper has to be fetched or copied by a script that runs during Setup." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Lock screen image">
+        <StackPanel Classes="options">
+          <RadioButton Name="LockScreenDefaultRadio" GroupName="PersonalLockScreen" IsChecked="True"
+                       Content="Use the default lock screen image" />
+          <RadioButton Name="LockScreenScriptRadio" GroupName="PersonalLockScreen"
+                       Content="Run a PowerShell script that loads the lock screen image:" />
+          <TextBox Name="LockScreenScriptBox" Classes="script" Margin="21,0,0,0" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,8 +1,19 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:fluent="clr-namespace:Avalonia.Themes.Fluent;assembly=Avalonia.Themes.Fluent"
+             xmlns:unattend="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
              x:Class="VirtDeck.Avalonia.App"
              RequestedThemeVariant="Default">
+  <!-- The answer-file window's four checklist pages (bloatware, desktop icons, folders on Start,
+       visual effects) all render the same row, so the template lives here once instead of in each
+       page's resources. The pages differ only in the catalog they fill from and the column width
+       they flow into, both of which are set on the ItemsControl. -->
+  <Application.DataTemplates>
+    <DataTemplate DataType="unattend:CheckRow">
+      <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+    </DataTemplate>
+  </Application.DataTemplates>
+
   <!-- Buttons and text fields in JetBrains Classic UI trim. Merged here, not into
        Application.Styles, so its TextControl* keys resolve ahead of FluentTheme's. -->
   <Application.Resources>

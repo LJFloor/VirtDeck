@@ -15,14 +15,20 @@ namespace VirtDeck.Unattend
         /// <summary>Preset format version. See <see cref="UnattendPreset"/>.</summary>
         public int Version { get; set; } = UnattendPreset.CurrentVersion;
 
+        public RegionLanguageConfig RegionLanguage { get; set; } = new();
         public SetupConfig Setup { get; set; } = new();
         public ActivationConfig Activation { get; set; } = new();
         public ComputerConfig Computer { get; set; } = new();
         public UserAccountsConfig UserAccounts { get; set; } = new();
         public FileExplorerConfig FileExplorer { get; set; } = new();
+        public StartTaskbarConfig StartTaskbar { get; set; } = new();
         public SystemTweaksConfig SystemTweaks { get; set; } = new();
+        public EffectsIconsConfig EffectsIcons { get; set; } = new();
         public VirtualMachineConfig VirtualMachines { get; set; } = new();
+        public WifiConfig Wifi { get; set; } = new();
         public AccessibilityConfig Accessibility { get; set; } = new();
+        public PersonalizationConfig Personalization { get; set; } = new();
+        public BloatwareConfig Bloatware { get; set; } = new();
 
         /// <summary>
         /// A deep copy, so the window can edit freely and Cancel can simply throw the copy away.

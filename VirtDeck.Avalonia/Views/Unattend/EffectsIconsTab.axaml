@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.EffectsIconsTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Visual effects">
+        <StackPanel Classes="options">
+          <RadioButton Name="EffectsDefaultRadio" GroupName="IconsEffects" IsChecked="True"
+                       Content="Use the default settings chosen by Windows" />
+          <RadioButton Name="EffectsAppearanceRadio" GroupName="IconsEffects"
+                       Content="Adjust for best appearance" />
+          <RadioButton Name="EffectsPerformanceRadio" GroupName="IconsEffects"
+                       Content="Adjust for best performance" />
+          <TextBlock Classes="subnote"
+                     Text="Worth considering for a VM: the animations and shadows are the part of the desktop that a software renderer struggles with most." />
+          <RadioButton Name="EffectsCustomRadio" GroupName="IconsEffects"
+                       Content="Use custom settings:" />
+
+          <ItemsControl Name="EffectsList" Classes="under">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel Orientation="Horizontal" ItemWidth="320" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Desktop icons">
+        <StackPanel Classes="options">
+          <CheckBox Name="DeleteEdgeIconCheck" Content="Delete the Edge shortcut from the desktop" />
+
+          <RadioButton Name="IconsDefaultRadio" GroupName="IconsDesktop" IsChecked="True"
+                       Content="Show the default desktop icons" />
+          <RadioButton Name="IconsCustomRadio" GroupName="IconsDesktop"
+                       Content="Show these desktop icons:" />
+
+          <ItemsControl Name="DesktopIconsList" Classes="under">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel Orientation="Horizontal" ItemWidth="200" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+
+          <TextBlock Classes="note"
+                     Text="Unticked means hidden, not left alone: this list replaces Windows' own choice rather than adding to it." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

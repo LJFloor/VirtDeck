@@ -36,14 +36,20 @@
          The pages are not named: the window walks these items and talks to whichever of them
          implement IUnattendTab, so a new section is a TabItem here and nothing else. -->
     <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
+      <TabItem Header="Region and language"><u:RegionLanguageTab /></TabItem>
       <TabItem Header="Activation"><u:ActivationTab /></TabItem>
       <TabItem Header="Setup"><u:SetupTab /></TabItem>
       <TabItem Header="Computer"><u:ComputerTab /></TabItem>
       <TabItem Header="User accounts"><u:UserAccountsTab /></TabItem>
       <TabItem Header="File Explorer"><u:FileExplorerTab /></TabItem>
+      <TabItem Header="Start and taskbar"><u:StartTaskbarTab /></TabItem>
       <TabItem Header="System tweaks"><u:SystemTweaksTab /></TabItem>
+      <TabItem Header="Effects and icons"><u:EffectsIconsTab /></TabItem>
       <TabItem Header="Virtual machines"><u:VirtualMachinesTab /></TabItem>
+      <TabItem Header="Wi-Fi"><u:WifiTab /></TabItem>
       <TabItem Header="Accessibility"><u:AccessibilityTab /></TabItem>
+      <TabItem Header="Personalization"><u:PersonalizationTab /></TabItem>
+      <TabItem Header="Bloatware"><u:BloatwareTab /></TabItem>
     </TabControl>
 
   </DockPanel>

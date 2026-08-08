@@ -340,6 +340,21 @@ constructed at once and live in one `TabControl`, so two pages using the same gr
 single group and silently uncheck each other. Every group name is therefore prefixed with its page
 (`SetupExpress`, `ComputerName`, `ExplorerHideFiles`, `AccessLockKeys`, ...).
 
+**Four pages render a tickable list out of one of the generator's tables** (bloatware, desktop icons,
+folders on Start, visual effects). They share `CheckRow` and a single `DataTemplate` in
+`App.axaml`'s `Application.DataTemplates`, and differ only in the catalog they fill from and the
+`WrapPanel.ItemWidth` they flow into. `CheckRow.From`/`CheckedIds` convert between the rows and the
+`List<string>` of ids the model stores. In all four the tick list is the **whole** setting rather than
+a set of overrides: the mapper expands it to on/off pairs across the entire table, because Windows
+replaces its own list rather than merging.
+
+**The pickers are `ComboBox`es filled through `Views/Unattend/OptionBox`**, which selects and reads
+back by id so no page repeats the find-by-id pair. `UnattendOption.ToString` is what lets them work
+with no `DataTemplate`. An id the catalog does not have clears the box rather than falling back to its
+first entry, so an unanswered picker is visibly unanswered. `UserLocales` is 686 entries and
+`GeoLocations` 267; a plain `ComboBox` copes but scrolls poorly, and swapping in `AutoCompleteBox` is
+a known refinement, not a correctness problem.
+
 **How the machine gets its first account is one radio group of three, not a table plus two
 checkboxes** (`AccountCreationMode`): OOBE asks for a Microsoft account (the default), or OOBE asks
 for a local one, or the answer file names the accounts itself. This is one place VirtDeck's UI is a
@@ -397,6 +412,11 @@ upstream drops degrades to "skipped" instead of a load failure. Never hand an un
 value rather than a member of a set, an unknown one is an **error naming it**, not a quiet fallback,
 because substituting a different answer for the user's is worse than refusing (see
 `UnattendConfigMapper.TimeZoneSettings`).
+
+Where an id is one **required** value rather than a member of a set, an unknown one is refused by
+name; where it is a member of a set, it is dropped. `UnattendConfigMapper.Lookup` and
+`UnattendConfigMapper.Known` are the two halves of that, and the difference is that losing one
+bloatware removal from a preset is recoverable while silently installing a different locale is not.
 
 A **closed** set gets a VirtDeck type mirroring it: an enum named `<Thing>Mode` for a radio group,
 plain bools for a fixed row of check boxes. That covers both the choice of *which* implementation of

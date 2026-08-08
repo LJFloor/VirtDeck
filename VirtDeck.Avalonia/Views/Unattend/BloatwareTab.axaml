@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.BloatwareTab">
+
+  <DockPanel>
+
+    <!-- Fixed above the list rather than scrolling with it: with sixty entries the count and the
+         select-all pair are wanted from anywhere in the list, not just the top. -->
+    <StackPanel DockPanel.Dock="Top" Margin="16,16,16,8" Spacing="8">
+      <TextBlock Classes="note"
+                 Text="Applications and features Windows installs that can be removed during Setup. Each one is uninstalled by a provisioned-package, capability or optional-feature removal run before the first user logs on, so nothing has to be uninstalled by hand afterwards." />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="SelectAllButton" Content="Select all" />
+        <Button Name="SelectNoneButton" Content="Select none" />
+        <TextBlock Name="SelectedCount" VerticalAlignment="Center" Opacity="0.7" />
+      </StackPanel>
+    </StackPanel>
+
+    <ScrollViewer Padding="16,0,16,16">
+      <!-- Three columns of a fixed width, which is what makes sixty checkboxes readable. ItemWidth
+           on the WrapPanel sizes every row the same, so the columns line up without a Grid. -->
+      <ItemsControl Name="BloatwareList">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel Orientation="Horizontal" ItemWidth="250" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+      </ItemsControl>
+    </ScrollViewer>
+
+  </DockPanel>
+</UserControl>
