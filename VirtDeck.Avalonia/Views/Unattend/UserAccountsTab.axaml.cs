@@ -12,7 +12,7 @@ namespace VirtDeck.Avalonia.Views.Unattend;
 /// it. Unused rows are left blank and dropped in <see cref="Apply"/>, which is cheaper for both the
 /// user and the code than an add/remove list for something nobody fills more than twice.
 /// </summary>
-public partial class UserAccountsTab : UserControl
+public partial class UserAccountsTab : UserControl, IUnattendTab
 {
     private const int AccountRowCount = 5;
 
@@ -31,13 +31,17 @@ public partial class UserAccountsTab : UserControl
         LogonAdministratorRadio.IsCheckedChanged += (_, _) => UpdateEnabled();
         PasswordCustomRadio.IsCheckedChanged += (_, _) => UpdateEnabled();
         LockoutCustomRadio.IsCheckedChanged += (_, _) => UpdateEnabled();
+        LockoutWindowBox.ValueChanged += (_, _) => UpdateEnabled();
+        LockoutDurationBox.ValueChanged += (_, _) => UpdateEnabled();
 
-        Load(new UserAccountsConfig());
+        Load(new UnattendConfig());
     }
 
     /// <summary>Fills the page from a config; the table is padded out to its fixed row count.</summary>
-    public void Load(UserAccountsConfig config)
+    public void Load(UnattendConfig root)
     {
+        var config = root.UserAccounts;
+
         AccountsTableRadio.IsChecked = config.AccountCreation == AccountCreationMode.LocalAccounts;
         MicrosoftAccountRadio.IsChecked = config.AccountCreation == AccountCreationMode.MicrosoftAccountInteractive;
         LocalAccountRadio.IsChecked = config.AccountCreation == AccountCreationMode.LocalAccountInteractive;
@@ -72,8 +76,10 @@ public partial class UserAccountsTab : UserControl
     }
 
     /// <summary>Writes the page back into a config. Blank table rows are not accounts.</summary>
-    public void Apply(UserAccountsConfig config)
+    public void Apply(UnattendConfig root)
     {
+        var config = root.UserAccounts;
+
         config.AccountCreation =
             LocalAccountRadio.IsChecked == true ? AccountCreationMode.LocalAccountInteractive :
             AccountsTableRadio.IsChecked == true ? AccountCreationMode.LocalAccounts :
@@ -110,11 +116,23 @@ public partial class UserAccountsTab : UserControl
     {
         AccountsTablePanel.IsEnabled = AccountsTableRadio.IsChecked == true;
         AdminPasswordBox.IsEnabled = LogonAdministratorRadio.IsChecked == true;
-        NoAdminNote.IsVisible = LogonFirstAdminRadio.IsChecked == true &&
+
+        // The generator refuses a table of accounts with no administrator in it, unless the built-in
+        // Administrator is the one being activated. Saying so here rather than only on OK, because the
+        // group column defaults to Users and the mistake is otherwise invisible until then.
+        NoAdminNote.IsVisible = AccountsTableRadio.IsChecked == true &&
+                                LogonAdministratorRadio.IsChecked != true &&
                                 !_accounts.Any(r => !r.IsEmpty && r.IsAdministrator);
+
         PasswordDaysBox.IsEnabled = PasswordCustomRadio.IsChecked == true;
-        LockoutThresholdBox.IsEnabled = LockoutCustomRadio.IsChecked == true;
-        LockoutWindowBox.IsEnabled = LockoutCustomRadio.IsChecked == true;
-        LockoutDurationBox.IsEnabled = LockoutCustomRadio.IsChecked == true;
+
+        bool custom = LockoutCustomRadio.IsChecked == true;
+        LockoutThresholdBox.IsEnabled = custom;
+        LockoutWindowBox.IsEnabled = custom;
+        LockoutDurationBox.IsEnabled = custom;
+
+        // The generator rejects a window longer than the duration. Both are spinners in the middle of
+        // a sentence, so the mistake is easy to make and invisible until OK; say it where it happens.
+        LockoutWindowNote.IsVisible = custom && LockoutWindowBox.Value > LockoutDurationBox.Value;
     }
 }

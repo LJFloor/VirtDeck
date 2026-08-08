@@ -1,0 +1,86 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.SystemTweaksTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <TextBlock Classes="note"
+                 Text="Every switch here is off by default, and off is what Windows does on its own. Each one is applied by a registry change or a command run during Setup." />
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Updates and restarts">
+        <StackPanel Classes="options">
+          <CheckBox Name="DisableWindowsUpdateCheck" Content="Disable Windows Update"
+                    ToolTip.Tip="Creates a scheduled task named PauseWindowsUpdate that keeps updates paused." />
+          <CheckBox Name="PreventAutomaticRebootCheck"
+                    Content="Prevent Windows Update from rebooting the computer"
+                    ToolTip.Tip="Creates a scheduled task that keeps moving the active hours window forward." />
+          <CheckBox Name="DisableAutomaticRestartSignOnCheck"
+                    Content="Disable automatic sign-on of the last user after a restart" />
+          <CheckBox Name="DisableFastStartupCheck" Content="Disable Fast Startup" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Security and privacy">
+        <StackPanel Classes="options">
+          <CheckBox Name="DisableUacCheck" Content="Disable User Account Control (UAC)"
+                    ToolTip.Tip="Not recommended alongside a Microsoft account: Windows will not let one sign in with UAC off." />
+          <CheckBox Name="DisableSacCheck" Content="Disable Smart App Control"
+                    ToolTip.Tip="Windows 11 only, and it cannot be turned back on afterwards without reinstalling." />
+          <CheckBox Name="DisableSmartScreenCheck" Content="Disable SmartScreen in Windows and Edge" />
+          <CheckBox Name="PreventDeviceEncryptionCheck" Content="Prevent device encryption"
+                    ToolTip.Tip="Windows 11 would otherwise turn BitLocker on by itself." />
+          <CheckBox Name="HardenSystemDriveAclCheck" Content="Harden ACLs"
+                    ToolTip.Tip="Removes write permission on C:\ for Authenticated Users." />
+          <CheckBox Name="DisableWpbtCheck"
+                    Content="Disable Windows Platform Binary Table (WPBT) execution" />
+          <CheckBox Name="PreventDeviceAppsCheck"
+                    Content="Prevent download of applications associated with hardware devices" />
+          <CheckBox Name="DisableSystemRestoreCheck"
+                    Content="Disable System Protection / System Restore" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Auditing">
+        <StackPanel Classes="options">
+          <CheckBox Name="ProcessAuditCheck" Content="Audit process creation events"
+                    ToolTip.Tip="Writes an event to the Security log every time a process starts." />
+          <StackPanel Name="ProcessAuditPanel" Classes="under">
+            <CheckBox Name="ProcessAuditCommandLineCheck" Content="Include the command line in log events" />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Edge">
+        <StackPanel Classes="options">
+          <CheckBox Name="HideEdgeFreCheck" Content="Hide the Edge first-run experience" />
+          <CheckBox Name="DisableEdgeStartupBoostCheck"
+                    Content="Disable Edge Startup Boost and background mode" />
+          <CheckBox Name="MakeEdgeUninstallableCheck" Content="Make Edge uninstallable" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Convenience">
+        <StackPanel Classes="options">
+          <CheckBox Name="EnableLongPathsCheck" Content="Enable long paths"
+                    ToolTip.Tip="Sets LongPathsEnabled, which lifts the 260-character path limit for programs that opt in." />
+          <CheckBox Name="EnableRemoteDesktopCheck" Content="Enable Remote Desktop services (RDP)" />
+          <CheckBox Name="AllowPowerShellScriptsCheck"
+                    Content="Allow execution of PowerShell script files"
+                    ToolTip.Tip="Sets the execution policy to RemoteSigned." />
+          <CheckBox Name="DisableLastAccessCheck" Content="Do not update the Last Access Time stamp" />
+          <CheckBox Name="DisablePointerPrecisionCheck"
+                    Content="Disable the Enhance Pointer Precision mouse setting" />
+          <CheckBox Name="TurnOffSystemSoundsCheck" Content="Turn off system sounds" />
+          <CheckBox Name="DisableAppSuggestionsCheck"
+                    Content="Disable app suggestions and the Content Delivery Manager"
+                    ToolTip.Tip="Stops Windows silently installing promoted apps." />
+          <CheckBox Name="DeleteJunctionsCheck" Content="Delete hidden junction points"
+                    ToolTip.Tip="Removes the compatibility junctions such as C:\Documents and Settings." />
+          <CheckBox Name="DeleteWindowsOldCheck" Content="Delete the empty C:\Windows.old folder" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

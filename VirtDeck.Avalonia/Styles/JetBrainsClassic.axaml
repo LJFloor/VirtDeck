@@ -145,6 +145,11 @@
       <SolidColorBrush x:Key="JbListItemHover" Color="#FF3E4245" />
       <SolidColorBrush x:Key="JbListItemSelected" Color="#FF4B6EAF" />
       <SolidColorBrush x:Key="JbListItemSelectedForeground" Color="#FFFFFFFF" />
+
+      <!-- Inline validation text: IntelliJ's error red, which is muted enough to sit in a form
+           without shouting. Use it for a message about something the user must change, never for
+           ordinary hints; those are the 0.7-opacity note style. -->
+      <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC75450" />
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Light">
@@ -270,9 +275,19 @@
       <SolidColorBrush x:Key="JbListItemHover" Color="#FFEDF3FE" />
       <SolidColorBrush x:Key="JbListItemSelected" Color="#FF3875D6" />
       <SolidColorBrush x:Key="JbListItemSelectedForeground" Color="#FFFFFFFF" />
+
+      <!-- Inline validation text; see the Dark dictionary. Darker here so it keeps its contrast
+           against a white form. -->
+      <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC0392B" />
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>
+
+  <!-- Group box. Deliberately outside the theme dictionaries: both are grey with an alpha channel,
+       so one pair of values reads correctly on the light and the dark face alike, which is why this
+       has been the app's group-box idiom since before it had a name. -->
+  <SolidColorBrush x:Key="JbGroupBoxBorder" Color="#33808080" />
+  <SolidColorBrush x:Key="JbGroupBoxHeader" Color="#11808080" />
 
   <!--
     THE font size for the whole app. Avalonia gives a bare TextBlock 12, while every Fluent
@@ -786,6 +801,33 @@
                               Content="{TemplateBinding SelectedContent}"
                               ContentTemplate="{TemplateBinding SelectedContentTemplate}"
                               Margin="{TemplateBinding Padding}" />
+          </DockPanel>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <!--
+    Group box: a titled frame with a header strip, which is what every settings page in this app
+    draws by hand. Given a ControlTheme because the answer-file window alone has a few dozen of
+    them; eight lines of Border/DockPanel markup repeated that many times is where an idiom starts
+    drifting. Header is content, not a string property, so a page can put a checkbox in it later.
+  -->
+  <ControlTheme x:Key="JbGroupBox" TargetType="HeaderedContentControl">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}" CornerRadius="3">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Padding="12,3"
+                    Background="{DynamicResource JbGroupBoxHeader}">
+              <ContentPresenter Content="{TemplateBinding Header}"
+                                ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                TextElement.FontWeight="SemiBold" />
+            </Border>
+            <ContentPresenter Name="PART_ContentPresenter" Margin="12,10"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}" />
           </DockPanel>
         </Border>
       </ControlTemplate>

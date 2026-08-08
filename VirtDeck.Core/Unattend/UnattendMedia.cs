@@ -29,8 +29,9 @@ namespace VirtDeck.Unattend
         /// <summary>Same directory the wizard's boot disk defaults to.</summary>
         private const string ImageDirectory = "/var/lib/libvirt/images/";
 
+        /// <exception cref="UnattendBuildException">The config cannot be turned into an answer file.</exception>
         public static byte[] BuildIso(UnattendConfig config) =>
-            Iso9660Builder.Build(FileName, UnattendXmlBuilder.Build(config), VolumeId);
+            Iso9660Builder.Build(FileName, UnattendXml.Build(config), VolumeId);
 
         public static string RemotePath(string vmName) => ImageDirectory + vmName + PathSuffix;
 

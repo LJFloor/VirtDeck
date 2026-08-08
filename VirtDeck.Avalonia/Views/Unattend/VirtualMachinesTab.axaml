@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.VirtualMachinesTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}"
+                              Header="If this Windows will run virtual machines itself">
+        <StackPanel Classes="options">
+          <RadioButton Name="CoreIsolationKeepRadio" GroupName="VmCoreIsolation" IsChecked="True"
+                       Content="Keep core isolation enabled if supported" />
+          <RadioButton Name="CoreIsolationDisableRadio" GroupName="VmCoreIsolation"
+                       Content="Disable core isolation" />
+          <TextBlock Classes="note"
+                     Text="Core isolation (memory integrity, HVCI) claims the hardware virtualisation extensions for Windows' own hypervisor, which stops VirtualBox and VMware Workstation running at full speed inside this guest. It only matters if you intend to run VMs in it; nested virtualisation also has to be enabled on the host." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}"
+                              Header="Guest tools to install">
+        <StackPanel Classes="options">
+          <CheckBox Name="VirtIoCheck"
+                    Content="Install VirtIO drivers, VirtIO Guest Tools and the QEMU Guest Agent" />
+          <TextBlock Classes="subnote"
+                     Text="This is the right one for a VirtDeck VM, but it installs from a disc rather than downloading: attach the virtio-win ISO to the VM as another CD-ROM before starting the install, or the installer finds nothing and only writes a line to its log. It is off by default for that reason, and because this wizard gives Windows guests SATA and e1000e rather than VirtIO hardware." />
+
+          <CheckBox Name="VBoxCheck" Content="Install Oracle VirtualBox Guest Additions" />
+          <CheckBox Name="VMwareCheck" Content="Install VMware Tools" />
+          <CheckBox Name="ParallelsCheck" Content="Install Parallels Tools for Parallels Desktop" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

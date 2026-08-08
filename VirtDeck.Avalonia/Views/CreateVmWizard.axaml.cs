@@ -121,6 +121,10 @@ public partial class CreateVmWizard : Window
         LocalIsoBox.TextChanged += (_, _) => QueueMediaDetect();
 
         UnattendButton.Click += async (_, _) => await CustomizeWindowsSetupAsync();
+        // The answer-file generator parses a few hundred kilobytes of embedded tables the first time
+        // it is touched. Do it now, while the user is still filling this page in, so opening the
+        // window and pressing its OK button are both instant.
+        _ = Task.Run(UnattendCatalog.Prime);
 
         BrowseLocalButton.Click += async (_, _) =>
         {

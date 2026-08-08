@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.ComputerTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Computer name">
+        <StackPanel Classes="options">
+
+          <RadioButton Name="NameRandomRadio" GroupName="ComputerName" IsChecked="True"
+                       Content="Let Windows generate a random computer name like DESKTOP-ZFAH8Z2" />
+
+          <RadioButton Name="NameCustomRadio" GroupName="ComputerName"
+                       Content="Choose a computer name yourself:" />
+          <StackPanel Name="NameCustomPanel" Classes="under">
+            <TextBox Name="ComputerNameBox" Width="240" HorizontalAlignment="Left" />
+            <TextBlock Classes="note"
+                       Text="Up to 15 characters. No spaces, not all digits, and none of the punctuation Windows reserves. It must also differ from every account name." />
+          </StackPanel>
+
+          <RadioButton Name="NameScriptRadio" GroupName="ComputerName"
+                       Content="Work the computer name out with a PowerShell script:" />
+          <StackPanel Name="NameScriptPanel" Classes="under">
+            <TextBox Name="ComputerNameScriptBox" Classes="script" />
+            <TextBlock Classes="note"
+                       Text="The script runs during Setup and must write the name to standard output. It can read the serial number, a MAC address or anything else about the machine." />
+          </StackPanel>
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Time zone">
+        <StackPanel Classes="options">
+          <RadioButton Name="TimeZoneImplicitRadio" GroupName="ComputerTimeZone" IsChecked="True"
+                       Content="Let Windows determine the time zone from the language and region settings" />
+          <RadioButton Name="TimeZoneExplicitRadio" GroupName="ComputerTimeZone"
+                       Content="Set the time zone explicitly:" />
+          <StackPanel Name="TimeZonePanel" Classes="under">
+            <ComboBox Name="TimeZoneBox" Width="420" HorizontalAlignment="Left" />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -6,20 +6,22 @@ namespace VirtDeck.Avalonia.Views.Unattend;
 
 /// <summary>
 /// Collects everything that goes into the guest's <c>autounattend.xml</c>, one tab per section of the
-/// answer file. Only "User accounts" exists so far; the remaining sections (regional settings,
-/// partitioning, bloatware removal, ...) are separate tabs to come, which is why the tab strip is on
-/// the left where a long list of sections still reads.
+/// reference generator at schneegans.de, whose library actually writes the file (see
+/// <see cref="UnattendXml"/>). The tab strip is on the left because that list of sections is long.
 ///
 /// The window edits a clone and hands it back through <see cref="Result"/>, so Cancel discards
-/// everything without the caller needing to keep its own copy.
+/// everything without the caller needing to keep its own copy. It never names its pages; see
+/// <see cref="IUnattendTab"/>.
 ///
-/// Import/Export exchange the real answer file with a file on <b>this PC</b>, not on the host: unlike
-/// an install ISO, which the VM has to read and which is therefore worth keeping server-side, an
-/// answer file is authored here and lands on the host only as the generated disc.
+/// All three file buttons exchange a file with <b>this PC</b>, not with the host: unlike an install
+/// ISO, which the VM has to read and which is therefore worth keeping server-side, this is authored
+/// here and reaches the host only as the generated disc.
 /// </summary>
 public partial class UnattendWindow : Window
 {
     private const string XmlFilter = "Answer files (*.xml)|*.xml|All files (*.*)|*.*";
+    private const string PresetFilter = "Answer file presets (*.json)|*.json|All files (*.*)|*.*";
+    private const string PresetFileName = "unattend-preset.json";
 
     /// <summary>The edited config, or null while the window has not been accepted.</summary>
     public UnattendConfig? Result { get; private set; }
@@ -31,28 +33,61 @@ public partial class UnattendWindow : Window
     {
         InitializeComponent();
 
-        AccountsTab.Load((config ?? new UnattendConfig()).Clone().UserAccounts);
+        LoadTabs((config ?? new UnattendConfig()).Clone());
 
-        OkButton.Click += (_, _) =>
-        {
-            Result = CurrentConfig();
-            Close(true);
-        };
+        OkButton.Click += async (_, _) => await AcceptAsync();
         CancelButton.Click += (_, _) => Close(false);
-        ExportButton.Click += async (_, _) => await ExportAsync();
-        ImportButton.Click += async (_, _) => await ImportAsync();
+        ExportButton.Click += async (_, _) => await ExportXmlAsync();
+        SavePresetButton.Click += async (_, _) => await SavePresetAsync();
+        LoadPresetButton.Click += async (_, _) => await LoadPresetAsync();
     }
 
-    /// <summary>What the pages describe right now. Read by OK and by Export alike, so an exported file
-    /// is the same bytes the disc would carry.</summary>
+    /// <summary>Every section page, in tab order. Anything in the strip that is not one is skipped.</summary>
+    private IEnumerable<IUnattendTab> Tabs =>
+        SectionTabs.Items.OfType<TabItem>().Select(t => t.Content).OfType<IUnattendTab>();
+
+    private void LoadTabs(UnattendConfig config)
+    {
+        foreach (var tab in Tabs) tab.Load(config);
+    }
+
+    /// <summary>What the pages describe right now. Read by OK, Save preset and Export alike, so an
+    /// exported file is the same bytes the disc would carry.</summary>
     private UnattendConfig CurrentConfig()
     {
         var config = new UnattendConfig();
-        AccountsTab.Apply(config.UserAccounts);
+        foreach (var tab in Tabs) tab.Apply(config);
         return config;
     }
 
-    private async Task ExportAsync()
+    /// <summary>
+    /// Accepts the window, but only once the generator has agreed to build what the pages say.
+    ///
+    /// Validating here rather than at VM creation is the point: the generator refuses some
+    /// combinations (a table of accounts with no administrator in it, a lockout window longer than the
+    /// lockout duration), and the alternative is a wizard that defines the VM, creates its disks, and
+    /// only then reports that the answer disc could not be written.
+    /// </summary>
+    private async Task AcceptAsync()
+    {
+        var config = CurrentConfig();
+
+        try
+        {
+            // Off the UI thread: the first call also parses the generator's data tables.
+            await Task.Run(() => UnattendXml.Build(config));
+        }
+        catch (UnattendBuildException ex)
+        {
+            await MessageDialog.Info(this, "Windows setup", ex.Message);
+            return;
+        }
+
+        Result = config;
+        Close(true);
+    }
+
+    private async Task ExportXmlAsync()
     {
         var path = await FileDialogs.SaveFileAsync(this, "Export answer file", XmlFilter,
                                                    UnattendMedia.FileName, "xml");
@@ -60,46 +95,52 @@ public partial class UnattendWindow : Window
 
         try
         {
-            await File.WriteAllBytesAsync(path, UnattendXmlBuilder.Build(CurrentConfig()));
+            var xml = await Task.Run(() => UnattendXml.Build(CurrentConfig()));
+            await File.WriteAllBytesAsync(path, xml);
         }
         catch (Exception ex)
         {
-            await MessageDialog.Info(this, "Export failed", $"Could not write {path}:\n\n{ex.Message}");
+            await MessageDialog.Info(this, "Export failed", ex.Message);
+        }
+    }
+
+    private async Task SavePresetAsync()
+    {
+        var path = await FileDialogs.SaveFileAsync(this, "Save preset", PresetFilter,
+                                                   PresetFileName, "json");
+        if (path == null) return;
+
+        try
+        {
+            await File.WriteAllBytesAsync(path, UnattendPreset.Serialize(CurrentConfig()));
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(this, "Save failed", $"Could not write {path}:\n\n{ex.Message}");
         }
     }
 
     /// <summary>
-    /// Replaces the pages from an existing answer file. The window models one section of one pass, so
-    /// a file can easily say more than it can show; the reader lists what it had to drop and that list
-    /// is put to the user as a question, because importing is also the moment that content stops
-    /// existing anywhere the window will write.
+    /// Replaces every page from a preset. A preset is this window's own file and round-trips exactly,
+    /// so unlike reading back an answer file there is nothing to warn about and nothing to drop.
     /// </summary>
-    private async Task ImportAsync()
+    private async Task LoadPresetAsync()
     {
-        var path = await FileDialogs.OpenFileAsync(this, "Import answer file", XmlFilter);
+        var path = await FileDialogs.OpenFileAsync(this, "Load preset", PresetFilter);
         if (path == null) return;
 
-        UnattendImportResult imported;
+        UnattendConfig loaded;
         try
         {
-            imported = UnattendXmlReader.Parse(await File.ReadAllBytesAsync(path));
+            loaded = UnattendPreset.Parse(await File.ReadAllBytesAsync(path));
         }
         catch (Exception ex)
         {
             // Nothing on the pages is touched, so a wrong file costs the user only this dialog.
-            await MessageDialog.Info(this, "Import failed", $"Could not read {path}:\n\n{ex.Message}");
+            await MessageDialog.Info(this, "Load failed", $"Could not read {path}:\n\n{ex.Message}");
             return;
         }
 
-        if (imported.Warnings.Count > 0)
-        {
-            var message = "Some of this file cannot be shown here and will not be in what this window " +
-                          "writes back:\n\n" +
-                          string.Join("\n", imported.Warnings.Select(w => "- " + w)) +
-                          "\n\nImport the rest?";
-            if (!await MessageDialog.Confirm(this, "Import answer file", message)) return;
-        }
-
-        AccountsTab.Load(imported.Config.UserAccounts);
+        LoadTabs(loaded);
     }
 }

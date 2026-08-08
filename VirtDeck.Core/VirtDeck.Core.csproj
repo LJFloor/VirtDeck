@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SpiceClient\SpiceClient.csproj" />
+    <ProjectReference Include="..\third-party\unattend-generator\UnattendGenerator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

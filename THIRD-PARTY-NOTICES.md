@@ -40,11 +40,48 @@ Both artifacts are published self-contained, so these ship inside them:
 | Component | Version | License | Upstream |
 |---|---|---|---|
 | .NET runtime and libraries | 10 | MIT | https://github.com/dotnet/runtime |
-| Avalonia (+ Desktop, Themes.Fluent, Fonts.Inter) | 12.0.5 | MIT | https://github.com/AvaloniaUI/Avalonia |
+| Avalonia (+ Desktop, Themes.Fluent, Fonts.Inter) | 12.1.1 | MIT | https://github.com/AvaloniaUI/Avalonia |
+| Newtonsoft.Json (a dependency of UnattendGenerator, below) | 13.0.4 | MIT | https://github.com/JamesNK/Newtonsoft.Json |
 | Inter typeface (in Avalonia.Fonts.Inter) | n/a | SIL OFL 1.1 | https://github.com/rsms/inter |
 | SkiaSharp (+ NativeAssets.Linux) | 3.119.4 | MIT (wrapper), BSD-3-Clause (Skia itself) | https://github.com/mono/SkiaSharp |
 | Concentus (Opus decoder) | 2.2.2 | BSD-3-Clause (the Opus license) | https://github.com/lostromb/concentus |
 | SSH.NET | 2024.2.0 | MIT | https://github.com/sshnet/SSH.NET |
+
+## UnattendGenerator (vendored source, compiled into the app)
+
+VirtDeck's "Customize Windows setup" window writes its `autounattend.xml` with Christoph
+Schneegans' generator, the library behind <https://schneegans.de/windows/unattend-generator/>. It is
+not on NuGet, so its source is vendored at `third-party/unattend-generator/` and built as part of the
+solution; `third-party/unattend-generator/VENDORED.md` records the exact upstream commit and how to
+update it.
+
+- Project: unattend-generator (https://github.com/cschneegans/unattend-generator)
+- Version: commit `427480c7be47e8bd1301b89747baab38271b3da3` (2026-08-07)
+- License: MIT, reproduced below and at `third-party/unattend-generator/LICENSE.txt`
+
+```
+MIT License
+
+Copyright (c) 2024-2025 Christoph Schneegans
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## SpiceClient (SPICE protocol client, component of this product)
 

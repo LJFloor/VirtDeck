@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.ActivationTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Activation">
+        <StackPanel Classes="options">
+          <CheckBox Name="UseProductKeyCheck" Content="Use this product key to activate Windows:" />
+          <StackPanel Name="ProductKeyPanel" Classes="under">
+            <TextBox Name="ProductKeyBox" Width="260" HorizontalAlignment="Left"
+                     PlaceholderText="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" />
+            <TextBlock Classes="note"
+                       Text="Five groups of five letters and digits. This is the key applied to the installed system, which is a different thing from the key that tells Setup which edition to install; that one belongs to the Windows PE page." />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Processor architectures">
+        <StackPanel Classes="options">
+          <TextBlock Classes="note"
+                     Text="Which architectures the answer file is written for. Every setting is repeated once per architecture, so leaving all three ticked makes a file that works anywhere at the cost of being three times the size." />
+          <CheckBox Name="Amd64Check" Content="Intel / AMD 64-bit (x64)" />
+          <CheckBox Name="X86Check" Content="Intel / AMD 32-bit (x86)" />
+          <CheckBox Name="Arm64Check" Content="Windows on Arm64" />
+          <TextBlock Name="NoArchNote" Classes="error" IsVisible="False"
+                     Text="Pick at least one architecture, otherwise the answer file has nothing to apply to." />
+          <TextBlock Classes="note"
+                     Text="VMs created by this wizard are x64. The other two are here because an answer file can be carried elsewhere." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

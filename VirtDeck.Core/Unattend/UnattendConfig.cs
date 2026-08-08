@@ -1,123 +1,36 @@
 namespace VirtDeck.Unattend
 {
-    /// <summary>What Windows should do once the last account screen is behind it.</summary>
-    public enum FirstLogonMode
-    {
-        /// <summary>Log on to the first account in the table that is in the Administrators group.</summary>
-        FirstAdminAccount,
-
-        /// <summary>Activate the built-in Administrator account, set its password and log on to it.</summary>
-        BuiltInAdministrator,
-
-        /// <summary>Leave the sign-in screen up. Setup is finished but nobody is logged on.</summary>
-        None,
-    }
-
-    public enum PasswordExpiryMode
-    {
-        /// <summary>Passwords never expire, which is what current NIST guidance asks for.</summary>
-        Never,
-
-        /// <summary>Leave Windows' own 42 days alone.</summary>
-        WindowsDefault,
-
-        Custom,
-    }
-
-    public enum LockoutMode { Default, Disabled, Custom }
-
-    /// <summary>
-    /// How the machine gets its first user account. The three are alternatives, not options that stack:
-    /// either the answer file names the accounts, or OOBE asks for one, and asking for a Microsoft
-    /// account and asking for a local one are different screens.
-    /// </summary>
-    public enum AccountCreationMode
-    {
-        /// <summary>Leave OOBE's Microsoft-account screens up and let the user sign in there.</summary>
-        MicrosoftAccountInteractive,
-
-        /// <summary>Hide the Microsoft-account screens so OOBE offers the offline account path.</summary>
-        LocalAccountInteractive,
-
-        /// <summary>Setup creates the accounts in the table and OOBE asks for nothing.</summary>
-        LocalAccounts,
-    }
-
-    /// <summary>One row of the local accounts table.</summary>
-    public sealed class LocalAccount
-    {
-        public string Name { get; set; } = "";
-
-        /// <summary>Blank means "same as <see cref="Name"/>"; the generator fills it in.</summary>
-        public string DisplayName { get; set; } = "";
-
-        public string Password { get; set; } = "";
-
-        /// <summary>"Administrators" or "Users"; goes into the answer file verbatim.</summary>
-        public string Group { get; set; } = GroupUsers;
-
-        public const string GroupAdministrators = "Administrators";
-        public const string GroupUsers = "Users";
-
-        /// <summary>A row with no account name is an unused row of the table, not an account.</summary>
-        public bool IsEmpty => Name.Trim().Length == 0;
-
-        public bool IsAdministrator =>
-            string.Equals(Group, GroupAdministrators, StringComparison.OrdinalIgnoreCase);
-
-        public LocalAccount Clone() => (LocalAccount)MemberwiseClone();
-    }
-
-    /// <summary>
-    /// The "User accounts" tab. Everything here lands in the <c>oobeSystem</c> pass; see
-    /// <see cref="UnattendXmlBuilder"/> for which element each property becomes.
-    /// </summary>
-    public sealed class UserAccountsConfig
-    {
-        public AccountCreationMode AccountCreation { get; set; } = AccountCreationMode.MicrosoftAccountInteractive;
-
-        /// <summary>Only read under <see cref="AccountCreationMode.LocalAccounts"/>.</summary>
-        public List<LocalAccount> Accounts { get; set; } = new();
-
-        /// <summary>Only read under <see cref="AccountCreationMode.LocalAccounts"/>: there is no
-        /// predefined account to log on to in the other two modes.</summary>
-        public FirstLogonMode FirstLogon { get; set; } = FirstLogonMode.FirstAdminAccount;
-
-        /// <summary>Only meaningful for <see cref="FirstLogonMode.BuiltInAdministrator"/>.</summary>
-        public string AdministratorPassword { get; set; } = "";
-
-        public PasswordExpiryMode PasswordExpiry { get; set; } = PasswordExpiryMode.Never;
-        public int PasswordExpiryDays { get; set; } = 42;
-
-        // Windows' own defaults since 11 22H2: ten attempts within ten minutes, locked for ten.
-        public LockoutMode Lockout { get; set; } = LockoutMode.Default;
-        public int LockoutThreshold { get; set; } = 10;
-        public int LockoutWindowMinutes { get; set; } = 10;
-        public int LockoutDurationMinutes { get; set; } = 10;
-
-        /// <summary>
-        /// Base64-encode the passwords in the answer file. Not encryption (anyone can decode it) and
-        /// Windows itself does this, but it keeps passwords from being readable over a shoulder.
-        /// </summary>
-        public bool ObscurePasswords { get; set; }
-
-        public UserAccountsConfig Clone()
-        {
-            var copy = (UserAccountsConfig)MemberwiseClone();
-            copy.Accounts = Accounts.Select(a => a.Clone()).ToList();
-            return copy;
-        }
-    }
-
     /// <summary>
     /// Everything the "Customize Windows setup" window collects, and the only input
-    /// <see cref="UnattendMedia"/> needs to produce an answer disc. One property per tab; the rest of
-    /// the tabs (regional settings, partitioning, bloatware removal, ...) are still to come.
+    /// <see cref="UnattendMedia"/> needs to produce an answer disc. One property per tab group, each
+    /// declared in its own file under <c>Unattend/Model/</c> and named after the tab that edits it.
+    ///
+    /// It is flat, mutable and serialisable on purpose, unlike the generator's own immutable
+    /// <c>Configuration</c> record. <see cref="UnattendConfigMapper"/> explains why, and is where the
+    /// two meet. This class is also the preset file's document, so a property added here is saved,
+    /// loaded and cloned with no further work.
     /// </summary>
     public sealed class UnattendConfig
     {
-        public UserAccountsConfig UserAccounts { get; set; } = new();
+        /// <summary>Preset format version. See <see cref="UnattendPreset"/>.</summary>
+        public int Version { get; set; } = UnattendPreset.CurrentVersion;
 
-        public UnattendConfig Clone() => new() { UserAccounts = UserAccounts.Clone() };
+        public SetupConfig Setup { get; set; } = new();
+        public ActivationConfig Activation { get; set; } = new();
+        public ComputerConfig Computer { get; set; } = new();
+        public UserAccountsConfig UserAccounts { get; set; } = new();
+        public FileExplorerConfig FileExplorer { get; set; } = new();
+        public SystemTweaksConfig SystemTweaks { get; set; } = new();
+        public VirtualMachineConfig VirtualMachines { get; set; } = new();
+        public AccessibilityConfig Accessibility { get; set; } = new();
+
+        /// <summary>
+        /// A deep copy, so the window can edit freely and Cancel can simply throw the copy away.
+        ///
+        /// It goes through the preset serialiser rather than a hand-written copy per tab group. One
+        /// implementation cannot forget a field, and it self-tests: anything Clone loses, Save and Load
+        /// lose too, where the user will notice.
+        /// </summary>
+        public UnattendConfig Clone() => UnattendPreset.Parse(UnattendPreset.Serialize(this));
     }
 }

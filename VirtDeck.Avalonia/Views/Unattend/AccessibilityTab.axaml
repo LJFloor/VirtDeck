@@ -1,0 +1,86 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.AccessibilityTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Lock key settings">
+        <StackPanel Classes="options">
+          <RadioButton Name="LockKeysDefaultRadio" GroupName="AccessLockKeys" IsChecked="True"
+                       Content="Use the default lock key states and behaviors" />
+          <RadioButton Name="LockKeysConfigureRadio" GroupName="AccessLockKeys"
+                       Content="Configure the initial state and behavior of the lock keys as follows:" />
+
+          <Grid Name="LockKeyGrid" Classes="under"
+                ColumnDefinitions="120,140,160" RowDefinitions="Auto,Auto,Auto,Auto"
+                ColumnSpacing="6" RowSpacing="4">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="columnheader" Text="Key" />
+            <TextBlock Grid.Row="0" Grid.Column="1" Classes="columnheader" Text="Initial state" />
+            <TextBlock Grid.Row="0" Grid.Column="2" Classes="columnheader" Text="When pressed" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Caps Lock" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" Name="CapsInitialBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Off" />
+              <ComboBoxItem Content="On" />
+            </ComboBox>
+            <ComboBox Grid.Row="1" Grid.Column="2" Name="CapsBehaviorBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Toggle state" />
+              <ComboBoxItem Content="Ignore keystroke" />
+            </ComboBox>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Num Lock" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="2" Grid.Column="1" Name="NumInitialBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Off" />
+              <ComboBoxItem Content="On" />
+            </ComboBox>
+            <ComboBox Grid.Row="2" Grid.Column="2" Name="NumBehaviorBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Toggle state" />
+              <ComboBoxItem Content="Ignore keystroke" />
+            </ComboBox>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Scroll Lock" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="3" Grid.Column="1" Name="ScrollInitialBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Off" />
+              <ComboBoxItem Content="On" />
+            </ComboBox>
+            <ComboBox Grid.Row="3" Grid.Column="2" Name="ScrollBehaviorBox" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Toggle state" />
+              <ComboBoxItem Content="Ignore keystroke" />
+            </ComboBox>
+          </Grid>
+
+          <TextBlock Classes="note"
+                     Text="This affects every user and the sign-in screen. Num Lock on is the usual reason to come here; ignoring Caps Lock is the other." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Sticky keys">
+        <StackPanel Classes="options">
+          <RadioButton Name="StickyDefaultRadio" GroupName="AccessSticky" IsChecked="True"
+                       Content="Use the default Sticky keys settings" />
+          <RadioButton Name="StickyDisabledRadio" GroupName="AccessSticky"
+                       Content="Disable Sticky keys altogether" />
+          <RadioButton Name="StickyCustomRadio" GroupName="AccessSticky"
+                       Content="Configure Sticky keys as follows:" />
+
+          <StackPanel Name="StickyPanel" Classes="under">
+            <CheckBox Name="StickyHotKeyActiveCheck"
+                      Content="Press the Shift key 5 times to turn Sticky keys on or off" />
+            <CheckBox Name="StickyHotKeySoundCheck"
+                      Content="Play a siren sound when Sticky keys are turned on or off that way" />
+            <CheckBox Name="StickyIndicatorCheck" Content="Show the Sticky keys icon on the taskbar" />
+            <CheckBox Name="StickyAudibleFeedbackCheck"
+                      Content="Play a sound when shortcut keys are pressed and released" />
+            <CheckBox Name="StickyTriStateCheck" Content="Lock shortcut keys when pressed twice in a row" />
+            <CheckBox Name="StickyTwoKeysOffCheck"
+                      Content="Turn off Sticky keys when two keys are pressed at the same time" />
+            <TextBlock Classes="note"
+                       Text="Unticked means the behavior is turned off, not left alone: this list is the whole setting." />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

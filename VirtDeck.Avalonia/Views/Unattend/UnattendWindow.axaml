@@ -11,13 +11,17 @@
     <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
             Background="#11808080">
       <Grid ColumnDefinitions="Auto,*,Auto">
-        <!-- Import/Export move an autounattend.xml between this window and a file on this PC; they
-             are not an alternative to OK, so they sit away from the accept pair. -->
+        <!-- All three move a file between this window and this PC, never the host, so they sit away
+             from the accept pair. A preset is what this window reads back; the answer file is what
+             Windows reads and cannot be re-imported, which is why they are separate buttons rather
+             than one Import/Export pair over one format. -->
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-          <Button Name="ImportButton" Content="Import..." MinWidth="88"
-                  ToolTip.Tip="Fill these pages in from an existing autounattend.xml on this PC." />
-          <Button Name="ExportButton" Content="Export..." MinWidth="88"
-                  ToolTip.Tip="Save what these pages describe as an autounattend.xml on this PC." />
+          <Button Name="LoadPresetButton" Content="Load preset..." MinWidth="88"
+                  ToolTip.Tip="Fill these pages in from a preset saved on this PC." />
+          <Button Name="SavePresetButton" Content="Save preset..." MinWidth="88"
+                  ToolTip.Tip="Save everything on these pages to a file on this PC, to load again later." />
+          <Button Name="ExportButton" Content="Export XML..." MinWidth="88"
+                  ToolTip.Tip="Write the autounattend.xml these pages describe to a file on this PC. This is what the answer disc carries; it cannot be loaded back into this window." />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
           <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
@@ -27,11 +31,19 @@
     </Border>
 
     <!-- Sections on the left, page on the right. Each tab brings its own ScrollViewer so a page is
-         free to fill the height instead (a future partition table, say). -->
-    <TabControl Theme="{StaticResource JbSideTabControl}">
-      <TabItem Header="User accounts">
-        <u:UserAccountsTab Name="AccountsTab" />
-      </TabItem>
+         free to fill the height instead (a future partition table, say).
+
+         The pages are not named: the window walks these items and talks to whichever of them
+         implement IUnattendTab, so a new section is a TabItem here and nothing else. -->
+    <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
+      <TabItem Header="Activation"><u:ActivationTab /></TabItem>
+      <TabItem Header="Setup"><u:SetupTab /></TabItem>
+      <TabItem Header="Computer"><u:ComputerTab /></TabItem>
+      <TabItem Header="User accounts"><u:UserAccountsTab /></TabItem>
+      <TabItem Header="File Explorer"><u:FileExplorerTab /></TabItem>
+      <TabItem Header="System tweaks"><u:SystemTweaksTab /></TabItem>
+      <TabItem Header="Virtual machines"><u:VirtualMachinesTab /></TabItem>
+      <TabItem Header="Accessibility"><u:AccessibilityTab /></TabItem>
     </TabControl>
 
   </DockPanel>

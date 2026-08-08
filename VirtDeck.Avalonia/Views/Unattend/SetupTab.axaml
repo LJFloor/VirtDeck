@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.SetupTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Setup settings">
+        <StackPanel Classes="options">
+
+          <CheckBox Name="BypassRequirementsCheck"
+                    Content="Bypass the Windows 11 requirements check (TPM, Secure Boot, RAM)" />
+          <TextBlock Classes="subnote"
+                     Text="On by default. A libvirt guest has no vTPM unless one was added to it, so without this a Windows 11 installer refuses to start." />
+
+          <CheckBox Name="BypassNetworkCheck"
+                    Content="Allow Windows 11 to be installed without an internet connection" />
+
+          <CheckBox Name="HidePowerShellCheck"
+                    Content="Hide any PowerShell windows during Windows Setup" />
+
+          <CheckBox Name="KeepSensitiveFilesCheck"
+                    Content="Keep sensitive files" />
+          <TextBlock Classes="subnote"
+                     Text="The answer file and the scripts generated from it are left on the installed system instead of being deleted at first logon. They contain any passwords set on the User accounts page." />
+          <TextBlock Classes="subnote"
+                     Text="Choosing &quot;Do not logon&quot; on the User accounts page keeps them regardless: deleting them is itself a first-logon task, so with nobody signing in there is nothing to run it." />
+
+          <CheckBox Name="NarratorCheck"
+                    Content="Automatically start Narrator during Windows Setup and after logon" />
+
+          <CheckBox Name="ConfigurationSetCheck"
+                    Content="Use a distribution share / configuration set" />
+          <TextBlock Classes="subnote"
+                     Text="For an answer file that pulls drivers or packages from a share prepared alongside it. Leave off unless you have one." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Express settings">
+        <StackPanel Classes="options">
+          <TextBlock Classes="note"
+                     Text="The privacy page OOBE shows near the end of Setup: location, diagnostics, tailored experiences, advertising ID and so on." />
+          <RadioButton Name="ExpressDisableRadio" GroupName="SetupExpress" IsChecked="True"
+                       Content="Disable all" />
+          <RadioButton Name="ExpressEnableRadio" GroupName="SetupExpress"
+                       Content="Enable all" />
+          <RadioButton Name="ExpressInteractiveRadio" GroupName="SetupExpress"
+                       Content="Choose settings interactively during Windows Setup" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

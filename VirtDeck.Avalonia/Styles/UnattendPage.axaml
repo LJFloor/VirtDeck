@@ -1,0 +1,71 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    The shared vocabulary of the answer-file window's section pages. Declared once here rather than
+    in each page's UserControl.Styles, because there are seventeen of them and three classes copied
+    seventeen times is three classes that drift.
+
+    These are Styles, not resources, so they live in Application.Styles and not in the
+    JetBrainsClassic dictionary, which holds keys and control themes.
+  -->
+
+  <!-- Explanatory text under an option: what it does, or what it costs. Dimmed so a page reads as
+       its choices first and its prose second. -->
+  <Style Selector="TextBlock.note">
+    <Setter Property="Opacity" Value="0.7" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- The same, indented to sit under the radio button or check box it belongs to. 21px is the
+       14px box plus its 6px gap, so the text lines up with the label above it. -->
+  <Style Selector="TextBlock.subnote">
+    <Setter Property="Opacity" Value="0.7" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Margin" Value="21,0,0,0" />
+  </Style>
+
+  <!-- Everything owned by one radio option or check box, so the whole subtree greys out in one
+       assignment and there is never a value on screen that the selected option ignores. -->
+  <Style Selector="StackPanel.under, Grid.under, WrapPanel.under">
+    <Setter Property="Margin" Value="21,0,0,0" />
+  </Style>
+
+  <Style Selector="StackPanel.under">
+    <Setter Property="Spacing" Value="8" />
+  </Style>
+
+  <Style Selector="TextBlock.columnheader">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- A message about something the user has to change before the file can be generated. Not for
+       ordinary hints; those are .note. -->
+  <Style Selector="TextBlock.error">
+    <Setter Property="Foreground" Value="{DynamicResource JbErrorForeground}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- A box holding a script or a fragment of markup: monospaced, no wrapping, scrolls both ways.
+       Several pages take one, so the shape is set here rather than per page. Note that the scroll
+       bars are attached ScrollViewer properties; TextBox has none of its own. -->
+  <Style Selector="TextBox.script">
+    <Setter Property="AcceptsReturn" Value="True" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="FontFamily" Value="monospace" />
+    <Setter Property="MinHeight" Value="120" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+  </Style>
+
+  <!-- The page itself: one column of group boxes, breathing room against the tab strip. -->
+  <Style Selector="StackPanel.page">
+    <Setter Property="Spacing" Value="12" />
+  </Style>
+
+  <!-- The contents of a group box: one option per line. -->
+  <Style Selector="StackPanel.options">
+    <Setter Property="Spacing" Value="6" />
+  </Style>
+
+</Styles>

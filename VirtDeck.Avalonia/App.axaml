@@ -67,5 +67,8 @@
     <Style Selector="ButtonSpinner, NumericUpDown">
       <Setter Property="MinHeight" Value="{DynamicResource TextControlThemeMinHeight}" />
     </Style>
+
+    <!-- The class vocabulary the answer-file window's section pages are written in. -->
+    <StyleInclude Source="avares://virtdeck/Styles/UnattendPage.axaml" />
   </Application.Styles>
 </Application>

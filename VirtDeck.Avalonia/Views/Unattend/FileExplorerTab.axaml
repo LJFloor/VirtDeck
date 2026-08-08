@@ -1,0 +1,48 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Unattend.FileExplorerTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}"
+                              Header="Which files are hidden in File Explorer">
+        <StackPanel Classes="options">
+          <RadioButton Name="HideDefaultRadio" GroupName="ExplorerHideFiles" IsChecked="True"
+                       Content="Use the File Explorer default setting" />
+          <TextBlock Classes="subnote" Text="Anything with the Hidden attribute is hidden." />
+
+          <RadioButton Name="HideSystemRadio" GroupName="ExplorerHideFiles"
+                       Content="Hide protected operating system files only" />
+          <TextBlock Classes="subnote"
+                     Text="Only files with both the Hidden and the System attribute are hidden." />
+
+          <RadioButton Name="HideNoneRadio" GroupName="ExplorerHideFiles"
+                       Content="Show all files" />
+          <TextBlock Classes="subnote" Text="Recommended for advanced users." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="File Explorer tweaks">
+        <StackPanel Classes="options">
+          <CheckBox Name="ShowFileExtensionsCheck" Content="Always show file extensions" />
+          <TextBlock Classes="subnote"
+                     Text="File Explorer would otherwise hide the extension of any file type it recognises." />
+
+          <CheckBox Name="ClassicContextMenuCheck"
+                    Content="Use the classic context (right-click) menu in Windows 11" />
+
+          <CheckBox Name="HideInfoTipCheck"
+                    Content="Hide the pop-up description for folder and desktop items" />
+
+          <CheckBox Name="LaunchToThisPCCheck"
+                    Content="Open File Explorer to This PC instead of Quick access" />
+
+          <CheckBox Name="ShowEndTaskCheck"
+                    Content="Show the End task command in the taskbar" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

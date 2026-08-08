@@ -8,10 +8,11 @@ Guidance for Claude Code when working in this repository.
 dotnet build VirtDeck.sln            # everywhere: every project is net10.0 now
 ```
 
-Three projects (.NET 10), all `net10.0` and all buildable on either OS:
+Four projects (.NET 10), all `net10.0` and all buildable on either OS:
 - **SpiceClient**: cross-platform SPICE protocol client library. No UI toolkit: it produces raw BGRA buffers. Uses SkiaSharp for JPEG decode and Concentus for Opus.
-- **VirtDeck.Core**: cross-platform services and models (`Services/`, `Models/`, `Diagnostics/`, `Imaging/PpmImage`). SSH.NET + `virsh` over SSH; no UI dependency. Namespaces are `VirtDeck.*`.
+- **VirtDeck.Core**: cross-platform services and models (`Services/`, `Models/`, `Unattend/`, `Diagnostics/`, `Imaging/PpmImage`). SSH.NET + `virsh` over SSH; no UI dependency. Namespaces are `VirtDeck.*`.
 - **VirtDeck.Avalonia**: the UI (Windows + Linux). Assembly name `virtdeck`.
+- **third-party/unattend-generator**: vendored MIT source, not ours. Writes `autounattend.xml`; referenced by `VirtDeck.Core`. Do not edit it; see its `VENDORED.md`.
 
 A clean solution build is the no-regression gate, but it only proves compilation: Windows runtime behaviour (winmm audio, UsbDk capture) still needs a real Windows run, and the reverse for PulseAudio/udisks.
 
@@ -59,10 +60,11 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
   `Services/SshKeyDiscovery` scans `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) for the key dropdown: a file counts as a key when it has a `.pub` sibling **or** its first line says `PRIVATE KEY`, stock names sorted strongest first. `NeedsPassphrase` probes with `new PrivateKeyFile(path)` and treats only `SshPassPhraseNullOrEmptyException` as "encrypted"; anything unreadable answers false on purpose, so the connect attempt reports the real error instead of the UI asking for a passphrase that would not help. SSH.NET 2024.2.0 has **no ssh-agent support**, so keys are always read from disk. Settings persist the mode, key path and port, never the passphrase or the sudo password.
 - `Services/AppSettings`: JSON settings at `%APPDATA%`/`~/.config` + `VirtDeck/settings.json`. **Replaces the old `HKCU\SOFTWARE\VirtDeck` registry storage**; `LegacyRegistryImport` migrates it once on Windows.
 - `Imaging/PpmImage`: `virsh screenshot` P6 decoder → raw BGRA.
+- `Unattend/`: the answer-file boundary, and the only code that references the vendored generator. `UnattendConfig` is the flat serialisable model (one property per tab group, each declared in its own file under `Unattend/Model/` and named after the tab that edits it), `UnattendConfigMapper` projects it onto the library's `Configuration`, `UnattendXml.Build` is the single entry point (throws only `UnattendBuildException`), `UnattendCatalog` owns the one `UnattendGenerator` instance and exposes its lookup tables as `UnattendOption` lists, `UnattendPreset` is the JSON save/load, and `UnattendMedia` wraps the result in the answer disc. See "Unattended Windows setup" below.
 
 ### VirtDeck.Avalonia (cross-platform UI)
 - `Controls/SpiceDisplay`: Avalonia `Control`. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; `Render` does a 1:1 `DrawImage` with interpolation `None`. Owns the exactly-one-cursor state machine, built from `Cursor(Bitmap, PixelPoint)` and `StandardCursorType.None`.
-- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
+- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). `JbErrorForeground` is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), themed for both light and dark, so no view hardcodes a red. `JbGroupBox` is a `ControlTheme` for `HeaderedContentControl` carrying the app's titled-frame idiom, and `JbGroupBoxBorder`/`JbGroupBoxHeader` are its two brushes, deliberately outside the theme dictionaries because both are grey with an alpha channel and so read correctly on either face. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
   **One font baseline: 12.** A bare `TextBlock` defaults to 12 while every Fluent `ControlTheme` sets its own size from `ControlContentThemeFontSize` (14), so labels and the fields beside them rendered two points apart; each retemplated control here drops that setter and falls back to the inherited 12, which widened the gap further. The dictionary pulls the key down to 12, and every metric in it (24px fields and buttons, 22px tool buttons, a 14px check/radio box, `12,4` table rows) is sized for that. **Fields and buttons share one height (24)** (same 1px border, same 3px vertical inset), so a text box, dropdown or spinner lines up with the button next to it; `App.axaml` pins `ButtonSpinner`/`NumericUpDown` to the same key because Fluent sizes those outside `TextControl*`. Views should not set a local `FontSize` or `Height` to line controls up; fix the baseline instead. Headings (wizard title 15, login 16) are the deliberate exceptions.
 - `Input/PhysicalKeyMap`: Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent, more correct than a VK table, which reads through the host layout. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js, NOT `0xE0XX`. The key-up high bit is applied in `InputsChannel.SendKey`.
 - `Views/`: `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` (+ its per-tab `UserControl`s), the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
@@ -300,30 +302,67 @@ local files, so `DropFiles` can stat inline.
 
 ## Unattended Windows setup (autounattend.xml)
 
-The Create-VM wizard's **Customize Windows setup…** button (General page, under the install media)
-opens `Views/Unattend/UnattendWindow`: sections on the left, page on the right, one `TabItem` per
-section. Only **User accounts** exists so far; the rest of the answer file (regional settings,
-partitioning, bloatware) is more tabs. The UI follows the sections of schneegans.de's generator, which
-is the reference for what an answer file usefully exposes.
+**VirtDeck does not write the answer file; it fills in a form and hands it to
+[cschneegans/unattend-generator](https://github.com/cschneegans/unattend-generator)**, the MIT C#
+library behind schneegans.de's online generator, vendored at `third-party/unattend-generator/`. That
+library is the reference this window was modelled on in the first place, and it already owns the
+unattend schema, its element ordering, the registry tweak behind each "disable X" toggle, and the
+PowerShell payloads for the settings that have no unattend element at all. Adopting it turns "add a
+section" into a UI page plus a mapper arm, instead of implementing a piece of Windows Setup.
+`third-party/unattend-generator/VENDORED.md` has the pinned commit, the three-line local delta and
+the update procedure; **read it before touching that directory**, because the assembly name is baked
+into `Bloatware.json`'s `$type` discriminators and the repo's no-em-dash rule does not apply there.
+
+`Views/Unattend/UnattendWindow` is sections on the left, page on the right, one `TabItem` per section,
+ordered by where the reference tool puts the first section each page covers. **The window never names
+its pages**: it walks its `TabControl`'s items and calls `IUnattendTab.Load`/`Apply` on whichever
+implement it, so adding a section is a `TabItem` in the markup plus the page, with no line to maintain
+anywhere else. Both methods take the whole `UnattendConfig` rather than the group the page owns,
+because most pages render more than one section. Two invariants go with that: every page is
+constructed with the window (they are literal elements, not template output), so `Apply` on a page the
+user never opened has to be correct; and pages own disjoint parts of the config, so `Apply` order must
+never matter. Where two sections constrain each other, the resolution belongs in
+`UnattendConfigMapper`.
+
+**A page is written in one vocabulary, and none of it is local to the page.** The frame is
+`HeaderedContentControl` with `Theme="{StaticResource JbGroupBox}"`, which is the app's long-standing
+group-box markup (`#33808080` frame, `#11808080` header strip) turned into a `ControlTheme` because
+this window alone has a few dozen of them. `Styles/UnattendPage.axaml` holds the class vocabulary,
+merged into `Application.Styles`: `.page` and `.options` for the two levels of spacing, `.note` and
+`.subnote` for dimmed prose (the second indented 21px to sit under the option it belongs to),
+`.under` for the subtree one option owns and greys out in a single `IsEnabled` assignment,
+`.columnheader`, `.error` for a message about something that must change before the file can be
+generated, and `.script` for a monospaced box holding a script or a fragment of markup. A page that
+declares its own `UserControl.Styles` is a page that will drift from the other sixteen.
+
+**`RadioButton.GroupName` is scoped to the window, not to the page.** All seventeen pages are
+constructed at once and live in one `TabControl`, so two pages using the same group name would form a
+single group and silently uncheck each other. Every group name is therefore prefixed with its page
+(`SetupExpress`, `ComputerName`, `ExplorerHideFiles`, `AccessLockKeys`, ...).
 
 **How the machine gets its first account is one radio group of three, not a table plus two
 checkboxes** (`AccountCreationMode`): OOBE asks for a Microsoft account (the default), or OOBE asks
-for a local one, or the answer file names the accounts itself. They are alternatives, and the two that
-hand the job to OOBE come first because they need nothing else said; the accounts table, the nested
+for a local one, or the answer file names the accounts itself. This is one place VirtDeck's UI is a
+better fit than the web form's checkbox pair, and the library agrees: `IAccountSettings` has exactly
+these three implementations, so the mapper is a three-way switch. The accounts table, the nested
 **First logon** box and the Base64 checkbox all hang off one panel under the third option and grey out
-together. The generator ignores the table outright in the other two modes, but the UI keeps
-what was typed there, so flipping between options does not empty it. A row's group defaults to
-**Users**, which makes "logon to the first administrator account created above" answerable only if a
-row says otherwise; `LocalAccountRow` therefore raises change notification (the only row view model in
-the app that is written to rather than rendered from) so that option can say when it would do nothing
-instead of silently producing no autologon.
+together. The generator ignores the table outright in the other two modes, but the UI keeps what was
+typed there, so flipping between options does not empty it.
+
+A row's group defaults to **Users**, and the generator **refuses** a table with no administrator in it
+unless the built-in Administrator is the one being activated: a machine whose only accounts are
+standard users is unmanageable. `NoAdminNote` therefore sits with the table, in
+`JbErrorForeground`, and says the rule rather than warning about one option's consequences.
+`LocalAccountRow` raises change notification (the only row view model in the app that is written to
+rather than rendered from) so the note can appear as the group column is edited.
 
 **The answer file reaches Setup on a second CD-ROM, not inside the install ISO.** Windows Setup runs
 an implicit answer-file search at the start of every configuration pass, and one entry in it is the
 root of removable read-only media, so a separate disc is consumed with no command line and no
 keystroke. Editing the install ISO is not an alternative: a retail Windows image serves its real tree
 from **UDF**, and the ISO 9660 side of a 25H2 image holds three entries, so a file added there is
-invisible to Setup. `Services/Iso9660Builder` therefore writes a ~53 KB single-file image (Level 2 for
+invisible to Setup. `Services/Iso9660Builder` therefore writes a small single-file image, 25 fixed
+sectors plus the file itself, so around 57 KB for a default answer file (Level 2 for
 the 18-character `AUTOUNATTEND.XML;1`, plus Joliet because `mkisofs -J`/`oscdimg` is what every
 answer disc in the wild is made with, and **no El Torito record** so the firmware falls through it to
 the install medium). It is the inverse of `IsoIdentifier`, which parses the same descriptors.
@@ -337,27 +376,79 @@ that naming rule, and `VmListWindow`'s delete path uses `UnattendMedia.IsAnswerI
 deletion alongside the disk images. It is the one CD-ROM `DeleteVmDialog` will delete, because it is
 the one VirtDeck generated.
 
-**Element order in the XML is not cosmetic** (`Unattend/UnattendXmlBuilder`): the unattend schema
-declares each component's children as a sequence, so the builder emits the order WSIM itself does
-(`Password` first inside `LocalAccount` and `AutoLogon`, `Name` last). Passwords are Base64 in the
-Windows sense: UTF-16LE of the password with **the name of the element it sits in** appended, which is
-why that suffix is a parameter. Policies Windows has no unattend element for (password expiry, account
-lockout) become `net accounts` calls in `FirstLogonCommands`, which therefore do not run at all under
-"Do not logon" until somebody signs in.
+**The model is flat and mutable; the library's is neither, and `Unattend/UnattendConfigMapper` is the
+only place they meet.** `Configuration` is an immutable eighty-parameter record whose settings groups
+are sum types, and VirtDeck cannot hold one directly for four independent reasons: a sum type has
+nowhere to keep the value typed under the option the user is not currently on, which is the rule the
+accounts table already lives by; the settings records validate in their constructors, and a model
+edited keystroke by keystroke has to be allowed to be invalid; `System.Text.Json` cannot round-trip
+interface-typed members without discriminators, and adding them would mean editing vendored source;
+and building one needs a live `UnattendGenerator`, which `CreateVmWizard._unattend` must not drag
+around. So the model is flat, and assembling and validating both happen once, at generate time.
 
-**Import/Export (bottom left of the window) exchange the answer file itself with a file on *this PC***,
-through `FileDialogs`, never through `RemotePathBox`: an install ISO lives on the server because the VM
-reads it, but an answer file is authored here and only ever reaches the host as the generated disc.
-Export writes exactly what the disc would carry (`UnattendXmlBuilder.Build` of what the pages say, so
-OK and Export read the same config), passwords included and obscured exactly as the checkbox says.
-Import parses through `Unattend/UnattendXmlReader`, the inverse of the builder and deliberately only
-that far: the window models one section of one pass, so a foreign file's other passes, other
-components, unknown elements, foreign `FirstLogonCommands` and groups outside Administrators/Users
-come back as **warnings** and the import is put as a question, because importing is the moment that
-content stops existing in anything the window will write. A file that is not an answer file at all is
-**rejected** with the pages untouched. The reader matches element names ignoring namespaces and reads
-`PlainText` **per element** rather than trusting the file-wide checkbox; a builder-written file
-round-trips byte-identically (verified for all three account modes).
+Two typing rules follow, and the line between them is **open set or closed set**, not what the
+library happens to have called it.
+
+An **open** set is stored as **ids**: a lookup-table entry (locale, keyboard, geo, edition, time
+zone, bloatware, desktop icon, start folder, component) keeps its `IKeyed.Id` string, and so does a
+large enum nobody renders as a fixed row of controls. A preset then stays readable, and an entry that
+upstream drops degrades to "skipped" instead of a load failure. Never hand an unchecked id to
+`Lookup<T>`, which throws about internal types: check the table first. Where the id is one required
+value rather than a member of a set, an unknown one is an **error naming it**, not a quiet fallback,
+because substituting a different answer for the user's is worse than refusing (see
+`UnattendConfigMapper.TimeZoneSettings`).
+
+A **closed** set gets a VirtDeck type mirroring it: an enum named `<Thing>Mode` for a radio group,
+plain bools for a fixed row of check boxes. That covers both the choice of *which* implementation of
+an `IXxxSettings` interface is selected, which has no upstream name at all (`AccountCreationMode`,
+`FirstLogonMode`, `LockoutMode`), and small upstream enums that do (`ExpressMode`, `HideFilesMode`,
+`LockKeyState`, `LockKeyAction`, `StickyKeysMode`). Both are the same shape to the user, a handful of
+mutually exclusive options, and it is an implementation detail of the library that one is an
+interface and the other an enum, so the model should not make the UI care. Mirroring also puts the
+breakage in the right place: if upstream renames a member, the **mapper** stops compiling, which is
+found immediately, while presets keep loading because they hold VirtDeck's name. Where a name would
+collide across the two namespaces the mapper imports, VirtDeck's is the one that changes
+(`ExpressMode` for `ExpressSettingsMode`, `LockKeyState` for `LockKeyInitial`).
+
+**Anything not yet exposed keeps `Configuration.Default`'s value**, so the answer file only ever
+differs from the reference generator's by what the user actually set. There is one deliberate
+exception, and it is the tripwire the update procedure checks: the accounts page defaults password
+expiry to **Never** where upstream leaves Windows' 42 days. Neutralise that one setting and VirtDeck's
+default output is byte-identical to `Configuration.Default`'s.
+
+**An invalid config is now reachable, so OK validates.** The hand-written writer this replaced could
+not fail, so no caller had a failure path; the library validates its input in the settings
+constructors and its output against the unattend schema, and either can say no (no administrator
+account, a reserved user name, a lockout window longer than the lockout duration). `UnattendXml.Build`
+is the boundary: it is the only thing above Core that touches the generator, and the only exception
+that escapes it is `UnattendBuildException`, carrying the library's own wording, which is written for
+humans. The window builds once on OK, off the UI thread, and **stays open** with a dialog on failure,
+because the alternative is a wizard that defines the VM, creates its disks, and only then reports that
+the answer disc could not be written. `CreateVm`'s `Try("Answer disc", ...)` stays as the backstop.
+
+One cross-tab constraint is resolved in the mapper rather than in the UI: the library refuses
+`KeepSensitiveFiles = false` together with "do not logon", because deleting the answer file is a
+first-logon command and there would be nobody to run it. `UnattendConfigMapper.KeepSensitiveFiles`
+keeps the files in that combination instead of letting the accounts page produce a config that cannot
+generate. Note also that the library runs the account policies in the **specialize** pass, not in
+`FirstLogonCommands`, so unlike the old writer they apply even under "do not logon".
+
+**The three file buttons are Load preset / Save preset / Export XML, and they are not one pair over
+one format.** All three exchange a file with *this PC* through `FileDialogs`, never through
+`RemotePathBox`: an install ISO lives on the server because the VM reads it, but this is authored here
+and reaches the host only as the generated disc. **Export XML** writes exactly what the disc carries
+(`UnattendXml.Build` of what the pages say, so OK and Export read the same config), and it is one-way.
+**There is no XML import.** The online tool has one, but that is server-side code in its web front
+end, not part of the library, and writing one here would mean maintaining a parser for everything
+twenty-odd tabs can emit, against a library that changes. `Unattend/UnattendPreset` is the answer
+instead: VirtDeck's own JSON, a full-fidelity round trip, and it can hold what the answer file cannot,
+namely the values sitting under the radio options the user is not on. It writes enums **by name**,
+unlike `AppSettings`, which writes them numerically so a bad settings file can never stop the app
+launching; a preset failure is reportable in a dialog and the file is one somebody may hand-edit. It
+also insists on a `Version` property, because deserializing straight away would accept any JSON object
+and answer with pure defaults, which would look like a successful import that quietly blanked every
+page. `UnattendConfig.Clone()` goes through the same serialiser: one implementation that cannot forget
+a field, and it self-tests, since anything Clone loses Save and Load lose too.
 
 **The button is disabled with a reason, never hidden**: not Windows, or an OS that predates
 `autounattend.xml` (XP and earlier are scripted with `winnt.sif`, a different file in a different
