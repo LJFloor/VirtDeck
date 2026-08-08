@@ -33,9 +33,21 @@ namespace VirtDeck.Services
         /// </summary>
         public string AuthMode { get; set; } = "";
 
-        /// <summary>Last private key used, pre-selected on the login screen. Never a secret: the passphrase
-        /// and the sudo password are asked for every time and are not persisted.</summary>
+        /// <summary>Last private key used, pre-selected on the login screen. Never a secret: this file holds
+        /// nothing but the path. The passwords themselves live in the OS secret store when
+        /// <see cref="RememberPasswords"/> is on; see <see cref="SshCredentialStore"/>.</summary>
         public string PrivateKeyPath { get; set; } = "";
+
+        /// <summary>
+        /// Whether the login screen saves its passwords in the OS secret store (the desktop keyring
+        /// on Linux, Credential Manager on Windows). Only the flag lives here; the secrets never do.
+        ///
+        /// It is a flag rather than something inferred from what the store holds, and that is what
+        /// keeps a user who never opted in from ever being shown a keyring unlock prompt: with this
+        /// false, nothing reads the store at startup at all. A missing bool reads as false, which is
+        /// the right default for this one.
+        /// </summary>
+        public bool RememberPasswords { get; set; }
 
         /// <summary>
         /// Directory of the last install medium picked **on this PC**, reopened by the local pickers.

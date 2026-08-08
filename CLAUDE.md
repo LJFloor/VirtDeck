@@ -10,7 +10,7 @@ dotnet build VirtDeck.sln            # everywhere: every project is net10.0 now
 
 Four projects (.NET 10), all `net10.0` and all buildable on either OS:
 - **SpiceClient**: cross-platform SPICE protocol client library. No UI toolkit: it produces raw BGRA buffers. Uses SkiaSharp for JPEG decode and Concentus for Opus.
-- **VirtDeck.Core**: cross-platform services and models (`Services/`, `Models/`, `Unattend/`, `Diagnostics/`, `Imaging/PpmImage`). SSH.NET + `virsh` over SSH; no UI dependency. Namespaces are `VirtDeck.*`.
+- **VirtDeck.Core**: cross-platform services and models (`Services/`, `Models/`, `Unattend/`, `Diagnostics/`, `Secrets/`, `Imaging/PpmImage`). SSH.NET + `virsh` over SSH; no UI dependency. Namespaces are `VirtDeck.*`.
 - **VirtDeck.Avalonia**: the UI (Windows + Linux). Assembly name `virtdeck`.
 - **third-party/unattend-generator**: vendored MIT source, not ours. Writes `autounattend.xml`; referenced by `VirtDeck.Core`. Do not edit it; see its `VENDORED.md`.
 
@@ -57,8 +57,9 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Services/`: `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `NbdServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level (see below), not via `virt-xml`.
 - **SSH authentication**: `SshConnectionManager.ConnectWithPassword` / `ConnectWithKey` (host + **port**, no longer hardwired to 22). Both build a plain `ConnectionInfo` (the base class is not `IDisposable`, unlike `PasswordConnectionInfo`), so the manager owns the credential lifetime: the auth method and, for key auth, the `PrivateKeyFile` are **fields disposed after the client**, never `using`-scoped in the connect call, because `DownloadFileAsync` and `RunSudoCommandStreaming` each open a second client from `_client.ConnectionInfo` and would otherwise authenticate with disposed key material.
   **The sudo password is a separate secret** (`_sudoPassword`): with key auth there is no login password, and a NOPASSWD account has no sudo password either, which `FeedSudoPassword` already tolerated (sudo simply never reads stdin). `CheckSudo()` runs `sudo -S -p '' true` once from the login window and returns a message instead of throwing, so a wrong or missing sudo password is reported on the login screen rather than as a VM list that fails to load.
-  `Services/SshKeyDiscovery` scans `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) for the key dropdown: a file counts as a key when it has a `.pub` sibling **or** its first line says `PRIVATE KEY`, stock names sorted strongest first. `NeedsPassphrase` probes with `new PrivateKeyFile(path)` and treats only `SshPassPhraseNullOrEmptyException` as "encrypted"; anything unreadable answers false on purpose, so the connect attempt reports the real error instead of the UI asking for a passphrase that would not help. SSH.NET 2024.2.0 has **no ssh-agent support**, so keys are always read from disk. Settings persist the mode, key path and port, never the passphrase or the sudo password.
+  `Services/SshKeyDiscovery` scans `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) for the key dropdown: a file counts as a key when it has a `.pub` sibling **or** its first line says `PRIVATE KEY`, stock names sorted strongest first. `NeedsPassphrase` probes with `new PrivateKeyFile(path)` and treats only `SshPassPhraseNullOrEmptyException` as "encrypted"; anything unreadable answers false on purpose, so the connect attempt reports the real error instead of the UI asking for a passphrase that would not help. SSH.NET 2024.2.0 has **no ssh-agent support**, so keys are always read from disk. `settings.json` persists the mode, key path and port and **never a secret**; the passwords themselves go to the OS secret store when the user opts in, see "Remembering passwords" below.
 - `Services/AppSettings`: JSON settings at `%APPDATA%`/`~/.config` + `VirtDeck/settings.json`. **Replaces the old `HKCU\SOFTWARE\VirtDeck` registry storage**; `LegacyRegistryImport` migrates it once on Windows.
+- `Secrets/` + `Services/SshCredentialStore`: the OS secret store. See "Remembering passwords" below.
 - `Imaging/PpmImage`: `virsh screenshot` P6 decoder → raw BGRA.
 - `Unattend/`: the answer-file boundary, and the only code that references the vendored generator. `UnattendConfig` is the flat serialisable model (one property per tab group, each declared in its own file under `Unattend/Model/` and named after the tab that edits it), `UnattendConfigMapper` projects it onto the library's `Configuration`, `UnattendXml.Build` is the single entry point (throws only `UnattendBuildException`), `UnattendCatalog` owns the one `UnattendGenerator` instance and exposes its lookup tables as `UnattendOption` lists, `UnattendPreset` is the JSON save/load, and `UnattendMedia` wraps the result in the answer disc. See "Unattended Windows setup" below.
 
@@ -126,6 +127,44 @@ because the person reading the list is at the client, and it is what every SFTP 
   which the badges special-case by floppy geometry. A listing shows what the client's file manager
   would show; the VM-aware reading of a file belongs where it changes behaviour (`FloppyImage`,
   `IsoIdentifier`), not in the decoration.
+
+### Remembering passwords
+
+The login screen's three secrets (SSH login password, key passphrase, sudo password) can go to the
+OS store behind one **Remember passwords** checkbox: the freedesktop Secret Service on Linux
+(gnome-keyring, KWallet, KeePassXC) through `libsecret-1.so.0`, Credential Manager on Windows
+through advapi32. `Secrets/ISecretStore` + `SecretStores.Create` is the platform seam, the same
+interface-plus-factory-plus-null-fallback shape as `AudioSinks.Create`, and `Services/SshCredentialStore`
+is the only thing above it that knows what an SSH secret is. **`settings.json` still never holds a
+secret**; it holds `RememberPasswords`, and that flag existing is what lets a user who never opted in
+avoid ever seeing a keyring unlock prompt, because nothing reads the store at startup when it is false.
+
+- **Nothing in `Secrets/` throws.** Every path catches and answers falsy, because `Program.Main`
+  appends `ex.ToString()` to the crash log and a store that reports failures by throwing is one bad
+  message away from writing a password to a file. Same reason `Load` answers `""` rather than null:
+  no caller has to tell "no entry" from "could not read".
+- **`Save` is clean-slate, not upsert**: forget everything, then write what the form holds. That is
+  correct because `AppSettings` remembers exactly one host, one username, one key path, so the store
+  *is* the state of that one form, and it makes staleness impossible with no compare-with-previous
+  code (host, port, username, key, or a switch between password and key auth all leave nothing
+  behind). **An empty secret is never stored**: "no entry" and "an entry that is empty" leave the same
+  empty box, which is right for a NOPASSWD host, so the distinction would never be read.
+- **The passphrase is keyed by key file path, the passwords by `user@host:port`.** A passphrase
+  belongs to the file, so one key used against several hosts keeps one entry. Host lowercased (DNS is
+  case-insensitive), username not (POSIX usernames are), key path lowercased on Windows only.
+- **libsecret's `secret_password_*_sync` are C variadic** and cannot be called through `DllImport`;
+  the `*v_sync` siblings take a `GHashTable` instead. `SecretSchema` is a 592-byte zeroed block whose
+  head is blitted in, since C# cannot express its inline `[32]` array without `unsafe`. **Never pass a
+  NULL schema**: a named one makes libsecret add `xdg:schema` to the attributes on store *and* search,
+  and that is the only thing scoping our lookups and our purpose sweep to VirtDeck's own items.
+- **Calls block** (a locked keyring waits on its unlock prompt), so every call site is `Task.Run` plus
+  `Task.WhenAny(work, Task.Delay(SshCredentialStore.TimeoutMs))`, and one `Lock` serialises the store
+  so two secrets queue behind one prompt. A *slow* failure latches the store off for the session:
+  D-Bus spends 25 s activating a name nothing owns, and a clean-slate save would pay that six times.
+- **Secrets are written only after `CheckSudo` passes**, so the store never holds a rejected
+  credential, and recovery from one changed on the host is the existing error path plus retyping.
+- Both stores protect at rest against another **user**, not against another process running as
+  **you**: the Secret Service has no per-application isolation. Say that in the docs, not in the UI.
 
 ### Host capability checks
 

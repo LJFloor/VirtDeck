@@ -56,6 +56,15 @@
                  TextWrapping="Wrap" Opacity="0.7" />
     </StackPanel>
 
+    <!-- Outside both auth panels: one checkbox for whichever secrets the current mode uses. -->
+    <Grid ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+      <CheckBox Grid.Column="0" Name="RememberCheck" Content="Remember passwords" VerticalAlignment="Center"
+                ToolTip.Tip="Saves them in your desktop keyring (Windows Credential Manager)." />
+      <Button Grid.Column="1" Name="ForgetButton" Content="Forget" MinWidth="70"
+              ToolTip.Tip="Delete every password VirtDeck has saved on this PC" />
+    </Grid>
+    <TextBlock Name="RememberHint" TextWrapping="Wrap" Opacity="0.7" IsVisible="False" />
+
     <TextBlock Name="StatusText" TextWrapping="Wrap" Margin="0,12,0,0" />
 
     <Button Name="ConnectButton" Content="Connect" IsDefault="True"
