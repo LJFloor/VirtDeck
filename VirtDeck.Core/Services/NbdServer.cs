@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Win32.SafeHandles;
 using Renci.SshNet;
 
 namespace VirtDeck.Services
@@ -42,14 +43,19 @@ namespace VirtDeck.Services
         private const ushort CMD_READ = 0, CMD_WRITE = 1, CMD_DISC = 2, CMD_FLUSH = 3, CMD_TRIM = 4;
         private const uint ERR_NONE = 0, ERR_EPERM = 1, ERR_EINVAL = 22;
 
+        // Simple-reply header: magic + error + handle. A read reply is this followed by the payload.
+        private const int ReplyHeaderLen = 16;
+
+        // Ceiling on requests handled off the read loop at once, matching QEMU's own MAX_NBD_REQUESTS.
+        private const int MaxInFlight = 16;
+
         private TcpListener? _listener;
         private CancellationTokenSource? _cts;
         private Task? _acceptTask;
         private ForwardedPortRemote? _forwardedPort;
-        private FileStream? _file;
+        private SafeFileHandle? _handle;
         private long _size;
         private bool _writable;
-        private readonly object _fileLock = new();
 
         // Process-wide total of bytes served (reads + writes). Every transfer funnels through here, so the
         // WinForms app samples it to fold streamed-media traffic into the SSH-tunnel throughput meter.
@@ -67,9 +73,11 @@ namespace VirtDeck.Services
         {
             _writable = writable;
             _cts = new CancellationTokenSource();
-            _file = new FileStream(localPath, FileMode.Open,
+            // A bare handle rather than a FileStream: every access below is positional, so there is no
+            // stream position to share and no lock needed around seek+read.
+            _handle = File.OpenHandle(localPath, FileMode.Open,
                 writable ? FileAccess.ReadWrite : FileAccess.Read, FileShare.Read);
-            _size = _file.Length;
+            _size = RandomAccess.GetLength(_handle);
 
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
@@ -135,7 +143,7 @@ namespace VirtDeck.Services
                     client.NoDelay = true;
                     using var stream = client.GetStream();
                     if (Handshake(stream))
-                        Transmission(stream);
+                        Transmission(client, stream);
                 }
             }
             catch { /* client went away / protocol error; drop the connection */ }
@@ -239,81 +247,155 @@ namespace VirtDeck.Services
 
         // ---- Transmission (simple replies) ---------------------------------
 
-        private void Transmission(Stream s)
+        /// <summary>
+        /// Per-connection reply state. A simple reply carries its handle, so NBD lets replies come back in
+        /// any order; what has to stay atomic is the reply itself, which is what the write lock buys.
+        /// </summary>
+        private sealed class Conn(Stream stream)
         {
-            var req = new byte[28];
-            while (true)
-            {
-                if (!ReadFull(s, req, 0, 28)) return;
-                if (BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(0)) != REQUEST_MAGIC) return;
-                var type = BinaryPrimitives.ReadUInt16BigEndian(req.AsSpan(6));
-                var handle = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(8));
-                var offset = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(16));
-                var length = BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(24));
+            private readonly object _writeLock = new();
+            private readonly object _pendingLock = new();
+            private int _pending;
 
-                switch (type)
+            public int Pending { get { lock (_pendingLock) return _pending; } }
+
+            public void Write(byte[] buf) { lock (_writeLock) stream.Write(buf, 0, buf.Length); }
+
+            public void Begin() { lock (_pendingLock) _pending++; }
+
+            public void End()
+            {
+                lock (_pendingLock)
                 {
-                    case CMD_READ:  HandleRead(s, handle, offset, length); break;
-                    case CMD_WRITE: HandleWrite(s, handle, offset, length); break;
-                    case CMD_FLUSH: HandleFlush(s, handle); break;
-                    case CMD_TRIM:  SendSimpleReply(s, ERR_NONE, handle); break; // no-op for a raw file
-                    case CMD_DISC:  return;
-                    default:        SendSimpleReply(s, ERR_EINVAL, handle); break;
+                    if (--_pending == 0) Monitor.PulseAll(_pendingLock);
+                }
+            }
+
+            /// <summary>Blocks until every dispatched request has written its reply, so the caller can
+            /// close the stream without pulling it out from under a handler still using it.</summary>
+            public void Drain()
+            {
+                lock (_pendingLock)
+                {
+                    while (_pending > 0) Monitor.Wait(_pendingLock);
                 }
             }
         }
 
-        private void HandleRead(Stream s, ulong handle, ulong offset, uint length)
+        private void Transmission(TcpClient client, Stream s)
         {
-            if (offset + length > (ulong)_size) { SendSimpleReply(s, ERR_EINVAL, handle); return; }
-
-            var data = new byte[length];
-            lock (_fileLock)
+            var conn = new Conn(s);
+            try
             {
-                _file!.Seek((long)offset, SeekOrigin.Begin);
-                var total = 0;
-                while (total < (int)length)
+                var req = new byte[28];
+                while (true)
                 {
-                    var r = _file.Read(data, total, (int)length - total);
-                    if (r == 0) break;
-                    total += r;
+                    if (!ReadFull(s, req, 0, 28)) return;
+                    if (BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(0)) != REQUEST_MAGIC) return;
+                    var type = BinaryPrimitives.ReadUInt16BigEndian(req.AsSpan(6));
+                    var handle = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(8));
+                    var offset = BinaryPrimitives.ReadUInt64BigEndian(req.AsSpan(16));
+                    var length = BinaryPrimitives.ReadUInt32BigEndian(req.AsSpan(24));
+
+                    switch (type)
+                    {
+                        case CMD_READ:  DispatchRead(client, conn, handle, offset, length); break;
+                        case CMD_WRITE: HandleWrite(conn, s, handle, offset, length); break;
+                        // A flush has to cover the writes already replied to, so let them land first.
+                        case CMD_FLUSH: conn.Drain(); HandleFlush(conn, handle); break;
+                        case CMD_TRIM:  SendSimpleReply(conn, ERR_NONE, handle); break; // no-op for a raw file
+                        case CMD_DISC:  return;
+                        default:        SendSimpleReply(conn, ERR_EINVAL, handle); break;
+                    }
                 }
             }
-            SendSimpleReply(s, ERR_NONE, handle, data);
+            finally { conn.Drain(); }
+        }
+
+        /// <summary>
+        /// Hands the read to the pool only when the client already has another request queued, so its file
+        /// read overlaps the previous reply's socket write. An emulated CD-ROM is queue-depth 1 (ATAPI runs
+        /// one command at a time on both the ide and sata buses), and there the thread hop would be pure
+        /// added latency on the one path that decides boot speed, so that case stays inline.
+        /// </summary>
+        private void DispatchRead(TcpClient client, Conn conn, ulong handle, ulong offset, uint length)
+        {
+            var pipelined = conn.Pending < MaxInFlight && client.Available >= 28;
+            if (!pipelined) { HandleRead(conn, handle, offset, length); return; }
+
+            conn.Begin();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { HandleRead(conn, handle, offset, length); }
+                catch { /* the connection is going away; the read loop sees it too */ }
+                finally { conn.End(); }
+            });
+        }
+
+        private void HandleRead(Conn conn, ulong handle, ulong offset, uint length)
+        {
+            var h = _handle;
+            if (h is null || offset + length > (ulong)_size) { SendSimpleReply(conn, ERR_EINVAL, handle); return; }
+
+            // Header and payload leave as one write. Two writes are two segments on a NoDelay socket, and
+            // SSH.NET's forwarder turns each socket read into its own channel-data message, so a split
+            // reply costs an extra SSH packet and an extra wakeup on every one of the strictly serial
+            // requests that make up a boot.
+            var buf = new byte[ReplyHeaderLen + length];
+            WriteReplyHeader(buf, ERR_NONE, handle);
+            ReadAt(h, buf.AsSpan(ReplyHeaderLen, (int)length), (long)offset);
+            conn.Write(buf);
             Interlocked.Add(ref _totalBytesServed, length);
         }
 
-        private void HandleWrite(Stream s, ulong handle, ulong offset, uint length)
+        private void HandleWrite(Conn conn, Stream s, ulong handle, ulong offset, uint length)
         {
             var data = new byte[length];
             if (!ReadFull(s, data, 0, (int)length)) return; // drain the payload before replying
-            if (!_writable)                              { SendSimpleReply(s, ERR_EPERM, handle); return; }
-            if (offset + length > (ulong)_size)          { SendSimpleReply(s, ERR_EINVAL, handle); return; }
+            var h = _handle;
+            if (!_writable)                                  { SendSimpleReply(conn, ERR_EPERM, handle); return; }
+            if (h is null || offset + length > (ulong)_size) { SendSimpleReply(conn, ERR_EINVAL, handle); return; }
 
-            lock (_fileLock)
-            {
-                _file!.Seek((long)offset, SeekOrigin.Begin);
-                _file.Write(data, 0, (int)length);
-            }
-            SendSimpleReply(s, ERR_NONE, handle);
+            // Writes stay on the read loop: they are already serialized by having to read their payload
+            // out of the request stream, and a streamed floppy is far too small to be worth overlapping.
+            RandomAccess.Write(h, data, (long)offset);
+            SendSimpleReply(conn, ERR_NONE, handle);
             Interlocked.Add(ref _totalBytesServed, length);
         }
 
-        private void HandleFlush(Stream s, ulong handle)
+        private void HandleFlush(Conn conn, ulong handle)
         {
-            if (_writable) lock (_fileLock) { _file!.Flush(true); }
-            SendSimpleReply(s, ERR_NONE, handle);
+            var h = _handle;
+            if (_writable && h is not null) RandomAccess.FlushToDisk(h);
+            SendSimpleReply(conn, ERR_NONE, handle);
         }
 
-        private static void SendSimpleReply(Stream s, uint error, ulong handle, byte[]? data = null)
+        // Positional read: no seek and no shared file lock, so the several connections QEMU opens over an
+        // export's lifetime no longer serialize against each other. The loop is for partial reads only;
+        // the caller has already excluded reads past EOF.
+        private static void ReadAt(SafeFileHandle h, Span<byte> dest, long offset)
         {
-            var hdr = new byte[16];
-            BinaryPrimitives.WriteUInt32BigEndian(hdr.AsSpan(0), SIMPLE_REPLY_MAGIC);
-            BinaryPrimitives.WriteUInt32BigEndian(hdr.AsSpan(4), error);
-            BinaryPrimitives.WriteUInt64BigEndian(hdr.AsSpan(8), handle);
-            s.Write(hdr, 0, hdr.Length);
-            if (data != null) s.Write(data, 0, data.Length);
-            s.Flush();
+            var total = 0;
+            while (total < dest.Length)
+            {
+                var r = RandomAccess.Read(h, dest[total..], offset + total);
+                if (r == 0) break;
+                total += r;
+            }
+        }
+
+        private static void SendSimpleReply(Conn conn, uint error, ulong handle)
+        {
+            var hdr = new byte[ReplyHeaderLen];
+            WriteReplyHeader(hdr, error, handle);
+            conn.Write(hdr);
+        }
+
+        private static void WriteReplyHeader(byte[] buf, uint error, ulong handle)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(0), SIMPLE_REPLY_MAGIC);
+            BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(4), error);
+            BinaryPrimitives.WriteUInt64BigEndian(buf.AsSpan(8), handle);
         }
 
         private static bool ReadFull(Stream s, byte[] buf, int offset, int count)
@@ -342,14 +424,14 @@ namespace VirtDeck.Services
                 _forwardedPort = null;
             }
 
-            lock (_fileLock)
+            // SafeFileHandle is refcounted, so a read still in flight keeps the descriptor alive and only
+            // a read that starts after this point fails, which the connection handler already swallows.
+            var handle = _handle;
+            _handle = null;
+            if (handle != null)
             {
-                if (_file != null)
-                {
-                    try { if (_writable) _file.Flush(true); } catch { }
-                    try { _file.Dispose(); } catch { }
-                    _file = null;
-                }
+                try { if (_writable) RandomAccess.FlushToDisk(handle); } catch { }
+                try { handle.Dispose(); } catch { }
             }
 
             _cts?.Dispose();
