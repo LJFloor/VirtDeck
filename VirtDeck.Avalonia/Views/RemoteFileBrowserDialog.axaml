@@ -53,11 +53,17 @@
                        Opacity="0.7" VerticalAlignment="Center" />
             <TextBlock DockPanel.Dock="Right" Text="{Binding Size}" Width="{StaticResource ColSize}"
                        Opacity="0.7" VerticalAlignment="Center" />
-            <Border DockPanel.Dock="Left" Background="{Binding BadgeBrush}" CornerRadius="3"
-                    Width="34" Height="18" Margin="0,0,8,0" VerticalAlignment="Center">
-              <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="White"
-                         HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
+            <!-- The desktop's icon for the type, or the badge when it has none to give. Whichever
+                 it is, it is the same for every row, so the Name column stays aligned. -->
+            <Panel DockPanel.Dock="Left" Margin="0,0,8,0" VerticalAlignment="Center">
+              <Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="16" Height="16"
+                     RenderOptions.BitmapInterpolationMode="HighQuality" />
+              <Border IsVisible="{Binding !HasIcon}" Background="{Binding BadgeBrush}" CornerRadius="3"
+                      Width="34" Height="18">
+                <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="White"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+            </Panel>
             <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
           </DockPanel>
         </DataTemplate>

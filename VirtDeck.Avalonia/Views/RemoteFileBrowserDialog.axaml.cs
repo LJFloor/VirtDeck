@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Input;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Models;
 using VirtDeck.Services;
 
@@ -26,6 +27,9 @@ public partial class RemoteFileBrowserDialog : Window
 
     private string _currentDir = "/";
     private List<RemoteEntry> _entries = new();
+
+    /// <summary>Pixel size to fetch desktop icons at, or 0 to draw the fallback badges.</summary>
+    private int _iconSize;
 
     /// <summary>Selected path (the first one when multi-select); null if cancelled.</summary>
     public string? SelectedPath { get; private set; }
@@ -70,7 +74,16 @@ public partial class RemoteFileBrowserDialog : Window
         _currentDir = dir;
         NameBox.Text = name;
 
-        Opened += async (_, _) => await NavigateTo(_currentDir);
+        Opened += async (_, _) =>
+        {
+            // Rows are 16 logical px, so a 2x screen wants the theme's 32px art in that box rather
+            // than 16px art stretched into it. RenderScaling only means anything once shown.
+            int wanted = RenderScaling > 1.25 ? 32 : 16;
+            // The first lookup reads the Linux icon theme (and may shell out for its name), so it
+            // is warmed off the UI thread, alongside the first directory listing.
+            _iconSize = await Task.Run(() => FileIcons.Available(wanted) ? wanted : 0);
+            await NavigateTo(_currentDir);
+        };
     }
 
     // ---- Navigation ----------------------------------------------------
@@ -81,7 +94,12 @@ public partial class RemoteFileBrowserDialog : Window
         Cursor = new Cursor(StandardCursorType.Wait);
         try
         {
-            _entries = await Task.Run(() => _virsh.ListDirectory(dir));
+            _entries = await Task.Run(() =>
+            {
+                var entries = _virsh.ListDirectory(dir);
+                WarmIcons(entries);
+                return entries;
+            });
             _currentDir = dir;
             DirBox.Text = dir;
             PopulateList();
@@ -94,15 +112,31 @@ public partial class RemoteFileBrowserDialog : Window
         finally { Cursor = Cursor.Default; }
     }
 
+    /// <summary>
+    /// Puts every icon this listing needs in the cache while still off the UI thread, so building
+    /// the rows is pure cache lookups. An icon is not always cheap the first time: on a theme that
+    /// ships SVG, each new type is a rasterisation, and a directory of mixed files would otherwise
+    /// pay for all of them at once with the UI thread held.
+    /// </summary>
+    private void WarmIcons(List<RemoteEntry> entries)
+    {
+        if (_iconSize == 0) return;
+        foreach (var entry in entries)
+        {
+            if (entry.IsDir) FileIcons.Folder(_iconSize);
+            else FileIcons.ForFileName(entry.Name, _iconSize);
+        }
+    }
+
     private void PopulateList()
     {
         var fe = FilterBox.SelectedItem as FilterEntry;
         _rows.Clear();
         foreach (var d in _entries.Where(x => x.IsDir).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-            _rows.Add(new RemoteFileRow(d));
+            _rows.Add(new RemoteFileRow(d, _iconSize));
         foreach (var f in _entries.Where(x => !x.IsDir && Matches(x.Name, fe))
                                   .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-            _rows.Add(new RemoteFileRow(f));
+            _rows.Add(new RemoteFileRow(f, _iconSize));
     }
 
     private void SyncNameBox()

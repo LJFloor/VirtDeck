@@ -44,6 +44,8 @@ Both artifacts are published self-contained, so these ship inside them:
 | Newtonsoft.Json (a dependency of UnattendGenerator, below) | 13.0.4 | MIT | https://github.com/JamesNK/Newtonsoft.Json |
 | Inter typeface (in Avalonia.Fonts.Inter) | n/a | SIL OFL 1.1 | https://github.com/rsms/inter |
 | SkiaSharp (+ NativeAssets.Linux) | 3.119.4 | MIT (wrapper), BSD-3-Clause (Skia itself) | https://github.com/mono/SkiaSharp |
+| Svg.Skia (+ Svg.Model, Svg.Custom, Svg.SceneGraph, Svg.Animation, ShimSkiaSharp) | 5.1.1 | MIT | https://github.com/wieslawsoltes/Svg.Skia |
+| ExCSS (a dependency of Svg.Skia, above) | 4.3.1 | MIT | https://github.com/TylerBrinks/ExCSS |
 | Concentus (Opus decoder) | 2.2.2 | BSD-3-Clause (the Opus license) | https://github.com/lostromb/concentus |
 | SSH.NET | 2024.2.0 | MIT | https://github.com/sshnet/SSH.NET |
 

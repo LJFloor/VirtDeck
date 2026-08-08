@@ -23,6 +23,12 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <!-- Rasterises Linux icon-theme SVGs for the remote file browser (Services/LinuxFileIcons).
+         Papirus, Breeze and Adwaita 46+ ship mimetype icons as SVG only, and Avalonia renders none
+         of it on its own. 5.1.1 wants SkiaSharp >= 3.119.2 and SpiceClient already pins 3.119.4, so
+         this bumps no version and adds no native library. Unused on Windows, where the shell hands
+         over pixels directly; carried anyway rather than compile the app differently per RID. -->
+    <PackageReference Include="Svg.Skia" Version="5.1.1" />
   </ItemGroup>
 
   <ItemGroup>

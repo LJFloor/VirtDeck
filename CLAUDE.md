@@ -72,10 +72,60 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Services/DropFiles`: the one place the drag-and-drop dialect is translated, the same way `FileDialogs` handles the filter string. Avalonia 12 replaced `IDataObject`/`DataFormats.FileDrop` with `IDataTransfer`/`DataFormat.File`, so Avalonia 11 snippets do not apply; `LocalFiles` filters a drop down to real local files (directories and portal handles are dropped) through the same `FileDialogs.LocalPathOf` the pickers use. **X11 drag-and-drop needs Avalonia 12.1+**: 12.0.x has no XDND in its X11 backend at all and raises no drop events on Linux, which is why the csproj pins 12.1 as the floor.
   Drop targets: the console window (below), the Create-VM wizard's General page (an ISO or floppy image fills the install media and switches to "stream from this PC"), a removable-drive row in `VmEditWindow` (staged as that drive's media; the extension must match the drive kind), and `LoginWindow`'s key panel (adds and selects a private key). Not `RemotePathBox`: its path is on the *server*, so a local path there would be meaningless.
 - Console drops: any file is sent into the guest with `SpiceSession.SendFile` (the vdagent file-transfer channel; the guest agent picks where it lands), and the status bar shows one shared progress bar and Cancel for the whole drop, refcounted in `_activeXfers` and driven **only** by the session's file events, because `SendFile` returns silently for a missing file or a departed agent. A single ISO or floppy image dropped on a VM that has the matching drive **always asks** (`MessageDialog.Choose`) whether to insert it or send it; with no guest agent the send button is disabled with a reason rather than the drop silently mounting. Nothing is ever mounted unconfirmed, and a shut-off VM is a valid drop target (the drive targets are detected on the powered-off paths too, and the media change goes straight to the saved config).
-- `Controls/RemotePathBox`: textbox + "…" opening `RemoteFileBrowserDialog`. That browser badges files by extension instead of asking the OS for an icon (`ShellIcons`/`SHGetFileInfo` is deleted): these are the *server's* files, so a client-side association would be misleading anyway.
+- `Controls/RemotePathBox`: textbox + "…" opening `RemoteFileBrowserDialog`. That browser draws the
+  host desktop's own file-type icons; see "Remote file browser icons" below.
 - `Input/AsciiScancodes`: char → AT set-1 scancode + shift, for "Type clipboard". Replaces `VkKeyScan`, which read the *host* layout; scancodes are positional, so the guest's layout decides; a fixed US table is exactly as correct and equally approximate elsewhere.
 - Clipboard: **text and images, both ways**; see "Clipboard sharing" below for the whole story. `Services/HostClipboard` is the one place the Avalonia clipboard dialect is translated, the way `DropFiles` is for drag-and-drop.
 - `Input/IKeyboardGrab`: `X11KeyboardGrab` (`XGrabKeyboard`) on Linux so Alt+Tab/Super reach the guest; no-op elsewhere. **Best-effort by design**; the console must work without it. The grab **must** be issued on Avalonia's own X display connection (dug out of `Window.PlatformImpl` by reflection): X reports key events during an active grab only to the grabbing *client*, and a client is a connection; a grab on a private `XOpenDisplay` takes every key away from Avalonia and the console goes deaf while grabbed. If the display can't be resolved, report unsupported (no grab) rather than falling back to a private connection.
+
+### Remote file browser icons
+
+`RemoteFileBrowserDialog` shows the **host desktop's** icon for each type, through
+`Services/FileIcons` and its two halves (`WindowsFileIcons`, `LinuxFileIcons` + `IconThemeIndex`),
+the same one-place-per-dialect shape as `FileDialogs` and `DropFiles`. **Everything is keyed by file
+name only and nothing is ever opened**, which is what makes it usable at all: the files being listed
+are on the *server*. So the icon is the client's opinion of the extension, which is the useful one,
+because the person reading the list is at the client, and it is what every SFTP client shows.
+
+- **Windows: the registered application associations.** `SHGetFileInfoW` with
+  `SHGFI_USEFILEATTRIBUTES` asks about a *type*, so `".iso"` is a valid argument and the path is
+  parsed rather than touched. It resolves through the same layer Explorer uses, so the user's own
+  default-program choices show through, and an unregistered extension gets the shell's blank page
+  instead of nothing. `FILE_ATTRIBUTE_DIRECTORY` gets the folder icon. Turning the HICON into pixels
+  is the fiddly half: `GetIconInfo` + `GetDIBits` reads the colour bitmap as top-down 32bpp BGRA with
+  **straight (non-premultiplied) alpha**, the same assumption `Icon.ToBitmap` makes, and where that
+  bitmap is under 32bpp or comes back fully transparent the 1bpp **mask** is what decides which
+  pixels are drawn (a pre-XP icon has no alpha channel at all).
+- **Linux: shared-mime-info plus the current icon theme.** `mime/globs2` gives the MIME type, then
+  `mime/icons`, the type with its slash dashed (`application/x-qemu-disk` to
+  `application-x-qemu-disk`), `mime/generic-icons`, and the same three for every parent in
+  `mime/subclasses`. **Aliases are tried too, which GIO does not do**, for one concrete reason:
+  shared-mime-info 2.x renamed `application/x-cd-image` to `application/vnd.efi.iso` and kept the old
+  name as an alias, while the themes still ship the art under `application-x-cd-image`, so skipping
+  aliases shows a bare disc where the theme has a drawn ISO. `IconThemeIndex` then does the Icon
+  Theme Specification's real lookup (`index.theme`'s `Directories` with each one's size rules,
+  through the whole `Inherits` chain, hicolor last). **Names are searched before themes**, GTK's
+  order rather than the spec pseudo-code's, so the theme the user picked wins with a generic icon
+  before its parent wins with a specific one. `@2x` subdirectories are skipped because a HiDPI row is
+  served by asking for a larger pixel size instead, and a directory is read once into a name set
+  because a miss would otherwise cost two `stat`s in each of ~450 subdirectories per name tried.
+- **SVG is not optional.** Papirus, Breeze and Adwaita 46+ ship mimetype icons as SVG only, so
+  `Svg.Skia` rasterises them at the size asked for. It needs SkiaSharp >= 3.119.2 and SpiceClient
+  already pins 3.119.4, so it changed no version and added no native library. It is dead weight in
+  the Windows artifact (3.3 MB of managed DLLs), which beats a RID-conditional compile in a solution
+  whose rule is that every project builds on either OS.
+- **The desktop is asked once per listing, not once per row.** `FileIcons.Available(size)` decides
+  whether a whole listing gets icons or the old colour-coded three-letter badges, so the two never
+  appear mixed and the Name column lines up either way; the badge table in `RemoteFileRow` survives
+  as that fallback and nothing else. Icons are cached by (type, size) and **shared by every row, so
+  no caller may dispose one**. First use reads the theme (and may shell out to `gsettings` for its
+  name), and on an SVG theme each new type is a rasterisation, so `NavigateTo` warms every icon the
+  listing needs inside the same `Task.Run` as the directory fetch and building the rows is then pure
+  cache hits.
+- **No VirtDeck-specific overrides.** The extension is handed to the OS as-is, including `.img`,
+  which the badges special-case by floppy geometry. A listing shows what the client's file manager
+  would show; the VM-aware reading of a file belongs where it changes behaviour (`FloppyImage`,
+  `IsoIdentifier`), not in the decoration.
 
 ### Host capability checks
 

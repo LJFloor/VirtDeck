@@ -1,15 +1,25 @@
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Models;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One row of the remote file browser. The WinForms version asked Windows for the registered
-/// icon (<c>SHGetFileInfo</c>); there is no cross-platform equivalent worth a P/Invoke, so the
-/// icon is a colour-coded three-letter badge built from the extension; the same look on both
-/// platforms, and it never depends on what the *client* has installed (these are the *server's*
-/// files, so a host association would have been misleading anyway).
+/// One row of the remote file browser. The icon is the host desktop's own: the registered
+/// application association on Windows, the current icon theme on Linux, both via
+/// <see cref="FileIcons"/> and both keyed only by the file name, since these files live on the
+/// *server* and there is nothing local to open. It is therefore the client's opinion of the
+/// extension, which is the useful one, because the person reading the list is at the client.
+///
+/// <para>The colour-coded three-letter badge is the fallback for a desktop that cannot answer at
+/// all, and <see cref="FileIcons.Available"/> is checked once for a whole listing so the two never
+/// appear mixed together. It is also all there was before, which is why the columns still line up
+/// either way.</para>
+///
+/// <para><see cref="Icon"/> is shared with every other row of the same type and owned by the cache;
+/// never dispose it.</para>
 /// </summary>
 public sealed class RemoteFileRow
 {
@@ -22,10 +32,14 @@ public sealed class RemoteFileRow
 
     public RemoteEntry Entry { get; }
 
-    public RemoteFileRow(RemoteEntry entry)
+    public RemoteFileRow(RemoteEntry entry, int iconPixelSize = 0)
     {
         Entry = entry;
         var ext = entry.IsDir ? "" : Path.GetExtension(entry.Name).TrimStart('.').ToLowerInvariant();
+
+        if (iconPixelSize > 0)
+            Icon = entry.IsDir ? FileIcons.Folder(iconPixelSize)
+                               : FileIcons.ForFileName(entry.Name, iconPixelSize);
 
         (Badge, BadgeBrush) = entry.IsDir
             ? ("DIR", FolderBrush)
@@ -46,6 +60,11 @@ public sealed class RemoteFileRow
 
     public string Name => Entry.Name;
     public bool IsDir => Entry.IsDir;
+
+    /// <summary>The desktop's icon for this type, or null when the badge is being used instead.</summary>
+    public Bitmap? Icon { get; }
+    public bool HasIcon => Icon != null;
+
     public string Badge { get; }
     public IBrush BadgeBrush { get; }
     public string Size => Entry.IsDir ? "" : FormatSize(Entry.Size);
