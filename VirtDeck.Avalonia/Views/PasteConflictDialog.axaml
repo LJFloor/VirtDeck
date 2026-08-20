@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.PasteConflictDialog"
+        Title="Paste"
+        Width="480" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <!-- Cancel first, the action that does the most last, and Skip between them: the same bar every
+         other dialog in the app ends with. The primary is the only one that writes anything. -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="SkipButton" Content="Skip" MinWidth="88" />
+      <!-- The primary sits in a Border for the reason MessageDialog's alternative does: a disabled
+           control is not hit-testable in Avalonia, so the tooltip explaining why it is disabled has
+           to hang off an enabled parent. -->
+      <Border Name="OkButtonHost">
+        <Button Name="OkButton" Content="Replace" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Spacing="10">
+      <TextBlock Name="PromptText" TextWrapping="Wrap" />
+      <TextBlock Name="DetailText" TextWrapping="Wrap" Opacity="0.7" />
+      <CheckBox Name="AllBox" IsVisible="False" />
+    </StackPanel>
+  </DockPanel>
+</Window>

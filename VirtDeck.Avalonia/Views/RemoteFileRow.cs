@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using VirtDeck.Avalonia.Services;
@@ -21,7 +22,7 @@ namespace VirtDeck.Avalonia.Views;
 /// <para><see cref="Icon"/> is shared with every other row of the same type and owned by the cache;
 /// never dispose it.</para>
 /// </summary>
-public sealed class RemoteFileRow
+public sealed class RemoteFileRow : INotifyPropertyChanged
 {
     private static readonly IBrush FolderBrush = Brush.Parse("#e8b339");
     private static readonly IBrush DiskBrush = Brush.Parse("#4a90d9");
@@ -32,9 +33,10 @@ public sealed class RemoteFileRow
 
     public RemoteEntry Entry { get; }
 
-    public RemoteFileRow(RemoteEntry entry, int iconPixelSize = 0)
+    public RemoteFileRow(RemoteEntry entry, int iconPixelSize = 0, bool isCut = false)
     {
         Entry = entry;
+        IsCut = isCut;
         var ext = entry.IsDir ? "" : Path.GetExtension(entry.Name).TrimStart('.').ToLowerInvariant();
 
         if (iconPixelSize > 0)
@@ -60,6 +62,62 @@ public sealed class RemoteFileRow
 
     public string Name => Entry.Name;
     public bool IsDir => Entry.IsDir;
+
+    /// <summary>
+    /// What the name column shows. A symlink says where it points, which is most of the reason to
+    /// notice it is one. The picker binds <see cref="Name"/> instead, because a link target in a
+    /// list you are choosing a file out of is noise.
+    /// </summary>
+    public string Display => Entry.IsLink && Entry.LinkTarget.Length > 0
+        ? $"{Entry.Name} -> {Entry.LinkTarget}"
+        : Entry.Name;
+
+    /// <summary>Dimmed in the file explorer: the link resolves to nothing this account can reach.</summary>
+    public bool IsBrokenLink => Entry.IsBrokenLink;
+
+    /// <summary>
+    /// This entry is on the file explorer's clipboard waiting to be moved, so the whole row is drawn
+    /// faded. It is set from the clipboard when the rows are built rather than raised as a change,
+    /// because rows here are rebuilt wholesale rather than edited in place; cutting repopulates the
+    /// list, which is what makes the fade appear at once and survive navigating away and back.
+    /// </summary>
+    public bool IsCut { get; }
+
+    private bool _isEditing;
+
+    /// <summary>
+    /// True while this row's name cell is a text box rather than a label.
+    ///
+    /// <para>It is the only thing here that changes after the row is built, and the only reason this
+    /// class notifies at all: every other property is read once and the list is rebuilt wholesale
+    /// rather than edited. A rename is the one action whose whole point is happening in the row the
+    /// user is looking at, so it cannot wait for a repopulate the way cutting can.</para>
+    /// </summary>
+    public bool IsEditing
+    {
+        get => _isEditing;
+        set
+        {
+            if (_isEditing == value) return;
+            _isEditing = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEditing)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// What the name column is drawn at. A broken symlink is dimmed rather than hidden or badged:
+    /// it is still a real entry, it just points at nothing reachable.
+    /// </summary>
+    public double NameOpacity => Entry.IsBrokenLink ? 0.5 : 1.0;
+
+    public string Permissions => Entry.Permissions;
+    public string Owner => Entry.Owner;
+    public string Group => Entry.Group;
+
+    /// <summary>Owner and group as one string, for the row tooltip.</summary>
+    public string Ownership => $"{Entry.Owner}:{Entry.Group}";
 
     /// <summary>The desktop's icon for this type, or null when the badge is being used instead.</summary>
     public Bitmap? Icon { get; }

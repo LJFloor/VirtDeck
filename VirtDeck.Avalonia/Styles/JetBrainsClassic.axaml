@@ -478,6 +478,21 @@
   </ControlTheme>
 
   <!--
+    A square button holding a glyph instead of a label: the same bordered cell as an ordinary
+    button, so the two sit in one strip, shrunk to the 24 every field and button in the app already
+    shares. MinWidth matches that height and the padding goes, which is the whole of "square"; the
+    16x16 glyph then centres itself in it.
+
+    A glyph in one of these must bind its Stroke to `$parent[Button].Foreground` rather than to
+    JbButtonForeground directly, or it stays at full strength while the button is disabled, and
+    Back and Forward spend most of their life disabled.
+  -->
+  <ControlTheme x:Key="JbIconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="MinWidth" Value="24" />
+    <Setter Property="Padding" Value="0" />
+  </ControlTheme>
+
+  <!--
     Toolbar button: the same flat cell a top-level MenuItem draws, so a plain command can sit next
     to the dropdowns in one strip without looking like a dialog button. Keyed rather than implicit;
     the bordered Button above stays the default everywhere else.
@@ -533,6 +548,20 @@
   <ControlTheme x:Key="JbStatusBarButton" TargetType="Button" BasedOn="{StaticResource JbToolButton}">
     <Setter Property="MinHeight" Value="16" />
     <Setter Property="Padding" Value="8,0" />
+  </ControlTheme>
+
+  <!--
+    A sortable column heading: the same flat cell again, but reading as the heading strip's text
+    rather than as a control, so a table whose columns sort looks identical to one whose columns do
+    not until the pointer is over it. The strip's own 12,3 already insets it, hence no padding of
+    its own, and the row height comes from the strip, hence MinHeight 0.
+  -->
+  <ControlTheme x:Key="JbColumnHeader" TargetType="Button" BasedOn="{StaticResource JbToolButton}">
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
   </ControlTheme>
 
   <!--
@@ -997,7 +1026,7 @@
                   Padding="{TemplateBinding Padding}">
             <!-- The 18px gutter is reserved whether or not anything is in it, so the labels of a
                  menu that mixes plain and checkable items still line up (JetBrains does the same). -->
-            <Grid ColumnDefinitions="18,*,Auto">
+            <Grid ColumnDefinitions="18,*,Auto,Auto">
               <Panel Grid.Column="0" VerticalAlignment="Center">
                 <ContentPresenter Name="PART_IconPresenter" IsVisible="False"
                                   Content="{TemplateBinding Icon}"
@@ -1023,8 +1052,18 @@
                                 VerticalAlignment="Center"
                                 RecognizesAccessKey="True" />
 
+              <!-- The chord an item names, when it names one. The lane is the theme's job rather
+                   than each view spelling "Ctrl+X" into its own Header: Fluent's MenuItem has this
+                   column and this retemplate had dropped it, so InputGesture drew nothing anywhere
+                   in the app, including in the cut/copy/paste flyout a TextBox brings with it. -->
+              <TextBlock Name="PART_InputGestureText" Grid.Column="2"
+                         Text="{TemplateBinding InputGesture}"
+                         IsVisible="{TemplateBinding InputGesture, Converter={x:Static ObjectConverters.IsNotNull}}"
+                         Foreground="{TemplateBinding Foreground}" Opacity="0.65"
+                         Margin="20,0,0,0" VerticalAlignment="Center" />
+
               <!-- Filled triangle, the classic submenu marker; hidden on leaf items (:empty). -->
-              <Path Name="Chevron" Grid.Column="2"
+              <Path Name="Chevron" Grid.Column="3"
                     Fill="{TemplateBinding Foreground}"
                     Margin="14,0,0,0" VerticalAlignment="Center"
                     Data="M 0,0 L 4,3.5 L 0,7 Z" />

@@ -331,6 +331,52 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// Runs a command as the login user on a dedicated connection, calling
+        /// <paramref name="onLine"/> for each line of stdout. Blocks until the command exits. Throws
+        /// on non-zero exit status.
+        ///
+        /// <para>The un-elevated sibling of <see cref="RunSudoCommandStreaming"/>, and it exists for
+        /// the same reason: <see cref="RunCommand"/> holds <c>_ioLock</c> for its whole call, so one
+        /// long copy through it would freeze the VM list, the container list and every other module
+        /// until it finished. Like its sibling it neither escapes its argument nor wraps it in
+        /// <c>bash -c</c>, so the caller spells out its own wrapper.</para>
+        /// </summary>
+        public void RunCommandStreaming(string command, Action<string> onLine, CancellationToken ct)
+        {
+            if (_client == null || !_client.IsConnected)
+                throw new InvalidOperationException("SSH is not connected.");
+
+            using var sshRun = new SshClient(_client.ConnectionInfo);
+            sshRun.Connect();
+            try
+            {
+                using var cmd = sshRun.CreateCommand(command);
+                using var reg = ct.Register(() =>
+                {
+                    try { cmd.CancelAsync(); } catch { }
+                    try { sshRun.Disconnect(); } catch { }
+                });
+                var ar = cmd.BeginExecute();
+                using var reader = new System.IO.StreamReader(cmd.OutputStream);
+                string? line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    Interlocked.Add(ref _bytesReceived, line.Length + 1);
+                    onLine(line);
+                }
+                ct.ThrowIfCancellationRequested();
+                cmd.EndExecute(ar);
+                if (cmd.ExitStatus != 0)
+                    throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error.Trim()}");
+            }
+            finally
+            {
+                try { sshRun.Disconnect(); } catch { }
+            }
+        }
+
+        /// <summary>
         /// Runs <paramref name="argv"/> under sudo behind a pseudo terminal and hands back the live
         /// session. On its own connection, like <see cref="DownloadFileAsync"/> and
         /// <see cref="RunSudoCommandStreaming"/>, so it never holds <c>_ioLock</c>: a console stays

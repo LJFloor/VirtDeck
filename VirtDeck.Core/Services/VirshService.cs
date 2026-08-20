@@ -8,6 +8,7 @@ namespace VirtDeck.Services
     public class VirshService
     {
         private readonly SshConnectionManager _ssh;
+        private readonly RemoteFileService _files;
         private readonly Dictionary<string, VmInfo> _vms = new();
 
         public IReadOnlyDictionary<string, VmInfo> Vms => _vms;
@@ -26,6 +27,7 @@ namespace VirtDeck.Services
         public VirshService(SshConnectionManager ssh)
         {
             _ssh = ssh;
+            _files = new RemoteFileService(ssh);
         }
 
         public async Task RefreshAsync()
@@ -814,48 +816,19 @@ namespace VirtDeck.Services
         // ---- Remote file browsing (over the sudo channel, so root-owned dirs are listable) ----
 
         /// <summary>
-        /// Lists a directory on the host. Runs as root via sudo so root-owned paths (e.g.
-        /// /var/lib/libvirt/images) are visible. Output is NUL-delimited records of
-        /// type \t size \t mtime \t name, so names with spaces/newlines survive.
-        /// Throws if the path is missing/unreadable.
+        /// Lists a directory on the host as root, so root-owned paths (e.g.
+        /// /var/lib/libvirt/images) are visible. The listing itself lives in
+        /// <see cref="RemoteFileService"/>, which the file explorer drives un-elevated; this is the
+        /// same call with sudo, so the find format string exists in one place.
+        /// Throws if the path is missing or unreadable, which is what this method's callers
+        /// (the media pickers) already handle.
         /// </summary>
         public List<RemoteEntry> ListDirectory(string path)
         {
-            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
-            var cmd = $"p=$(echo {b64} | base64 -d); " +
-                      "find \"$p\" -maxdepth 1 -mindepth 1 -printf '%Y\\t%s\\t%TY-%Tm-%Td %TH:%TM\\t%f\\0'";
-            var raw = _ssh.RunSudoCommand(cmd);
-
-            var list = new List<RemoteEntry>();
-            foreach (var record in raw.Split('\0', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var f = record.Split('\t', 4);
-                if (f.Length < 4) continue;
-                if (!long.TryParse(f[1], out var size)) size = 0;
-                list.Add(new RemoteEntry
-                {
-                    IsDir = f[0] == "d",
-                    Size = size,
-                    Modified = f[2],
-                    Name = f[3],
-                });
-            }
-            return list;
+            var listing = _files.ListDirectory(path, elevated: true);
+            if (listing.Failure != ListFailure.None) throw new Exception(listing.Message);
+            return listing.Entries;
         }
-
-        /// <summary>Parent directory of an absolute POSIX path, or null at the root.</summary>
-        public static string? ParentPath(string path)
-        {
-            if (string.IsNullOrEmpty(path) || path == "/") return null;
-            var trimmed = path.TrimEnd('/');
-            var slash = trimmed.LastIndexOf('/');
-            if (slash <= 0) return "/";
-            return trimmed[..slash];
-        }
-
-        /// <summary>Joins a directory and child name with a single POSIX separator.</summary>
-        public static string CombinePath(string dir, string name) =>
-            dir == "/" ? "/" + name : dir.TrimEnd('/') + "/" + name;
 
         // ---- Network -------------------------------------------------------
 

@@ -11,6 +11,7 @@
          box, stroked not filled, so it reads at one weight beside a 12pt label. -->
     <StreamGeometry x:Key="IconVirtualMachines">M1,2 H15 V11 H1 Z M6,14 H10 M8,11 V14</StreamGeometry>
     <StreamGeometry x:Key="IconContainers">M1,4 H15 V13 H1 Z M1,4 L3.5,1 H12.5 L15,4 M6,4 V13 M10,4 V13</StreamGeometry>
+    <StreamGeometry x:Key="IconFileExplorer">M1,3 H6 L7.5,5 H15 V13 H1 Z</StreamGeometry>
     <StreamGeometry x:Key="IconTerminal">M1,3 H15 V13 H1 Z M4,6.5 L6.5,8.5 L4,10.5 M8,10.5 H12</StreamGeometry>
   </Window.Resources>
 
@@ -52,6 +53,18 @@
           </StackPanel>
         </TabItem.Header>
         <vm:ContainersModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconFileExplorer}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="File explorer" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:FileExplorerModule />
       </TabItem>
 
       <TabItem>

@@ -57,7 +57,7 @@ public partial class RemoteFileBrowserDialog : Window
 
         UpButton.Click += async (_, _) =>
         {
-            if (VirshService.ParentPath(_currentDir) is { } parent) await NavigateTo(parent);
+            if (RemoteFileService.ParentPath(_currentDir) is { } parent) await NavigateTo(parent);
         };
         DirBox.KeyDown += async (_, e) =>
         {
@@ -153,7 +153,7 @@ public partial class RemoteFileBrowserDialog : Window
         var picked = FileList.SelectedItems?.Cast<RemoteFileRow>().ToList() ?? new List<RemoteFileRow>();
         if (picked.Count == 1 && picked[0].IsDir)
         {
-            await NavigateTo(VirshService.CombinePath(_currentDir, picked[0].Name));
+            await NavigateTo(RemoteFileService.CombinePath(_currentDir, picked[0].Name));
             return;
         }
         await Accept(picked);
@@ -164,7 +164,7 @@ public partial class RemoteFileBrowserDialog : Window
         if (_selectMultiple)
         {
             var paths = picked.Where(p => !p.IsDir)
-                              .Select(p => VirshService.CombinePath(_currentDir, p.Name)).ToArray();
+                              .Select(p => RemoteFileService.CombinePath(_currentDir, p.Name)).ToArray();
             if (paths.Length == 0)
             {
                 await MessageDialog.Info(this, "Browse", "Select one or more files.");
@@ -178,7 +178,7 @@ public partial class RemoteFileBrowserDialog : Window
             string path;
             if (picked.Count == 1 && !picked[0].IsDir)
             {
-                path = VirshService.CombinePath(_currentDir, picked[0].Name);
+                path = RemoteFileService.CombinePath(_currentDir, picked[0].Name);
             }
             else
             {
@@ -188,7 +188,7 @@ public partial class RemoteFileBrowserDialog : Window
                     await MessageDialog.Info(this, "Browse", "Select a file or enter a name.");
                     return;
                 }
-                path = typed.StartsWith('/') ? typed : VirshService.CombinePath(_currentDir, typed);
+                path = typed.StartsWith('/') ? typed : RemoteFileService.CombinePath(_currentDir, typed);
             }
             SelectedPath = path;
             SelectedPaths = new[] { path };
@@ -207,7 +207,7 @@ public partial class RemoteFileBrowserDialog : Window
             var d = initial.TrimEnd('/');
             return (d.Length == 0 ? "/" : d, "");
         }
-        var parent = VirshService.ParentPath(initial);
+        var parent = RemoteFileService.ParentPath(initial);
         if (parent == null) return ("/", "");
         return (parent, initial[(initial.LastIndexOf('/') + 1)..]);
     }

@@ -67,7 +67,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 
 ### VirtDeck.Avalonia (cross-platform UI)
 - `Controls/SpiceDisplay`: Avalonia `Control`. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; `Render` does a 1:1 `DrawImage` with interpolation `None`. Owns the exactly-one-cursor state machine, built from `Cursor(Bitmap, PixelPoint)` and `StandardCursorType.None`.
-- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window, and `JbModuleTabControl`/`JbModuleTabItem` derive from that pair with a taller row for the main window's module side menu), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). `JbErrorForeground` is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), themed for both light and dark, so no view hardcodes a red. `JbGroupBox` is a `ControlTheme` for `HeaderedContentControl` carrying the app's titled-frame idiom, with its content inset templated from `Padding` (12,10 by default) so a box whose whole content is a table can ask for `Padding="0"` and let the rows run to the frame instead of drawing a second border a few pixels inside the first, and `JbGroupBoxBorder`/`JbGroupBoxHeader` are its two brushes, deliberately outside the theme dictionaries because both are grey with an alpha channel and so read correctly on either face; `JbIconAdd`/`JbIconRemove` sit beside them, outside for the related reason that a green meaning "add" must not change meaning with the theme. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
+- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window, and `JbModuleTabControl`/`JbModuleTabItem` derive from that pair with a taller row for the main window's module side menu), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups; the `MenuItem` template carries a lane for `InputGesture`, because a retemplate that drops Fluent's gesture column makes that property draw nothing anywhere in the app, including in the cut/copy/paste flyout a `TextBox` brings with it, and the alternative is every view spelling "Ctrl+X" into its own `Header`), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). `JbErrorForeground` is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), themed for both light and dark, so no view hardcodes a red. `JbGroupBox` is a `ControlTheme` for `HeaderedContentControl` carrying the app's titled-frame idiom, with its content inset templated from `Padding` (12,10 by default) so a box whose whole content is a table can ask for `Padding="0"` and let the rows run to the frame instead of drawing a second border a few pixels inside the first, and `JbGroupBoxBorder`/`JbGroupBoxHeader` are its two brushes, deliberately outside the theme dictionaries because both are grey with an alpha channel and so read correctly on either face; `JbIconAdd`/`JbIconRemove` sit beside them, outside for the related reason that a green meaning "add" must not change meaning with the theme. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
   **One font baseline: 12.** A bare `TextBlock` defaults to 12 while every Fluent `ControlTheme` sets its own size from `ControlContentThemeFontSize` (14), so labels and the fields beside them rendered two points apart; each retemplated control here drops that setter and falls back to the inherited 12, which widened the gap further. The dictionary pulls the key down to 12, and every metric in it (24px fields and buttons, 22px tool buttons, a 14px check/radio box, `12,4` table rows) is sized for that. **Fields and buttons share one height (24)** (same 1px border, same 3px vertical inset), so a text box, dropdown or spinner lines up with the button next to it; `App.axaml` pins `ButtonSpinner`/`NumericUpDown` to the same key because Fluent sizes those outside `TextControl*`. Views should not set a local `FontSize` or `Height` to line controls up; fix the baseline instead. Headings (wizard title 15, login 16) are the deliberate exceptions.
 - `Controls/TerminalControl` + `VirtDeck.Core/Terminal/`: the container console's terminal, split the
   same way SPICE is. `TerminalScreen` (cell grid, scrollback, alt screen, all under `SyncRoot`) and
@@ -97,7 +97,8 @@ bar and the process lifetime; everything a user actually manages lives in an `IM
 menu is a `TabControl` themed with `JbModuleTabControl` (the settings-window side strip with a taller
 row, so a 16px glyph fits beside the label). Modules today: **Virtual machines** (`VirtualMachinesModule`,
 which is the whole former `VmListWindow` minus the shell: the VM list, the Networks tab, `VmDetailsView`
-and every per-VM command), **Containers** (`ContainersModule`, below) and **Terminal**
+and every per-VM command), **Containers** (`ContainersModule`, below), **File explorer**
+(`FileExplorerModule`, below: the host's filesystem as the login user) and **Terminal**
 (`TerminalModule`, below: a shell on the host itself).
 
 **The shell never names its modules.** It walks its `TabControl`'s items and calls `IModule` on
@@ -1117,6 +1118,143 @@ keeps, because Ctrl+C already means interrupt and that is the more important of 
 text arrives through `TextInput`, so dead keys, compose and any layout work with no table to
 maintain; `TextInput` carries no modifiers, so the key press that preceded it is what says whether it
 was a chord and was already sent.
+
+## File explorer
+
+`FileExplorerModule` browses the host's filesystem: a path bar, one multi-select detail list (Name,
+Size, Modified, Permissions, Owner, Group), Back/Forward/Up/Home/Refresh and a hidden-files toggle.
+It also **moves and copies files about, on the host**: Cut, Copy and Paste, from the context menu
+and from Ctrl+X, Ctrl+C and Ctrl+V. Upload, download, rename and a Delete command of its own are not
+here, and neither is a viewer, a tree pane or a directory watch.
+
+- **It lists as the logged-in user, and that is the point.** Every other remote file call in the app
+  goes through `RunSudoCommand`, because every one of them is looking for a VM's disks under
+  root-owned `/var/lib/libvirt/images`. Somebody browsing wants their own view of the machine, so
+  this module is the app's first and only user of `SshConnectionManager.RunCommand`'s non-sudo path
+  for real work. That runner is not a drop-in for the sudo one: it neither wraps its argument in
+  `bash -c` nor exports a locale nor folds stderr, so the script does all three itself.
+- **`Services/RemoteFileService` is the one place a remote directory is listed**, and one `elevated`
+  flag covers both callers: this module passes false, `VirshService.ListDirectory` passes true and
+  is now a four-line forwarder over it. That is what keeps the `find -printf` format string, with
+  its dereferenced-type and unbounded-name rules, from existing twice. `ParentPath` and
+  `CombinePath` moved there with it.
+- **A failure is a value, not an exception.** `RunCommand` turns a non-zero exit into a throw, and
+  "you may not read this directory" is something the module has to draw. So the script always exits
+  0 for the states it models and answers with a **tagged record** (`x` an entry, `e` a stated
+  failure), the same idiom `DockerService`'s `c`/`u` listing uses, and `DirectoryListing` carries a
+  `ListFailure` plus its wording. Genuinely unexpected failures still throw, as everywhere else.
+- **The retry as root is offered on any failure, and never latches.** A path inside a directory the
+  account cannot search is indistinguishable from a missing one to the shell, so refusing to offer
+  the retry on "not found" would strand the user for the wrong reason. What the elevation covers is
+  **one listing**: the next navigation reads as the user again, and while an elevated listing is on
+  screen the status bar says "listing as root", because the one case where somebody is not seeing
+  their own view of the machine is the case worth saying out loud. Latching it would be fewer clicks
+  in `/root` and a lie everywhere after.
+- **`%y` and `%Y` are both fetched.** `%Y` is the dereferenced type, so a symlink to a directory is
+  navigable (which is what the picker already did); `%y` is the entry's own, so a symlink is still
+  identifiable, shows its target in the Name column, and is dimmed rather than hidden when `%Y` comes
+  back `N` or `?`. **`%f` is last and the parse splits with a cap of ten**, so the name is the
+  unbounded remainder and a name containing a tab survives; a tab inside a symlink target would
+  mis-split that one row, and names are far likelier to be odd than link targets.
+- **This module has a Refresh button where the VM and container lists deliberately do not.** Those
+  have an event tail (`virsh event --loop`, `docker events`) telling them when to re-read; nothing on
+  the host tells a client that a directory changed, and polling a filesystem over SSH to find out
+  would be worse than a button. The same fact is why a paste has to re-list explicitly when it
+  finishes, reusing the expression the Refresh button itself runs. For the same reason `Deactivate`
+  is empty and `Shutdown` cancels a running paste and nothing else: there is no timer, no poll, no
+  tail, no window, and the only `SshClient` of its own this module ever holds is the one a paste
+  streams on. `ActivateAsync` still re-lists on every return, per the contract that nothing is stale
+  by the time it is visible.
+- **Sorting and the hidden-files toggle never touch the host.** Both run `PopulateList` over the
+  entries already in hand. Directories come first whatever the sort says and the direction applies
+  inside each group; Size orders on the `long`, and **Modified orders on the string**, which is
+  correct because it is formatted host-side as `yyyy-MM-dd HH:mm`, fixed width and ISO ordered, so
+  lexicographic order already is chronological order. A failure latches `_failed` precisely so a
+  sort click cannot replace the reason the list is empty with an empty list.
+- **The toolbar is five square icon buttons**, themed `JbIconButton`: the ordinary bordered button
+  shrunk to the 24 that every field and button in the app already shares, with its padding dropped,
+  so "square" is one metric rather than a size set per view. Their glyphs are the house 16x16
+  stroked style, and `IconRefresh` is the app's first arc, because a circular arrow cannot be drawn
+  with the straight segments the module icons use. **Each glyph binds its `Stroke` to
+  `$parent[Button].Foreground`, not to `JbButtonForeground`**: bound to the brush directly it would
+  stay at full strength while the button is disabled, and Back and Forward are disabled most of the
+  time. With no label left on them the tooltip is the only name each button has, so all five say
+  what they do and name their shortcut.
+- **The column headers are `Button`s themed `JbColumnHeader`**, a flat cell derived from
+  `JbToolButton` the way `JbStatusBarButton` is, so a table whose columns sort looks identical to one
+  whose columns do not until the pointer is over it. Everything else about the strip and the rows is
+  the VM and container lists' table, copied rather than reinvented.
+- **Icons are `FileIcons`, decided once for the whole module** and warmed inside the same `Task.Run`
+  as each listing, exactly as `RemoteFileBrowserDialog` does it, so building rows on the UI thread is
+  pure cache hits and an SVG icon theme never rasterises with that thread held. See "Remote file
+  browser icons" above for the whole story; the same rule applies here, that the icon is the
+  *client's* opinion of the extension because the person reading the list is at the client.
+- **Cut, Copy and Paste, and the clipboard is the module's own.** It holds absolute host paths
+  snapshotted at the gesture (a `RemoteEntry` carries no path, and the directory on screen has
+  usually moved by the time Paste is pressed) plus the one bit saying which gesture it was. It
+  deliberately **never touches the desktop clipboard**: a path on the server means nothing pasted
+  into a local application. "Copy path" is the separate command that does put text on the real
+  clipboard, and it is unchanged. A cut entry is **faded whole** (`RemoteFileRow.IsCut`, the
+  `DockPanel.cut` style) rather than only in its name the way a broken symlink is: that one is a
+  fact about the entry, this is a pending change to it, which is the staged-row idiom `VmEditWindow`
+  already draws. The fade is read off the clipboard on every rebuild rather than set once, so it
+  survives navigating away and back, a sort click and the hidden-files toggle alike.
+- **Every question is asked before a byte moves.** `RemoteFileService.InspectPaste` is one round trip
+  that answers whether the destination is still there and writable, whether it sits inside one of the
+  sources, and per source whether the name is taken and what kind each side is; the user settles every
+  clash against that, and only then does `Paste` run. The alternative, asking as the copy goes, means
+  a dialog interrupting a transfer already under way. A refusal is a `PasteBlock` value on the plan
+  rather than an exception, exactly as a listing's `ListFailure` is, and for the same reason: the
+  module has to draw it.
+- **There are two scripts because there are two runners.** The pre-flight is NUL-terminated tagged
+  records like the listing's, name last and unbounded, through the ordinary `RunCommand` /
+  `RunSudoCommand` pair. The paste itself is **line**-oriented with every payload field base64'd,
+  because it streams and the callback is a line at a time; base64 is what stops a name containing a
+  newline splitting a record, and each record carries the item's **index**, so a reply is matched to
+  its source by position and never by name (two sources from different directories can share a
+  basename). Both build their bash arrays from a NUL-separated base64 blob with
+  `while IFS= read -r -d ''`, the `DockerService.ArgvScript` idiom, and both `exit 0` for every state
+  they model.
+- **A paste streams, so it cannot freeze the rest of the app.** `RunCommand` and `RunSudoCommand`
+  hold `_ioLock` for their whole call, so a multi-gigabyte `cp` through either would stop the VM
+  list, the container list and every other module dead for as long as it ran.
+  `SshConnectionManager.RunCommandStreaming` is the new un-elevated sibling of
+  `RunSudoCommandStreaming`: a connection of its own, a line at a time, and the same rule that the
+  caller spells out its own wrapper because it neither escapes nor wraps what it is given. That is
+  also what gives the status bar a live "Copying x (3/5)" and `Shutdown` something to cancel. There
+  is no Cancel button in this pass, because a module owns the shell's two status slots and has no
+  footer to put one in; the token is there for when there is somewhere to put it.
+- **A folder onto a folder merges, and nothing ever deletes what the user did not name.** The
+  conflict dialog's primary is **Replace** for a file and **Merge** for a folder, because that is
+  what actually happens: `cp -a "$s/." "$t/"` puts the contents in, same-named files are overwritten,
+  and whatever was only in the target stays. Deleting the target first would be the literal reading
+  of "replace" and would destroy files nobody was asked about, in a module that has no Delete command
+  at all. The one `rm -rf` in the whole feature is of a **move's source**, which is what a move is.
+- **A copy back into its own directory has no question to ask, so it is not asked.** Replacing would
+  mean copying a file over itself, which `cp` refuses, and there is no rename here to offer any other
+  name, so it lands beside itself as the first free `name (copy)`, `name (copy 2)`. The free-name
+  loop runs on the host and splits an extension only for a name matching `?*.*`, so `.bashrc` is not
+  turned into ` (copy)` and a directory keeps its whole name. A *move* into the same directory is
+  the no-op it looks like, and simply clears the clipboard.
+- **`PasteConflictDialog` is a small window rather than a stretched `MessageDialog`**, the way
+  `DeleteVmDialog` is, for two things `MessageDialog.Choose` cannot carry: the "do the same for the
+  rest" box, and a disabled **primary**, where `Choose` can only disable its alternative. A file and
+  a folder of the same name is exactly that case, since neither can replace or merge into the other:
+  the primary is disabled with its reason on hover, never hidden, so the dialog asks the same
+  question every time instead of quietly becoming a different one. "Do the same for the rest" still
+  skips a kind mismatch, because there is no overwrite there to apply.
+- **Writing offers the same one-shot root retry that reading does, and it latches no harder.** A
+  destination the account cannot write to, or an item the host refused, gets one "retry as root"; the
+  retry re-runs only the items that failed, with the answers already given, and `_shownElevated` is
+  untouched, so the next paste is read and written as the user again. Whether root is worth offering
+  is decided by matching the tool's own words, which is reliable because the script exports
+  `LC_ALL=C`. A cut is **spent only once the move happened**, so a partly refused one stays on the
+  clipboard.
+- **Keys are bound to the list, not tunnelled at the top level.** `ConsoleWindow` and
+  `TerminalModule` register theirs on the window because the guest and the container need every key;
+  here Backspace still belongs to the path box, so Backspace-for-Up, Alt+Left/Right and Enter live on
+  the `ListBox` alone. Ctrl+X, Ctrl+C and Ctrl+V go there for the sharper form of the same reason:
+  inside the path box those three have to keep meaning what they mean in any other text box.
 
 ## Terminal
 

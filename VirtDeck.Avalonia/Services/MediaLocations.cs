@@ -70,7 +70,7 @@ public static class MediaLocations
     /// <summary>Stores the directory of a file picked on the host (POSIX paths, so not Path.GetDirectoryName).</summary>
     public static void RememberServer(string filePath)
     {
-        if (VirshService.ParentPath(filePath) is { Length: > 0 } dir) Store(s => s.LastServerMediaDir = dir);
+        if (RemoteFileService.ParentPath(filePath) is { Length: > 0 } dir) Store(s => s.LastServerMediaDir = dir);
     }
 
     private static void Store(Action<AppSettings> set)

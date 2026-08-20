@@ -1,0 +1,220 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.FileExplorerModule"
+             x:DataType="vm:RemoteFileRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by the header and every row, so they stay aligned. -->
+    <x:Double x:Key="ColSize">90</x:Double>
+    <x:Double x:Key="ColModified">140</x:Double>
+    <x:Double x:Key="ColPerms">100</x:Double>
+    <x:Double x:Key="ColOwner">90</x:Double>
+    <x:Double x:Key="ColGroup">90</x:Double>
+
+    <!-- The sort direction caret, in the house style: a small box, stroked not filled. Descending
+         is the same glyph rotated, set from the code-behind. -->
+    <StreamGeometry x:Key="IconSortCaret">M0,1 L4,5 L8,1</StreamGeometry>
+
+    <!-- Toolbar glyphs, the same house style as the module icons in MainWindow: a 16x16 box,
+         stroked not filled, so they read at one weight. Refresh is the app's first arc; a circular
+         arrow cannot be drawn with the straight segments the other glyphs use. It is a 315 degree
+         clockwise sweep of the circle centred 8,8 with radius 5, from 3 o'clock round to 1:30, then
+         a short line outward to a right-angle head whose arms run back up and to the left. Both arc
+         flags are 1 because the sweep is clockwise and longer than a half turn, and both end points
+         sit exactly on that circle, or the renderer would scale the radii to reach them and draw a
+         curve that is not the circle the rest of the glyph implies. That outward line is what
+         pushes the head off the circle, so the whole arrowhead lives inside the 45 degree gap and
+         no arm crosses the arc; a stroked circular arrow whose barbs cut back through its own
+         stroke is what looks muddy at 16px. -->
+    <StreamGeometry x:Key="IconBack">M13,8 H4 M8,4 L4,8 L8,12</StreamGeometry>
+    <StreamGeometry x:Key="IconForward">M3,8 H12 M8,4 L12,8 L8,12</StreamGeometry>
+    <StreamGeometry x:Key="IconUp">M8,13 V4 M4,8 L8,4 L12,8</StreamGeometry>
+    <StreamGeometry x:Key="IconHome">M2.5,8 L8,2.5 L13.5,8 M4.5,7 V13.5 H11.5 V7</StreamGeometry>
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- An entry waiting to be moved. The whole row fades, not just its name the way a broken
+         symlink does: that one is a fact about the entry, this is a pending change to it, and the
+         staged-row idiom in VmEditWindow says so the same way. -->
+    <Style Selector="DockPanel.cut">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel>
+
+    <!-- The toolbar. Nothing here carries Classes="accent": that is reserved for the one command
+         that creates something, and this module creates nothing. Refresh is a real button, unlike
+         in the VM and container lists, because nothing on the host tells the client that a
+         directory changed. -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <!-- Five square icon buttons. The glyph binds its Stroke to the button's own Foreground,
+             not to JbButtonForeground, so it dims with the button: Back and Forward are disabled
+             most of the time. With no label on them, the tooltip is the only name each one has. -->
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+          <Button Name="BackButton" Theme="{StaticResource JbIconButton}" ToolTip.Tip="Back (Alt+Left)">
+            <Path Data="{StaticResource IconBack}" Width="16" Height="16"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+          </Button>
+          <Button Name="ForwardButton" Theme="{StaticResource JbIconButton}" ToolTip.Tip="Forward (Alt+Right)">
+            <Path Data="{StaticResource IconForward}" Width="16" Height="16"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+          </Button>
+          <Button Name="UpButton" Theme="{StaticResource JbIconButton}" ToolTip.Tip="Up to the parent directory (Backspace)">
+            <Path Data="{StaticResource IconUp}" Width="16" Height="16"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+          </Button>
+          <Button Name="HomeButton" Theme="{StaticResource JbIconButton}" ToolTip.Tip="Home directory on the host">
+            <Path Data="{StaticResource IconHome}" Width="16" Height="16"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+          </Button>
+          <Button Name="RefreshButton" Theme="{StaticResource JbIconButton}" ToolTip.Tip="List this directory again">
+            <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+          </Button>
+        </StackPanel>
+        <CheckBox DockPanel.Dock="Right" Name="HiddenBox" Content="Hidden files" Margin="10,0,0,0"
+                  ToolTip.Tip="Show names beginning with a dot" />
+        <TextBox Name="PathBox" Margin="10,0,0,0" ToolTip.Tip="Type a path and press Enter" />
+      </DockPanel>
+    </Border>
+
+    <!-- The same heading strip the VM and container lists draw, with every cell a button because
+         every column sorts. JbColumnHeader is flat, so it still reads as a heading. -->
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <Button Name="GroupHeader" DockPanel.Dock="Right" Width="{StaticResource ColGroup}"
+                Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Group" />
+            <Path Name="GroupCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+        <Button Name="OwnerHeader" DockPanel.Dock="Right" Width="{StaticResource ColOwner}"
+                Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Owner" />
+            <Path Name="OwnerCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+        <Button Name="PermsHeader" DockPanel.Dock="Right" Width="{StaticResource ColPerms}"
+                Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Permissions" />
+            <Path Name="PermsCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+        <Button Name="ModifiedHeader" DockPanel.Dock="Right" Width="{StaticResource ColModified}"
+                Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Modified" />
+            <Path Name="ModifiedCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+        <Button Name="SizeHeader" DockPanel.Dock="Right" Width="{StaticResource ColSize}"
+                Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Size" />
+            <Path Name="SizeCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+        <Button Name="NameHeader" Theme="{StaticResource JbColumnHeader}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="Name" />
+            <Path Name="NameCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
+          </StackPanel>
+        </Button>
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <ListBox Name="FileList" Background="Transparent" Padding="0"
+               SelectionMode="Multiple"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ContextMenu>
+          <ContextMenu Name="FileMenu">
+            <MenuItem Name="MenuOpen" Header="Open" />
+            <MenuItem Name="MenuCopyPath" Header="Copy path" />
+            <Separator />
+            <!-- Display only: these carry Click handlers rather than commands, so naming the chord
+                 here cannot also fire it. The keys themselves are bound to the list. -->
+            <MenuItem Name="MenuCut" Header="Cut" InputGesture="Ctrl+X" />
+            <MenuItem Name="MenuCopy" Header="Copy" InputGesture="Ctrl+C" />
+            <MenuItem Name="MenuPaste" Header="Paste" InputGesture="Ctrl+V" />
+            <Separator />
+            <MenuItem Name="MenuRename" Header="Rename" InputGesture="F2" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:RemoteFileRow">
+            <DockPanel Classes.cut="{Binding IsCut}">
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Group}"       Width="{StaticResource ColGroup}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Owner}"       Width="{StaticResource ColOwner}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Permissions}" Width="{StaticResource ColPerms}"    Opacity="0.7" VerticalAlignment="Center" FontFamily="monospace" />
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Modified}"    Width="{StaticResource ColModified}" Opacity="0.7" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Size}"        Width="{StaticResource ColSize}"     Opacity="0.7" VerticalAlignment="Center" />
+              <!-- The desktop's icon for the type, or the badge when it has none to give. Whichever
+                   it is, it is the same for every row, so the Name column stays aligned. -->
+              <Panel DockPanel.Dock="Left" Margin="0,0,8,0" VerticalAlignment="Center">
+                <Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="16" Height="16"
+                       RenderOptions.BitmapInterpolationMode="HighQuality" />
+                <Border IsVisible="{Binding !HasIcon}" Background="{Binding BadgeBrush}" CornerRadius="3"
+                        Width="34" Height="18">
+                  <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="Bold" Foreground="White"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+              </Panel>
+              <!-- The name cell is read or edited, never both. Renaming happens in the row itself
+                   rather than in a dialog, because the row is what the rename is about; the text box
+                   is found, filled and focused from the code-behind when IsEditing flips, so the
+                   template holds no state of its own and a second edit of the same row cannot start
+                   with the previous one's text. -->
+              <Panel>
+                <!-- A broken symlink is dimmed rather than hidden or flagged: it is still a real
+                     entry, it just resolves to nothing this account can reach. -->
+                <TextBlock Text="{Binding Display}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding Ownership}"
+                           IsVisible="{Binding !IsEditing}"
+                           Opacity="{Binding NameOpacity}" />
+                <!-- MinHeight 0 against the app's 24px field baseline: that baseline exists so a
+                     text box lines up with the button beside it, and this one has to sit inside a
+                     table row instead without making the row it is in taller than its neighbours. -->
+                <TextBox IsVisible="{Binding IsEditing}" VerticalAlignment="Center"
+                         MinHeight="0" Padding="2,0" Margin="-3,0,0,0" />
+              </Panel>
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <!-- Why the list is empty, so an unusable directory never just looks broken. The retry is
+           offered on any failure, because a path inside a directory the account cannot search is
+           indistinguishable from a missing one. -->
+      <StackPanel Name="EmptyPanel" IsVisible="False" Spacing="10"
+                  HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Name="EmptyText" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360" />
+        <Button Name="ElevateButton" Content="Retry as root" IsVisible="False"
+                HorizontalAlignment="Center"
+                ToolTip.Tip="List this one directory with sudo. The next directory you open is read as you again." />
+      </StackPanel>
+    </Panel>
+
+  </DockPanel>
+</UserControl>
