@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.RowToolbar">
+
+  <UserControl.Styles>
+    <!-- The disabled state of JbToolButton only dims its Foreground, and a glyph drawn with a
+         colour of its own would stay bright. This is the one place these buttons are built, so the
+         rule lives here rather than in each page. -->
+    <Style Selector="Button:disabled Path">
+      <Setter Property="Opacity" Value="0.35" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Orientation="Horizontal" Spacing="2">
+    <Button Name="AddButton" Theme="{StaticResource JbToolButton}" Padding="2" Width="22"
+            ToolTip.Tip="Add a row">
+      <Path Width="12" Height="12" Stretch="None" StrokeThickness="1.6"
+            Stroke="{StaticResource JbIconAdd}" Data="M 1.5,6 H 10.5 M 6,1.5 V 10.5" />
+    </Button>
+    <Button Name="RemoveButton" Theme="{StaticResource JbToolButton}" Padding="2" Width="22"
+            ToolTip.Tip="Remove the selected row">
+      <Path Width="12" Height="12" Stretch="None" StrokeThickness="1.6"
+            Stroke="{StaticResource JbIconRemove}" Data="M 1.5,6 H 10.5" />
+    </Button>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+        x:Class="VirtDeck.Avalonia.Views.Containers.ContainerEditWindow"
+        Title="New container"
+        Width="820" Height="600" MinWidth="680" MinHeight="460"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <!-- Saving is several host commands (a pull, a stop, a create), so the one that is running
+             says so here rather than the window simply going quiet. -->
+        <TextBlock Grid.Column="0" Name="StatusText" Margin="0,0,12,0"
+                   VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <!-- Saving without running it is the second-most likely thing to want, so it is a button
+               of its own rather than a check box somebody has to find on the General page. -->
+          <Button Name="SaveButton" Content="Save" MinWidth="88" />
+          <Button Name="SaveStartButton" Content="Save and start" MinWidth="88"
+                  IsDefault="True" Classes="accent" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Pages on the left, one on the right. They are not named: the window walks these items and
+         talks to whichever of them implement IContainerTab, so a new page is a TabItem here and
+         nothing else. -->
+    <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
+      <TabItem Header="General"><c:GeneralTab /></TabItem>
+      <TabItem Header="Volumes"><c:VolumesTab /></TabItem>
+      <TabItem Header="Network"><c:NetworkTab /></TabItem>
+      <TabItem Header="Environment"><c:EnvironmentTab /></TabItem>
+      <TabItem Header="Devices"><c:DevicesTab /></TabItem>
+    </TabControl>
+
+  </DockPanel>
+</Window>

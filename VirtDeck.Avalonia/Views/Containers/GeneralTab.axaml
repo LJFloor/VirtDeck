@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.GeneralTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Container">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Image" VerticalAlignment="Center" />
+            <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="ImageBox"
+                             FilterMode="ContainsOrdinal" MinimumPrefixLength="0"
+                             PlaceholderText="nginx:alpine" />
+          </Grid>
+          <TextBlock Classes="note"
+                     Text="The dropdown lists the images already on the host. Any other reference can be typed instead, and it is pulled when the container is saved." />
+          <TextBlock Name="NameNote" Classes="error" IsVisible="False" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Restart policy">
+        <StackPanel Classes="options">
+          <ComboBox Name="RestartBox" Width="220" HorizontalAlignment="Left">
+            <ComboBoxItem Tag="no" Content="Never" />
+            <ComboBoxItem Tag="on-failure" Content="Only when it exits with an error" />
+            <ComboBoxItem Tag="unless-stopped" Content="Always, unless it was stopped by hand" />
+            <ComboBoxItem Tag="always" Content="Always" />
+          </ComboBox>
+          <TextBlock Classes="note"
+                     Text="Whether the docker daemon brings the container back after it exits, and after the host reboots." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

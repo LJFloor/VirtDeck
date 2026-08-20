@@ -450,10 +450,10 @@ public partial class LoginWindow : Window
                 await Task.WhenAny(write, Task.Delay(SshCredentialStore.TimeoutMs));
             }
 
-            // The VM list owns the app's lifetime from here: it disposes the SSH connection and
-            // shuts the process down when it closes.
+            // The main window owns the app's lifetime from here: it disposes the SSH connection
+            // and shuts the process down when it closes.
             _handedOff = true;
-            new VmListWindow(ssh).Show();
+            new MainWindow(ssh).Show();
             Close();
         }
         catch (Exception ex)

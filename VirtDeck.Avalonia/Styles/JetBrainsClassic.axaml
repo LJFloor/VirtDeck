@@ -150,6 +150,31 @@
            without shouting. Use it for a message about something the user must change, never for
            ordinary hints; those are the 0.7-opacity note style. -->
       <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC75450" />
+
+      <!-- The container console's own surface and the sixteen colours an escape sequence can name.
+           Darcula's terminal palette. The other 240 of the 256 are computed (a 6x6x6 cube and 24
+           greys) and are the same on either face, because they are absolute colours; only these
+           sixteen and the two defaults are a matter of taste, so only these are themed. -->
+      <SolidColorBrush x:Key="JbTerminalBackground" Color="#FF1E1F22" />
+      <SolidColorBrush x:Key="JbTerminalForeground" Color="#FFBCBEC4" />
+      <SolidColorBrush x:Key="JbTerminalSelection" Color="#FF2E436E" />
+      <SolidColorBrush x:Key="JbTerminalCursor" Color="#FFBCBEC4" />
+      <Color x:Key="JbTerminal0">#FF000000</Color>
+      <Color x:Key="JbTerminal1">#FFCD3131</Color>
+      <Color x:Key="JbTerminal2">#FF0DBC79</Color>
+      <Color x:Key="JbTerminal3">#FFE5E510</Color>
+      <Color x:Key="JbTerminal4">#FF3B8EEA</Color>
+      <Color x:Key="JbTerminal5">#FFBC3FBC</Color>
+      <Color x:Key="JbTerminal6">#FF11A8CD</Color>
+      <Color x:Key="JbTerminal7">#FFE5E5E5</Color>
+      <Color x:Key="JbTerminal8">#FF666666</Color>
+      <Color x:Key="JbTerminal9">#FFF14C4C</Color>
+      <Color x:Key="JbTerminal10">#FF23D18B</Color>
+      <Color x:Key="JbTerminal11">#FFF5F543</Color>
+      <Color x:Key="JbTerminal12">#FF3B8EEA</Color>
+      <Color x:Key="JbTerminal13">#FFD670D6</Color>
+      <Color x:Key="JbTerminal14">#FF29B8DB</Color>
+      <Color x:Key="JbTerminal15">#FFFFFFFF</Color>
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Light">
@@ -279,6 +304,30 @@
       <!-- Inline validation text; see the Dark dictionary. Darker here so it keeps its contrast
            against a white form. -->
       <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC0392B" />
+
+      <!-- The console on the light face; see the Dark dictionary. The sixteen are darkened rather
+           than swapped, because a terminal colour has to keep its identity (red is red) while
+           gaining enough contrast to be read on white. -->
+      <SolidColorBrush x:Key="JbTerminalBackground" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="JbTerminalForeground" Color="#FF2B2B2B" />
+      <SolidColorBrush x:Key="JbTerminalSelection" Color="#FFA6D2FF" />
+      <SolidColorBrush x:Key="JbTerminalCursor" Color="#FF2B2B2B" />
+      <Color x:Key="JbTerminal0">#FF000000</Color>
+      <Color x:Key="JbTerminal1">#FFCD3131</Color>
+      <Color x:Key="JbTerminal2">#FF00A000</Color>
+      <Color x:Key="JbTerminal3">#FF949800</Color>
+      <Color x:Key="JbTerminal4">#FF0451A5</Color>
+      <Color x:Key="JbTerminal5">#FFBC05BC</Color>
+      <Color x:Key="JbTerminal6">#FF0598BC</Color>
+      <Color x:Key="JbTerminal7">#FF555555</Color>
+      <Color x:Key="JbTerminal8">#FF666666</Color>
+      <Color x:Key="JbTerminal9">#FFCD3131</Color>
+      <Color x:Key="JbTerminal10">#FF14CE14</Color>
+      <Color x:Key="JbTerminal11">#FFB5BA00</Color>
+      <Color x:Key="JbTerminal12">#FF0451A5</Color>
+      <Color x:Key="JbTerminal13">#FFBC05BC</Color>
+      <Color x:Key="JbTerminal14">#FF0598BC</Color>
+      <Color x:Key="JbTerminal15">#FF000000</Color>
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>
@@ -288,6 +337,12 @@
        has been the app's group-box idiom since before it had a name. -->
   <SolidColorBrush x:Key="JbGroupBoxBorder" Color="#33808080" />
   <SolidColorBrush x:Key="JbGroupBoxHeader" Color="#11808080" />
+
+  <!-- The add and remove glyphs of an editable list's tool strip, IntelliJ's own two. Outside the
+       theme dictionaries for the same reason the two above are: both are saturated enough to read
+       on either face, and a green that means "add" should not change meaning with the theme. -->
+  <SolidColorBrush x:Key="JbIconAdd" Color="#59A869" />
+  <SolidColorBrush x:Key="JbIconRemove" Color="#C75450" />
 
   <!--
     THE font size for the whole app. Avalonia gives a bare TextBlock 12, while every Fluent
@@ -808,6 +863,24 @@
   </ControlTheme>
 
   <!--
+    Module tabs: the main window's side menu, which is the side-tab strip above carrying an icon
+    beside each label. Derived rather than copied, so the strip metrics (160px, the right-edge
+    hairline, the 2px left selection bar) stay defined once; the only difference is a row tall
+    enough for a 16px glyph to sit in without crowding the text.
+
+    Header is content, not a string, so the icon lives in the caller's markup and this theme knows
+    nothing about it.
+  -->
+  <ControlTheme x:Key="JbModuleTabItem" TargetType="TabItem" BasedOn="{StaticResource JbSideTabItem}">
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="MinHeight" Value="34" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="JbModuleTabControl" TargetType="TabControl" BasedOn="{StaticResource JbSideTabControl}">
+    <Setter Property="ItemContainerTheme" Value="{StaticResource JbModuleTabItem}" />
+  </ControlTheme>
+
+  <!--
     Group box: a titled frame with a header strip, which is what every settings page in this app
     draws by hand. Given a ControlTheme because the answer-file window alone has a few dozen of
     them; eight lines of Border/DockPanel markup repeated that many times is where an idiom starts
@@ -815,6 +888,10 @@
   -->
   <ControlTheme x:Key="JbGroupBox" TargetType="HeaderedContentControl">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <!-- The inset around the contents, templated rather than hardcoded so a box whose whole content
+         is a table can ask for none and let the rows run to the frame. Anything else would put a
+         second border a few pixels inside the first, which reads as a mistake. -->
+    <Setter Property="Padding" Value="12,10" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}" CornerRadius="3">
@@ -825,7 +902,7 @@
                                 ContentTemplate="{TemplateBinding HeaderTemplate}"
                                 TextElement.FontWeight="SemiBold" />
             </Border>
-            <ContentPresenter Name="PART_ContentPresenter" Margin="12,10"
+            <ContentPresenter Name="PART_ContentPresenter" Margin="{TemplateBinding Padding}"
                               Content="{TemplateBinding Content}"
                               ContentTemplate="{TemplateBinding ContentTemplate}" />
           </DockPanel>
@@ -873,6 +950,21 @@
     <Style Selector="^:selected">
       <Setter Property="Foreground" Value="{DynamicResource JbListItemSelectedForeground}" />
     </Style>
+  </ControlTheme>
+
+  <!--
+    The same row, for a table that is typed into rather than picked from (the container editor's
+    volumes, ports, variables and devices).
+
+    Two differences, both about the keyboard. A selector is one tab stop by design, which is right
+    for a list you pick from and wrong for a grid of text boxes: Tab has to walk the cells, so the
+    row stops being a navigation boundary. And the row itself stops being a tab stop, or every row
+    would cost an extra Tab press on the way to its first cell. It stays focusable, so clicking and
+    the arrow keys still select.
+  -->
+  <ControlTheme x:Key="JbFormRow" TargetType="ListBoxItem" BasedOn="{StaticResource JbTableRow}">
+    <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue" />
+    <Setter Property="IsTabStop" Value="False" />
   </ControlTheme>
 
   <!--

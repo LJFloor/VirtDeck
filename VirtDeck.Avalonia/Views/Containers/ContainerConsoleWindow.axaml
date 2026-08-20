@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.Containers.ContainerConsoleWindow"
+        Title="Console"
+        Width="900" Height="560" MinWidth="480" MinHeight="300"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
+          <!-- No IsCancel and no IsDefault anywhere on this bar: Escape and Enter belong to the
+               container, and a default button would swallow both. -->
+          <Button Name="ReconnectButton" Content="Reconnect" MinWidth="72" />
+          <Button Name="CopyButton" Content="Copy" MinWidth="72" />
+          <Button Name="PasteButton" Content="Paste" MinWidth="72" />
+        </StackPanel>
+        <!-- Which shell opened, whether the session is live, and why it ended. -->
+        <TextBlock Name="StatusText" Margin="12,0,0,0"
+                   VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <!-- The scroll bar is the window's rather than the control's, so the terminal itself stays a
+         plain grid of cells that any other module could host. -->
+    <ScrollBar Name="Scroll" DockPanel.Dock="Right" Orientation="Vertical"
+               Visibility="Visible" AllowAutoHide="False" Minimum="0" SmallChange="1" />
+
+    <c:TerminalControl Name="Terminal" />
+
+  </DockPanel>
+</Window>

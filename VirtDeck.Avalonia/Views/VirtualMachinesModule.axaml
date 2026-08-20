@@ -1,13 +1,10 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
-        x:Class="VirtDeck.Avalonia.Views.VmListWindow"
-        x:DataType="vm:VmRow"
-        Title="VirtDeck"
-        Width="1080" Height="640"
-        WindowStartupLocation="CenterScreen">
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.VirtualMachinesModule"
+             x:DataType="vm:VmRow">
 
-  <Window.Resources>
+  <UserControl.Resources>
     <!-- One column layout shared by the header and every row, so they stay aligned. -->
     <x:Double x:Key="ColName">220</x:Double>
     <x:Double x:Key="ColState">100</x:Double>
@@ -15,7 +12,7 @@
     <x:Double x:Key="ColMem">100</x:Double>
     <x:Double x:Key="ColNetName">220</x:Double>
     <x:Double x:Key="ColNetState">110</x:Double>
-  </Window.Resources>
+  </UserControl.Resources>
 
   <DockPanel>
 
@@ -25,16 +22,6 @@
       <StackPanel Orientation="Horizontal" Spacing="6">
         <Button Name="NewVmButton" Content="New VM…" Classes="accent" />
       </StackPanel>
-    </Border>
-
-    <Border DockPanel.Dock="Bottom" Padding="10,5" BorderThickness="0,1,0,0" BorderBrush="#22808080">
-      <DockPanel>
-        <TextBlock Name="HostCapsText" DockPanel.Dock="Right" Opacity="0.7" />
-        <Border DockPanel.Dock="Right" Width="1" Margin="10,1" Background="#33808080" />
-        <TextBlock Name="ThroughputText" DockPanel.Dock="Right" Opacity="0.7"
-                   ToolTip.Tip="Combined SSH tunnel throughput: management channel, SPICE consoles and NBD media streams" />
-        <TextBlock Name="StatusText" />
-      </DockPanel>
     </Border>
 
     <!-- List on the left, details sidebar on the right; the splitter is user-movable. -->
@@ -144,4 +131,4 @@
 
     </Grid>
   </DockPanel>
-</Window>
+</UserControl>

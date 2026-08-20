@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.ContainerLogsWindow"
+        Title="Logs"
+        Width="900" Height="560" MinWidth="480" MinHeight="300"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
+          <!-- Ticked is the point of the window: docker follows the log, the view stays pinned to
+               the newest line, and a container that stops and starts again is picked back up.
+               Unticking stops the stream and leaves what arrived on screen. -->
+          <CheckBox Name="FollowCheck" Content="Follow" IsChecked="True" VerticalAlignment="Center" />
+          <Button Name="ReloadButton" Content="Reload" MinWidth="72" />
+          <Button Name="CopyButton" Content="Copy" MinWidth="72" />
+          <Button Name="ClearButton" Content="Clear" MinWidth="72" />
+        </StackPanel>
+        <!-- Whether the stream is live, why it ended, or what docker refused. -->
+        <TextBlock Name="StatusText" Margin="12,0,0,0"
+                   VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <!-- Monospaced and unwrapped, because a log line is a record and folding it hides the shape of
+         the output. Read-only, but still a TextBox so the text can be selected and copied. -->
+    <TextBox Name="LogText" AcceptsReturn="True" IsReadOnly="True" TextWrapping="NoWrap"
+             FontFamily="monospace" BorderThickness="0"
+             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+
+  </DockPanel>
+</Window>

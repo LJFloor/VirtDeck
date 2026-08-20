@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.DevicesTab">
+
+  <DockPanel Margin="16">
+
+    <TextBlock DockPanel.Dock="Top" Classes="note" Margin="0,0,0,12"
+               Text="A device node on the host, handed to the container: a serial adapter at /dev/ttyUSB0, a TV tuner, a GPU render node. Leave the container path empty to keep the node at the same path it has outside." />
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Devices" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="DeviceTools" Margin="8,6,8,6" />
+
+        <!-- The same table the main window draws: a heading strip in JbGroupBoxHeader's
+             grey over a rule, and rows on the window's own background. 12px of padding, so
+             the headings sit over the cells rather than beside them, matching JbTableRow. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="*,*,60,60,60" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="On the host" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="In the container" />
+            <TextBlock Grid.Column="2" Classes="columnheader" Text="Read" HorizontalAlignment="Center" />
+            <TextBlock Grid.Column="3" Classes="columnheader" Text="Write" HorizontalAlignment="Center" />
+            <TextBlock Grid.Column="4" Classes="columnheader" Text="Mknod" HorizontalAlignment="Center" />
+          </Grid>
+        </Border>
+
+        <!-- No border of its own: the group box already draws one, and the rows are meant to run
+             right up to it. -->
+        <ListBox Name="DeviceList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <!-- Not virtualised: an unrealised row has no cells for Tab to reach, and these lists are
+               a handful of rows, never a listing. -->
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="c:DeviceRow">
+              <Grid ColumnDefinitions="*,*,60,60,60" ColumnSpacing="6">
+                <AutoCompleteBox Grid.Column="0" PlaceholderText="/dev/ttyUSB0"
+                                 FilterMode="ContainsOrdinal" MinimumPrefixLength="0"
+                                 ItemsSource="{Binding Devices}"
+                                 Text="{Binding HostPath, Mode=TwoWay}"
+                                 LostFocus="HostPathLostFocus" />
+                <TextBox Grid.Column="1" PlaceholderText="same as the host"
+                         Text="{Binding ContainerPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <CheckBox Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          IsChecked="{Binding CanRead, Mode=TwoWay}" />
+                <CheckBox Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          IsChecked="{Binding CanWrite, Mode=TwoWay}" />
+                <CheckBox Grid.Column="4" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          IsChecked="{Binding CanMknod, Mode=TwoWay}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

@@ -325,6 +325,30 @@ namespace VirtDeck.Services
             }
         }
 
+        /// <summary>
+        /// Runs <paramref name="argv"/> under sudo behind a pseudo terminal and hands back the live
+        /// session. On its own connection, like <see cref="DownloadFileAsync"/> and
+        /// <see cref="RunSudoCommandStreaming"/>, so it never holds <c>_ioLock</c>: a console stays
+        /// open for as long as somebody is typing into it, and everything else on the host has to
+        /// keep working meanwhile.
+        ///
+        /// The sudo password is fed by <see cref="SshPtySession"/> itself, and only when sudo asks
+        /// for it. <see cref="FeedSudoPassword"/> cannot be used here: it writes blind and then
+        /// closes stdin, and on this channel stdin is the user's own keyboard.
+        /// </summary>
+        public Task<SshPtySession> OpenSudoPtyAsync(IReadOnlyList<string> argv, int cols, int rows,
+                                                    CancellationToken ct)
+        {
+            if (_client is not { IsConnected: true })
+                throw new InvalidOperationException("SSH is not connected.");
+
+            var info = _client.ConnectionInfo;
+            var password = _sudoPassword;
+            return Task.Run(() => SshPtySession.Open(
+                info, argv, password, cols, rows,
+                n => Interlocked.Add(ref _bytesReceived, n)), ct);
+        }
+
         public void Disconnect() => _client?.Disconnect();
 
         public void Dispose()
