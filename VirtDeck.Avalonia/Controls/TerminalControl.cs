@@ -31,6 +31,13 @@ public sealed class TerminalControl : Control
 
     private const int ScrollWheelLines = 3;
 
+    /// <summary>
+    /// What Ctrl+wheel may zoom between. Below the lower bound the cell measurement stops being
+    /// reliable; above the upper one an 80-column shell no longer fits anything usable on screen.
+    /// </summary>
+    private const double MinFontSize = 8;
+    private const double MaxFontSize = 32;
+
     public static readonly StyledProperty<double> FontSizeProperty =
         AvaloniaProperty.Register<TerminalControl, double>(nameof(FontSize), 13d);
 
@@ -330,6 +337,17 @@ public sealed class TerminalControl : Control
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
+        // Zoom is checked before the alternate screen is, so Ctrl+wheel works inside vim and htop
+        // too: it changes how the client draws, which is nothing the far end has an opinion about.
+        // Setting FontSize rebuilds the typefaces and relayouts, which resizes the screen and raises
+        // TerminalResized, so the host's existing debounce tells the far end its new geometry.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            FontSize = Math.Clamp(FontSize + (e.Delta.Y > 0 ? 1 : -1), MinFontSize, MaxFontSize);
+            e.Handled = true;
+            return;
+        }
+
         // The alternate screen has no history, and a program using it (less, vim) has its own idea
         // of what scrolling means, so the wheel is left alone there.
         bool alt;

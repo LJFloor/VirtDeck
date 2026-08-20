@@ -22,6 +22,10 @@ namespace VirtDeck.Services
         public string Host { get; private set; } = string.Empty;
         public int Port { get; private set; } = 22;
 
+        /// <summary>The account everything here runs as. Held like Host and Port rather than read off
+        /// <see cref="Client"/>, which throws once the connection is gone.</summary>
+        public string Username { get; private set; } = string.Empty;
+
         // Running total of bytes received over this SSH connection (command output, screenshots,
         // file downloads). Sampled by the UI to show a live throughput rate. Updated from
         // background command threads, so access is via Interlocked.
@@ -79,6 +83,7 @@ namespace VirtDeck.Services
             _sudoPassword = sudoPassword;
             Host = host;
             Port = port;
+            Username = info.Username;
         }
 
         // SSH.NET reports both "no passphrase given" and "wrong passphrase" as bare exceptions whose
@@ -346,6 +351,30 @@ namespace VirtDeck.Services
             var password = _sudoPassword;
             return Task.Run(() => SshPtySession.Open(
                 info, argv, password, cols, rows,
+                n => Interlocked.Add(ref _bytesReceived, n)), ct);
+        }
+
+        /// <summary>
+        /// Opens the account's own login shell on the host behind a pseudo terminal. Its own
+        /// connection, like <see cref="OpenSudoPtyAsync"/> and for the same reason: a terminal stays
+        /// open for as long as somebody has it on screen, and everything else on the host has to keep
+        /// working meanwhile.
+        ///
+        /// Deliberately not the sudo path. That one can only produce a root session, and this is the
+        /// host as the user themselves; <c>sudo</c> typed into it prompts them the way it would in
+        /// any other terminal, and the password held here never reaches it.
+        ///
+        /// The session arrives unstarted: the caller subscribes, then calls
+        /// <see cref="SshPtySession.Start"/>, or the MOTD is lost.
+        /// </summary>
+        public Task<SshPtySession> OpenShellPtyAsync(int cols, int rows, CancellationToken ct)
+        {
+            if (_client is not { IsConnected: true })
+                throw new InvalidOperationException("SSH is not connected.");
+
+            var info = _client.ConnectionInfo;
+            return Task.Run(() => SshPtySession.OpenShell(
+                info, cols, rows,
                 n => Interlocked.Add(ref _bytesReceived, n)), ct);
         }
 

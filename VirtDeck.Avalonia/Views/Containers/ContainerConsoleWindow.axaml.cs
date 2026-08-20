@@ -61,6 +61,10 @@ public partial class ContainerConsoleWindow : Window
         _request = request;
         Title = $"Console: {name}";
 
+        // One terminal font for the whole app: the Terminal module writes it, both surfaces read it,
+        // and Ctrl+wheel here is saved on the way out below.
+        Terminal.FontSize = AppSettings.Current.TerminalFontSize;
+
         _resizeDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ResizeSettleMs) };
         _resizeDebounce.Tick += (_, _) =>
         {
@@ -94,6 +98,7 @@ public partial class ContainerConsoleWindow : Window
         {
             _closing = true;
             _resizeDebounce.Stop();
+            SaveFontSize();
             EndSession();
         };
     }
@@ -132,6 +137,10 @@ public partial class ContainerConsoleWindow : Window
             _session = session;
             session.DataReceived += OnSessionData;
             session.Ended += OnSessionEnded;
+
+            // Only once the two above are hooked: the factory hands back an unstarted session so no
+            // output can be read before somebody is listening for it.
+            session.Start();
 
             // The far end was given the size this window had when the connect started; anything the
             // user did to the window in between is caught up here.
@@ -227,6 +236,15 @@ public partial class ContainerConsoleWindow : Window
     /// <summary>Disposes a session that arrived after nobody wanted it any more.</summary>
     private static void Close(SshPtySession session) =>
         Task.Run(() => { try { session.Dispose(); } catch { /* already gone */ } });
+
+    /// <summary>Writes a Ctrl+wheel zoom back, when it actually moved, so the two terminals agree.</summary>
+    private void SaveFontSize()
+    {
+        var settings = AppSettings.Current;
+        if (Math.Abs(settings.TerminalFontSize - Terminal.FontSize) < 0.01) return;
+        settings.TerminalFontSize = Terminal.FontSize;
+        settings.Save();
+    }
 
     // ---- Clipboard --------------------------------------------------------
 

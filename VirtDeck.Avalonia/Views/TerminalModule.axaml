@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.TerminalModule">
+
+  <DockPanel>
+
+    <!-- Same toolbar strip as the other modules. No Classes="accent" on anything: those reserve it
+         for the one command that creates something, and Reconnect replaces a shell rather than
+         adding one. No IsDefault and no IsCancel either, for the reason ContainerConsoleWindow
+         states: Enter and Escape belong to the shell, and a default button would swallow both. -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+          <Button Name="SmallerButton" Content="A-" MinWidth="32"
+                  ToolTip.Tip="Smaller text (Ctrl+scroll)" />
+          <Button Name="LargerButton" Content="A+" MinWidth="32"
+                  ToolTip.Tip="Larger text (Ctrl+scroll)" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <Button Name="ReconnectButton" Content="Reconnect" MinWidth="72"
+                  ToolTip.Tip="Start a new shell, replacing the one on screen" />
+          <Button Name="CopyButton" Content="Copy" MinWidth="72"
+                  ToolTip.Tip="Copy the selection (Ctrl+Shift+C)" />
+          <Button Name="PasteButton" Content="Paste" MinWidth="72"
+                  ToolTip.Tip="Paste into the shell (Ctrl+Shift+V)" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- The scroll bar is the host's rather than the control's, exactly as in the container
+         console, so the terminal itself stays a plain grid of cells. -->
+    <ScrollBar Name="Scroll" DockPanel.Dock="Right" Orientation="Vertical"
+               Visibility="Visible" AllowAutoHide="False" Minimum="0" SmallChange="1" />
+
+    <c:TerminalControl Name="Terminal" />
+
+  </DockPanel>
+</UserControl>

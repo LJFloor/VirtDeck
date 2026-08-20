@@ -79,7 +79,7 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
   layout to a scancode, so there the position is the truth, while here the far end wants characters
   and the layout has already been applied.
 - `Input/PhysicalKeyMap`: Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent, more correct than a VK table, which reads through the host layout. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js, NOT `0xE0XX`. The key-up high bit is applied in `InputsChannel.SendKey`.
-- `Views/`: `LoginWindow`, `MainWindow` (the shell; its modules are `VirtualMachinesModule` + `VmDetailsView` and `ContainersModule`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` and `Containers/ContainerEditWindow` (each + its per-tab `UserControl`s), `Containers/ContainerLogsWindow`, `Containers/ContainerConsoleDialog` + `Containers/ContainerConsoleWindow`, the small device dialogs, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window or module (`VmRow`, `NetworkRow`, `ContainerRow`, `DiskEditRow`, `UsbDeviceRow`, `Containers/ContainerEditRows`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
+- `Views/`: `LoginWindow`, `MainWindow` (the shell; its modules are `VirtualMachinesModule` + `VmDetailsView` and `ContainersModule`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` and `Containers/ContainerEditWindow` (each + its per-tab `UserControl`s), `Containers/ContainerLogsWindow`, `Containers/ContainerConsoleDialog` + `Containers/ContainerConsoleWindow`, `TerminalModule`, the small device dialogs, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window or module (`VmRow`, `NetworkRow`, `ContainerRow`, `DiskEditRow`, `UsbDeviceRow`, `Containers/ContainerEditRows`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
 - `Services/FileDialogs`: the one place the WinForms filter string (`"ISO images (*.iso)|*.iso"`) is translated, into `IStorageProvider` picker types (XDG portal on Linux). Only local paths are accepted; everything downstream needs a real `FileStream`.
 - `Services/DropFiles`: the one place the drag-and-drop dialect is translated, the same way `FileDialogs` handles the filter string. Avalonia 12 replaced `IDataObject`/`DataFormats.FileDrop` with `IDataTransfer`/`DataFormat.File`, so Avalonia 11 snippets do not apply; `LocalFiles` filters a drop down to real local files (directories and portal handles are dropped) through the same `FileDialogs.LocalPathOf` the pickers use. **X11 drag-and-drop needs Avalonia 12.1+**: 12.0.x has no XDND in its X11 backend at all and raises no drop events on Linux, which is why the csproj pins 12.1 as the floor.
   Drop targets: the console window (below), the Create-VM wizard's General page (an ISO or floppy image fills the install media and switches to "stream from this PC"), a removable-drive row in `VmEditWindow` (staged as that drive's media; the extension must match the drive kind), and `LoginWindow`'s key panel (adds and selects a private key). Not `RemotePathBox`: its path is on the *server*, so a local path there would be meaningless.
@@ -97,7 +97,8 @@ bar and the process lifetime; everything a user actually manages lives in an `IM
 menu is a `TabControl` themed with `JbModuleTabControl` (the settings-window side strip with a taller
 row, so a 16px glyph fits beside the label). Modules today: **Virtual machines** (`VirtualMachinesModule`,
 which is the whole former `VmListWindow` minus the shell: the VM list, the Networks tab, `VmDetailsView`
-and every per-VM command) and **Containers** (`ContainersModule`, below).
+and every per-VM command), **Containers** (`ContainersModule`, below) and **Terminal**
+(`TerminalModule`, below: a shell on the host itself).
 
 **The shell never names its modules.** It walks its `TabControl`'s items and calls `IModule` on
 whichever contents implement it, exactly as `UnattendWindow` does for its section pages, so adding a
@@ -125,7 +126,8 @@ never opened must still behave; and modules own disjoint state, so activation or
   `docker events`): each holds its own SSH connection, and reconnecting one on every module switch
   would cost far more than dropping the events. Host capabilities are probed on the first activation
   only, except where the answer was "not installed" and re-probing is the user's only way forward
-  (see Containers).
+  (see Containers). **Terminal takes the same exception further and does nothing at all here**,
+  because its session is the feature; see below.
 - **`Shutdown` runs on every module, not just the visible one.** A hidden module still owns the
   console windows and NBD media streams it opened while it was on screen, and those outlive a module
   switch by design.
@@ -1073,6 +1075,69 @@ keeps, because Ctrl+C already means interrupt and that is the more important of 
 text arrives through `TextInput`, so dead keys, compose and any layout work with no table to
 maintain; `TextInput` carries no modifiers, so the key press that preceded it is what says whether it
 was a chord and was already sent.
+
+## Terminal
+
+`TerminalModule` is one shell on the SSH host, as the account the user logged in with, drawn by the
+same `TerminalControl` the container console uses over the same `SshPtySession`. Every other module
+wraps a command (`virsh`, `docker`, `dd`); this one is the host itself, so anything the UI does not
+model no longer means leaving VirtDeck with the credentials in hand.
+
+- **The login user's shell, not root, and that needed a second factory.** `SshPtySession.Open` wraps
+  its argv in `exec sudo -S -p '<marker>' ...` unconditionally, so every session it can make is a
+  root one and its gate, marker and preamble all exist to hide sudo's prompt and the login shell
+  running it. A host terminal wants none of that: the MOTD and the prompt **are** the content. So
+  `SshPtySession.OpenShell` (behind `SshConnectionManager.OpenShellPtyAsync`) asks for a plain SSH
+  shell, which already runs the account's own shell, with no argv, no bootstrap line, no sentinel and
+  the gate open from the first byte. `sudo` typed into it prompts the user the way it would anywhere
+  else, and the sudo password VirtDeck holds is never written into this session.
+- **Echo is the trap.** `Open` sets `TerminalModes.ECHO = 0` because the line it types at the login
+  shell and the sudo password that may follow are the client's rather than the user's, and it costs
+  them nothing because `docker exec -it` puts the terminal into raw mode inside the container and
+  echoes for itself. There is nothing downstream of a plain login shell to do that, so copying the
+  modes dictionary here would mean typing into a shell that shows nothing back. `OpenShell` uses the
+  overload that takes no modes at all.
+- **`Start` is now the caller's job, on both paths.** `Open` used to spawn the read thread inside the
+  factory, which was safe only because its gate buffers everything until the caller has subscribed.
+  With the gate open from the first byte, anything read between the factory returning and
+  `DataReceived +=` is dropped, and on a login shell that is the MOTD and the first prompt. Both
+  factories therefore hand back an **unstarted** session and both call sites call `Start()` right
+  after subscribing, so there is one rule rather than two. A session abandoned before `Start`
+  disposes cleanly.
+- **`Deactivate` deliberately does nothing but stop the resize debounce.** This is the one module that
+  costs something while hidden, and that is the whole feature: the PTY read thread keeps feeding
+  `TerminalScreen` under its own lock, so a `tail -f` left running is still running on the way back.
+  Nothing needs the UI thread on that path, and `TerminalControl` stops only its 16 ms repaint pump on
+  detach, so re-attaching catches everything up in a single repaint against the stale `_drawnRevision`.
+  It is the same exception the `virsh event --loop` and `docker events` tails already take, taken
+  further. `Shutdown` **must** end the session, because `MainWindow.Shutdown` disposes the shared
+  connection straight after, and with it the auth material this session's own client authenticated
+  with.
+- **Auto-start once, then stay dead.** `ActivateAsync` opens the shell the first time the module is
+  looked at and never again: coming back to a live session must not disturb it, and coming back to one
+  the user ended by typing `exit` must not silently revive it. There is no window to close here, so a
+  clean exit leaves the last screen with a line saying so and Reconnect enabled; a failure reads the
+  same way with its own reason. That is the opposite of `ContainerConsoleWindow`, which closes on a
+  clean exit precisely because it *is* a window and dismissing a dead one would make the user say they
+  are finished twice.
+- **The status bar is the module's two slots, so there is no footer.** The container console needs its
+  own status line because it is a window; a module already owns the shell's, and stacking a second bar
+  above it would be one bar too many. Left says what the session is doing, right says `user@host`
+  (with the port only when it is not 22), which needs no probe at all: the connection already knows.
+  The commands go in a top toolbar like the other modules, and none of them is `Classes="accent"`,
+  which those reserve for the one command that creates something.
+- **The keyboard handler goes on the top level, not on the module.** Tunnelled and `handledEventsToo`,
+  exactly as `ConsoleWindow` registers the guest's, or Tab moves focus to the toolbar and the arrow
+  keys drive it. Registering it in `OnAttachedToVisualTree` and removing it in
+  `OnDetachedFromVisualTree` is what scopes it to this module being on screen, since a `TabControl`
+  detaches the content it is not showing; another module's Tab stays its own.
+- **Font size is one setting for every terminal the app draws.** `Ctrl+wheel` lives in
+  `TerminalControl` itself, checked before the alternate-screen guard so it works inside `vim` and
+  `htop` too, and setting `FontSize` already relayouts and raises `TerminalResized`, so the far end
+  learns its new geometry through the existing debounce. `AppSettings.TerminalFontSize` is read by
+  both surfaces; the module's `A-`/`A+` buttons save at once and the wheel gesture is saved from
+  `Deactivate`, which is why there is no debounce timer, and the write is guarded on the value having
+  actually moved so a module switch does not rewrite `settings.json` for nothing.
 
 ## Conventions
 

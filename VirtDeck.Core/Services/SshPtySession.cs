@@ -43,6 +43,12 @@ namespace VirtDeck.Services
         private volatile bool _closed;
 
         /// <summary>
+        /// The line typed at the host's login shell to get to the command, or null when the session
+        /// *is* the login shell and there is nothing to type. Written by <see cref="Start"/>.
+        /// </summary>
+        private string? _bootstrap;
+
+        /// <summary>
         /// Everything the host has said so far, while the session is still getting to the container.
         /// It is held rather than shown, because none of it belongs to the user: the MOTD, the login
         /// shell's prompt and sudo's password prompt all arrive before the command does. If the
@@ -58,8 +64,10 @@ namespace VirtDeck.Services
         private const int MaxPreamble = 64 * 1024;
 
         /// <summary>
-        /// False until the sentinel arrives, which is the moment the container's own output starts.
+        /// False until the sentinel arrives, which is the moment the command's own output starts.
         /// Once open it never closes, and no scanning happens again for the life of the session.
+        /// <see cref="OpenShell"/> starts it open: there the login shell is the session, so its MOTD
+        /// and its prompt are the content rather than plumbing to be hidden.
         /// </summary>
         private bool _gateOpen;
         private bool _answered;
@@ -78,20 +86,22 @@ namespace VirtDeck.Services
         public event Action<string?>? Ended;
 
         private SshPtySession(SshClient client, ShellStream stream, string marker, string sentinel,
-                              string sudoPassword, Action<long> countBytes)
+                              string sudoPassword, bool gateOpen, Action<long> countBytes)
         {
             _client = client;
             _stream = stream;
             _markerBytes = Encoding.UTF8.GetBytes(marker);
             _sentinelBytes = Encoding.UTF8.GetBytes(sentinel);
             _sudoPassword = sudoPassword;
+            _gateOpen = gateOpen;
             _countBytes = countBytes;
         }
 
         /// <summary>
-        /// Opens a PTY on <paramref name="info"/>, runs <paramref name="argv"/> under sudo, and
-        /// starts reading. Blocking: the caller wraps it, as every other dedicated-connection call
-        /// here is wrapped.
+        /// Opens a PTY on <paramref name="info"/> and prepares to run <paramref name="argv"/> under
+        /// sudo. Blocking: the caller wraps it, as every other dedicated-connection call here is
+        /// wrapped. Nothing flows until <see cref="Start"/>, which the caller invokes once it has
+        /// subscribed.
         ///
         /// It takes an argument vector rather than a command line for the reason
         /// <c>DockerService.ArgvScript</c> spells out: everything here carries user text (a shell
@@ -130,7 +140,8 @@ namespace VirtDeck.Services
             // the command later prints. That is what lets the scans below run with no time limit.
             var marker = "VDSUDO-" + Guid.NewGuid().ToString("N");
             var sentinel = "VDGO-" + Guid.NewGuid().ToString("N");
-            var session = new SshPtySession(client, stream, marker, sentinel, sudoPassword, countBytes);
+            var session = new SshPtySession(client, stream, marker, sentinel, sudoPassword,
+                                            gateOpen: false, countBytes);
 
             var blob = string.Concat(argv.Select(a => a + "\0"));
             var argvB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(blob));
@@ -154,15 +165,68 @@ namespace VirtDeck.Services
                          $"bash -c 'printf \"%s\\n\" \"$0\"; exec \"$@\"' '{sentinel}' \"${{a[@]}}\"";
             var scriptB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
 
-            session.Start($"exec /bin/bash -c \"$(echo {scriptB64} | base64 -d)\"\n");
+            session._bootstrap = $"exec /bin/bash -c \"$(echo {scriptB64} | base64 -d)\"\n";
             return session;
         }
 
-        private void Start(string line)
+        /// <summary>
+        /// Opens the account's own login shell on <paramref name="info"/>. No sudo, no argv and no
+        /// sentinel: an SSH shell request already runs the user's shell, so there is nothing to type
+        /// at it and nothing to hide from them. What sudo would give instead is a root session, and
+        /// this one is meant to be the host as *they* are; they can still type <c>sudo</c> in it and
+        /// answer its prompt themselves.
+        ///
+        /// **Echo is left alone here**, which is the one thing that must not be copied from
+        /// <see cref="Open"/>. That path turns <c>ECHO</c> off because the line it types at the login
+        /// shell and the sudo password that may follow are the client's rather than the user's, and
+        /// it costs them nothing because <c>docker exec -it</c> puts the terminal into raw mode
+        /// inside the container and echoes for itself. There is nothing downstream here to do that,
+        /// so echo off would mean typing into a shell that shows nothing back.
+        /// </summary>
+        internal static SshPtySession OpenShell(ConnectionInfo info, int cols, int rows,
+                                                Action<long> countBytes)
         {
-            var bytes = Encoding.UTF8.GetBytes(line);
-            _stream.Write(bytes, 0, bytes.Length);
-            _stream.Flush();
+            var client = new SshClient(info);
+            ShellStream stream;
+            try
+            {
+                client.Connect();
+                stream = client.CreateShellStream(TerminalName, (uint)cols, (uint)rows, 0, 0,
+                                                  BufferSize);
+            }
+            catch
+            {
+                try { client.Dispose(); } catch { /* nothing to salvage */ }
+                throw;
+            }
+
+            // Nothing to watch for and nothing to answer: the gate is open from the first byte and
+            // the marker and sentinel are never printed, so neither is ever searched for.
+            return new SshPtySession(client, stream, marker: "", sentinel: "", sudoPassword: "",
+                                     gateOpen: true, countBytes);
+        }
+
+        /// <summary>
+        /// Begins the session: writes the bootstrap line, if this session has one, then starts
+        /// reading.
+        ///
+        /// It is the caller's job rather than the factory's, and on the shell path that is
+        /// load-bearing. There the gate is open from the first byte, so anything arriving between the
+        /// factory returning and the caller subscribing to <see cref="DataReceived"/> would simply be
+        /// dropped, and on a login shell that is the MOTD and the first prompt. <see cref="Open"/>
+        /// would survive starting itself, because its gate buffers until the sentinel, but both
+        /// factories hand an unstarted session back so there is one rule here rather than two.
+        /// </summary>
+        public void Start()
+        {
+            if (_reader != null || _closed) return;
+
+            if (_bootstrap is { } line)
+            {
+                var bytes = Encoding.UTF8.GetBytes(line);
+                _stream.Write(bytes, 0, bytes.Length);
+                _stream.Flush();
+            }
 
             _reader = new Thread(ReadLoop) { IsBackground = true, Name = "ssh-pty" };
             _reader.Start();

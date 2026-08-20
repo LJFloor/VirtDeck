@@ -60,6 +60,13 @@ namespace VirtDeck.Services
         /// <summary>Directory of the last install medium picked **on the SSH host**.</summary>
         public string LastServerMediaDir { get; set; } = "";
 
+        /// <summary>
+        /// Terminal font size, shared by the Terminal module and the container console: one font for
+        /// every terminal the app draws. 13 matches <c>TerminalControl</c>'s own default, so an
+        /// existing settings file that predates this key reads back exactly what it rendered before.
+        /// </summary>
+        public double TerminalFontSize { get; set; } = 13;
+
         /// <summary>Per-VM console preferences, keyed by domain UUID.</summary>
         public Dictionary<string, VmSettings> Vms { get; set; } = new();
 
