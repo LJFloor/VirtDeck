@@ -76,6 +76,31 @@ public sealed class TerminalControl : Control
     private (int line, int col)? _selectEnd;
     private bool _selecting;
 
+    /// <summary>
+    /// The button held while the far end owns the pointer, or null. Non-null is also what says a
+    /// release is still owed, and it is what tells 1002 apart from 1003: a drag is motion with this
+    /// set, and 1003 reports motion whether or not it is.
+    /// </summary>
+    private TerminalMouseButton? _mouseDown;
+
+    /// <summary>
+    /// The cell the last motion report named. Motion is reported once per cell rather than once per
+    /// pointer event: a drag across the window is hundreds of moves, and each report is bytes on the
+    /// wire plus a redraw at the far end.
+    /// </summary>
+    private (int col, int row) _lastMouseCell = (-1, -1);
+
+    /// <summary>
+    /// Where the pointer last was. Only <see cref="OnPointerCaptureLost"/> reads it, because that is
+    /// the one report with no event of its own to take a position from.
+    /// </summary>
+    private Point _lastPointer;
+
+    /// <summary>Which of the two cursors is currently set; see <see cref="ApplyPointerCursor"/>.</summary>
+    private bool _ibeamShown = true;
+    private readonly Cursor _ibeam = new(StandardCursorType.Ibeam);
+    private readonly Cursor _arrow = new(StandardCursorType.Arrow);
+
     /// <summary>Whether the key press just handled already produced bytes; see OnTextInput.</summary>
     private bool _keyHandled;
 
@@ -110,7 +135,7 @@ public sealed class TerminalControl : Control
 
         Focusable = true;
         ClipToBounds = true;
-        Cursor = new Cursor(StandardCursorType.Ibeam);
+        Cursor = _ibeam;
 
         BuildTypefaces();
         BuildPalette();
@@ -122,7 +147,18 @@ public sealed class TerminalControl : Control
         _pump.Tick += (_, _) =>
         {
             long revision;
-            lock (_screen.SyncRoot) revision = _screen.Revision;
+            MouseTracking mouse;
+            lock (_screen.SyncRoot)
+            {
+                revision = _screen.Revision;
+                mouse = _screen.MouseMode;
+            }
+
+            // The mouse mode is read here rather than pushed from the parser because setting it does
+            // not touch the screen, so it moves no revision and there is nothing to subscribe to.
+            // One extra field read under a lock already held is cheaper than either alternative.
+            ApplyPointerCursor(mouse);
+
             if (revision == _drawnRevision) return;
             _drawnRevision = revision;
             InvalidateVisual();
@@ -337,13 +373,32 @@ public sealed class TerminalControl : Control
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        // Zoom is checked before the alternate screen is, so Ctrl+wheel works inside vim and htop
-        // too: it changes how the client draws, which is nothing the far end has an opinion about.
-        // Setting FontSize rebuilds the typefaces and relayouts, which resizes the screen and raises
+        // Zoom is checked before anything else, so Ctrl+wheel works inside vim and htop too: it
+        // changes how the client draws, which is nothing the far end has an opinion about. Setting
+        // FontSize rebuilds the typefaces and relayouts, which resizes the screen and raises
         // TerminalResized, so the host's existing debounce tells the far end its new geometry.
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             FontSize = Math.Clamp(FontSize + (e.Delta.Y > 0 ? 1 : -1), MinFontSize, MaxFontSize);
+            e.Handled = true;
+            return;
+        }
+
+        // A wheel notch is a button to a program that asked for the mouse, which is how `less` and
+        // `man` scroll at all. Reported in every tracking mode, including the press-only one, since
+        // a notch is a press.
+        var (mode, _) = MouseState();
+        if (mode != MouseTracking.Off && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            var button = e.Delta.Y > 0 ? TerminalMouseButton.WheelUp : TerminalMouseButton.WheelDown;
+            var at = e.GetPosition(this);
+
+            // One report per notch, not one per configured line: how far a notch scrolls is the far
+            // end's decision, and ScrollWheelLines is this end's answer for its own history.
+            var notches = Math.Max(1, (int)Math.Abs(e.Delta.Y));
+            for (var i = 0; i < notches; i++)
+                ReportMouse(button, TerminalMouseAction.Press, at, e.KeyModifiers);
+
             e.Handled = true;
             return;
         }
@@ -356,6 +411,74 @@ public sealed class TerminalControl : Control
 
         ScrollOffset = _scroll + (int)(e.Delta.Y * ScrollWheelLines);
         e.Handled = true;
+    }
+
+    // ---- Mouse reporting --------------------------------------------------
+
+    /// <summary>Both mouse settings, read together under the one lock that guards them.</summary>
+    private (MouseTracking mode, MouseProtocol protocol) MouseState()
+    {
+        lock (_screen.SyncRoot) return (_screen.MouseMode, _screen.MouseEncoding);
+    }
+
+    /// <summary>
+    /// The cell under the pointer as a report names it: 1-based, and relative to the viewport rather
+    /// than to the history, because that is the only frame the far end shares. It floors where
+    /// <see cref="CellAt"/> rounds, since a report is about the cell the pointer is inside and a
+    /// selection is about the boundary it is nearest.
+    /// </summary>
+    private (int col, int row) ViewportCellAt(Point p)
+    {
+        lock (_screen.SyncRoot)
+        {
+            return (Math.Clamp((int)(p.X / _cellWidth) + 1, 1, _screen.Cols),
+                    Math.Clamp((int)(p.Y / _cellHeight) + 1, 1, _screen.Rows));
+        }
+    }
+
+    private static TerminalMouseModifiers ModifiersOf(KeyModifiers mods)
+    {
+        var result = TerminalMouseModifiers.None;
+        if (mods.HasFlag(KeyModifiers.Shift)) result |= TerminalMouseModifiers.Shift;
+        if (mods.HasFlag(KeyModifiers.Alt)) result |= TerminalMouseModifiers.Alt;
+        if (mods.HasFlag(KeyModifiers.Control)) result |= TerminalMouseModifiers.Control;
+        return result;
+    }
+
+    private static TerminalMouseButton? ButtonOf(PointerPointProperties props) =>
+        props.IsLeftButtonPressed ? TerminalMouseButton.Left
+        : props.IsMiddleButtonPressed ? TerminalMouseButton.Middle
+        : props.IsRightButtonPressed ? TerminalMouseButton.Right
+        : null;
+
+    private void ReportMouse(TerminalMouseButton button, TerminalMouseAction action,
+                             Point at, KeyModifiers mods)
+    {
+        var (mode, protocol) = MouseState();
+        var (col, row) = ViewportCellAt(at);
+        var bytes = TerminalMouse.Encode(mode, protocol, button, action, col, row, ModifiersOf(mods));
+        if (bytes is not null) Send(bytes);
+    }
+
+    /// <summary>
+    /// Whether this gesture belongs to the far end. Shift is the escape hatch every terminal has, and
+    /// it is not optional: without it there would be no way to select text out of a full-screen
+    /// program, because such a program is exactly the kind that takes the mouse.
+    /// </summary>
+    private bool PointerBelongsToFarEnd(KeyModifiers mods) =>
+        MouseState().mode != MouseTracking.Off && !mods.HasFlag(KeyModifiers.Shift);
+
+    /// <summary>
+    /// An I-beam over a screen that cannot be selected is a lie, so the pointer becomes an arrow
+    /// while the far end owns it. Called from the repaint pump, and does nothing on the ticks where
+    /// nothing changed.
+    /// </summary>
+    private void ApplyPointerCursor(MouseTracking mode)
+    {
+        var ibeam = mode == MouseTracking.Off;
+        if (ibeam == _ibeamShown) return;
+        _ibeamShown = ibeam;
+        Cursor = ibeam ? _ibeam : _arrow;
     }
 
     // ---- Selection --------------------------------------------------------
@@ -375,7 +498,29 @@ public sealed class TerminalControl : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         Focus();
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        var point = e.GetCurrentPoint(this);
+
+        if (PointerBelongsToFarEnd(e.KeyModifiers))
+        {
+            // The whole gesture goes to the far end, reportable or not: a press it cannot spell (a
+            // fourth button, a column past what X10 can write) must still not start a selection
+            // here, or the release would land on a selection nobody asked for.
+            e.Handled = true;
+            if (ButtonOf(point.Properties) is not { } button) return;
+
+            // A report names a viewport row, so the viewport has to be the live one. Somebody
+            // scrolled back into history who clicks is asking about what they can see now.
+            SnapToBottom();
+
+            _mouseDown = button;
+            _lastPointer = point.Position;
+            _lastMouseCell = ViewportCellAt(point.Position);
+            e.Pointer.Capture(this);
+            ReportMouse(button, TerminalMouseAction.Press, point.Position, e.KeyModifiers);
+            return;
+        }
+
+        if (!point.Properties.IsLeftButtonPressed)
         {
             base.OnPointerPressed(e);
             return;
@@ -390,14 +535,56 @@ public sealed class TerminalControl : Control
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
-        if (!_selecting) { base.OnPointerMoved(e); return; }
-        _selectEnd = CellAt(e.GetPosition(this));
-        InvalidateVisual();
+        // A selection already under way keeps the pointer to the end of the drag, even if the far
+        // end turned tracking on midway: the gesture belongs to whoever it started with.
+        if (_selecting)
+        {
+            _selectEnd = CellAt(e.GetPosition(this));
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
+        var (mode, _) = MouseState();
+
+        // 1002 reports a drag and 1003 reports every move; the press-and-release modes report
+        // neither, and Encode would refuse them anyway. Checking here as well is what keeps a plain
+        // hover from costing a lock and an encode per pointer event.
+        var wanted = mode == MouseTracking.AnyEvent
+                     || (mode == MouseTracking.ButtonEvent && _mouseDown is not null);
+        if (!wanted)
+        {
+            // Still swallowed while a button this end reported is down, so the gesture stays whole.
+            if (_mouseDown is not null) e.Handled = true;
+            else base.OnPointerMoved(e);
+            return;
+        }
+
+        var at = e.GetPosition(this);
+        _lastPointer = at;
+        var cell = ViewportCellAt(at);
         e.Handled = true;
+        if (cell == _lastMouseCell) return;
+
+        _lastMouseCell = cell;
+        ReportMouse(_mouseDown ?? TerminalMouseButton.None, TerminalMouseAction.Move, at,
+                    e.KeyModifiers);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
+        // Answered from _mouseDown rather than from the current mode, so a program that turns
+        // tracking off between the press and the release still gets the release it is owed.
+        if (_mouseDown is { } button)
+        {
+            _mouseDown = null;
+            _lastMouseCell = (-1, -1);
+            e.Pointer.Capture(null);
+            ReportMouse(button, TerminalMouseAction.Release, e.GetPosition(this), e.KeyModifiers);
+            e.Handled = true;
+            return;
+        }
+
         if (_selecting)
         {
             _selecting = false;
@@ -409,6 +596,31 @@ public sealed class TerminalControl : Control
             e.Handled = true;
         }
         base.OnPointerReleased(e);
+    }
+
+    /// <summary>
+    /// Capture can be taken away mid-drag: another window steals focus, or the pointer device goes.
+    /// Neither gesture gets a release then, so both are ended here rather than left latched, which
+    /// would otherwise leave every later hover reporting as a drag or extending a selection nobody
+    /// is making. The far end is told the button came up, because as far as it knows one is down.
+    /// </summary>
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        if (_mouseDown is { } button)
+        {
+            _mouseDown = null;
+            _lastMouseCell = (-1, -1);
+            ReportMouse(button, TerminalMouseAction.Release, _lastPointer, KeyModifiers.None);
+        }
+
+        if (_selecting)
+        {
+            _selecting = false;
+            if (_selectStart == _selectEnd) _selectStart = _selectEnd = null;
+            InvalidateVisual();
+        }
+
+        base.OnPointerCaptureLost(e);
     }
 
     public bool HasSelection => _selectStart is not null && _selectEnd is not null;

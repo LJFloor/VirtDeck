@@ -1039,12 +1039,54 @@ second.
 What is implemented is what `vim`, `htop`, `top` and `less` use: the C0 set, `DECSC`/`DECRC`, `RI`,
 the cursor and erase and insert/delete families, `DECSTBM`, `SGR` including `38`/`48` in both the
 `;5;n` and `;2;r;g;b` spellings **and their colon forms**, `DSR`, and the DEC private modes for
-application cursor keys, autowrap, cursor visibility, bracketed paste and the alternate screen.
-**Everything else is consumed, never printed**, so the failure mode for something exotic is a missing
-effect and not a screen full of `[38;5;`. Deliberately absent, each with a comment saying so: mouse
-reporting (the modes are swallowed so a program does not also see them refused; everything these
-programs offer the mouse they also offer the keyboard), sixel, double-width lines, and character sets
-beyond consuming the selector.
+application cursor keys, autowrap, cursor visibility, bracketed paste, the alternate screen and
+**mouse reporting** (below). **Everything else is consumed, never printed**, so the failure mode for
+something exotic is a missing effect and not a screen full of `[38;5;`. Deliberately absent, each
+with a comment saying so: sixel, double-width lines, and character sets beyond consuming the
+selector.
+
+#### The mouse
+
+`Terminal/TerminalMouse.cs` turns one pointer event into the bytes a program that asked for the mouse
+expects, or into nothing when the mode it asked for does not cover that event. It sits in Core beside
+the screen and the parser for the reason they do: which events are reportable and how they are
+spelled is the terminal protocol, not a toolkit's idea of a pointer, so the control's whole job is to
+turn pixels into a cell and a button and hand them over. Its output is checked against xterm's own
+documented sequences rather than against itself.
+
+- **Two settings, not one.** Modes 9/1000/1002/1003 say *what* to report and are one setting between
+  them (`MouseTracking`), so turning any of them off is silence; 1005/1006/1015 say how to spell it
+  and are a second (`MouseProtocol`). A program sets one of each, and 1002 plus 1006 is what nearly
+  everything modern asks for. Resetting an encoding only falls back to X10 when it is the one
+  actually in force, because three separate modes must not be read as one.
+- **A release cannot say which button it was, outside SGR.** Every other encoding writes button 3 and
+  keeps the motion and modifier bits above it, which is also why 1003's bare motion and a release are
+  literally the same bytes under the X10 encoding. SGR keeps the real button and says "release" with
+  its final letter instead, which is the whole reason it exists.
+- **The X10 encoding gives each field one byte biased by 32, so nothing past column 223 fits.** Such
+  a report is **dropped rather than clamped**: naming the wrong cell is worse than naming none, and
+  anything likely to be run in a window that wide asks for SGR, which has no limit.
+- **Shift is the escape hatch, and it is not optional.** Holding it hands the pointer back to this end
+  for selecting text. Without it there would be no way to copy anything out of a full-screen program,
+  because such a program is exactly the kind that takes the mouse.
+- **Motion is reported once per cell, never once per pointer event.** A drag across the window is
+  hundreds of moves, and each report is bytes on the wire plus a redraw at the far end.
+- **A report names a viewport row**, 1-based, because that is the only frame the two ends share. So a
+  press snaps the view to the bottom first: somebody scrolled back into history who clicks is asking
+  about what they can see now. It also floors where the selection code rounds, since a report is
+  about the cell the pointer is inside and a selection is about the boundary it is nearest.
+- **A gesture belongs to whoever it started with.** The release is answered from the button this end
+  recorded rather than from the current mode, so a program that turns tracking off between press and
+  release still gets the release it is owed; a selection already under way survives tracking being
+  turned on midway; and `OnPointerCaptureLost` ends both, because neither gets a release when another
+  window steals focus mid-drag and a latched one would make every later hover a phantom drag.
+- **A wheel notch is a button** (64 and 65), which is how `less` and `man` scroll at all, and it is
+  reported in every tracking mode since a notch is a press. One report per notch: how far that
+  scrolls is the far end's decision, where `ScrollWheelLines` is this end's answer for its own
+  history.
+- **The pointer becomes an arrow while the far end owns it**, because an I-beam over a screen that
+  cannot be selected is a lie. The repaint pump reads the mode to decide, since setting it touches no
+  cell and so moves no `Revision` there is anything to subscribe to.
 
 Three things in this area were bugs waiting to happen and are written the way they are on purpose:
 

@@ -65,6 +65,16 @@ namespace VirtDeck.Terminal
         public bool BracketedPaste { get; set; }
         public bool AltScreen => _useAlt;
 
+        /// <summary>
+        /// Which pointer events the far end asked to be told about, and how to spell them. Two
+        /// settings rather than one because a program sets one of each (1002 and 1006, typically),
+        /// and they are held here rather than in the control for the reason everything else on this
+        /// class is: the parser writes them and the control reads them, both under
+        /// <see cref="SyncRoot"/>.
+        /// </summary>
+        public MouseTracking MouseMode { get; set; } = MouseTracking.Off;
+        public MouseProtocol MouseEncoding { get; set; } = MouseProtocol.X10;
+
         public int CursorX => _cx;
         public int CursorY => _cy;
 
@@ -509,6 +519,8 @@ namespace VirtDeck.Terminal
             ApplicationCursorKeys = false;
             ApplicationKeypad = false;
             BracketedPaste = false;
+            MouseMode = MouseTracking.Off;
+            MouseEncoding = MouseProtocol.X10;
             ResetTabs();
             Touch();
         }

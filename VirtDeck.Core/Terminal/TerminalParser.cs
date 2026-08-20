@@ -336,20 +336,30 @@ namespace VirtDeck.Terminal
 
                     case 2004: _screen.BracketedPaste = set; break;
 
-                    // Mouse reporting is accepted and then not done: the modes are swallowed so a
-                    // program that turns them on does not also see them refused, but no button
-                    // report is ever sent. Everything these programs offer the mouse, they also
-                    // offer the keyboard.
-                    case 9:
-                    case 1000:
-                    case 1002:
-                    case 1003:
-                    case 1005:
-                    case 1006:
-                    case 1015:
-                        break;
+                    // Mouse reporting. The first four say *what* to report and are one setting
+                    // between them, so turning any of them off is silence; the last three say how to
+                    // spell it and are a second setting. A program sets one of each.
+                    case 9: _screen.MouseMode = set ? MouseTracking.X10 : MouseTracking.Off; break;
+                    case 1000: _screen.MouseMode = set ? MouseTracking.Normal : MouseTracking.Off; break;
+                    case 1002: _screen.MouseMode = set ? MouseTracking.ButtonEvent : MouseTracking.Off; break;
+                    case 1003: _screen.MouseMode = set ? MouseTracking.AnyEvent : MouseTracking.Off; break;
+
+                    case 1005: MouseEncoding(MouseProtocol.Utf8, set); break;
+                    case 1006: MouseEncoding(MouseProtocol.Sgr, set); break;
+                    case 1015: MouseEncoding(MouseProtocol.Urxvt, set); break;
                 }
             }
+        }
+
+        /// <summary>
+        /// Turns one encoding on, or off if it is the one currently in force. The guard matters
+        /// because these are three separate modes rather than one: a program that resets 1006 while
+        /// 1005 is what is actually set must not be taken to mean "back to X10".
+        /// </summary>
+        private void MouseEncoding(MouseProtocol protocol, bool set)
+        {
+            if (set) _screen.MouseEncoding = protocol;
+            else if (_screen.MouseEncoding == protocol) _screen.MouseEncoding = MouseProtocol.X10;
         }
 
         // ---- SGR ------------------------------------------------------------
