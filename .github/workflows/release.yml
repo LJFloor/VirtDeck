@@ -69,12 +69,17 @@ jobs:
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} installer\VirtDeck.iss'
 
+      # One day, the minimum: unlike publish.yml's, this artifact is a hand-off to the release job
+      # below and nothing else, and the permanent copy is the one that job attaches to the Release,
+      # which is separate storage and no part of the Actions allowance. Keeping it any longer would
+      # be storing every release twice.
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: VirtDeck-installer
           path: installer/output/VirtDeckSetup-${{ needs.version.outputs.version }}.exe
           if-no-files-found: error
+          retention-days: 1
 
   linux:
     runs-on: ubuntu-latest
@@ -94,12 +99,14 @@ jobs:
       - name: Build AppImage
         run: packaging/build-appimage.sh "${{ needs.version.outputs.version }}"
 
+      # A hand-off to the release job, exactly like the installer above.
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
           name: VirtDeck-AppImage
           path: publish/VirtDeck-${{ needs.version.outputs.version }}-x86_64.AppImage
           if-no-files-found: error
+          retention-days: 1
 
   release:
     runs-on: ubuntu-latest

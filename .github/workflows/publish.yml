@@ -53,12 +53,18 @@ jobs:
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
 
+      # A week, not the 90-day default. This repo is private, so every artifact counts against the
+      # account's Actions storage allowance, and a push to main stores both of these at around
+      # 107 MB the pair; at the usual cadence the default filled the quota and then every upload in
+      # the repo started failing, builds included. A week is longer than anybody goes back for a
+      # CI build of main, and a tagged release keeps its binaries on the Release itself anyway.
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: VirtDeck-installer
           path: installer/output/*.exe
           if-no-files-found: error
+          retention-days: 7
 
   linux:
     runs-on: ubuntu-latest
@@ -81,9 +87,11 @@ jobs:
       - name: Build AppImage
         run: packaging/build-appimage.sh "${{ steps.ver.outputs.version }}"
 
+      # Same week as the installer above, and for the same reason.
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
           name: VirtDeck-AppImage
           path: publish/*.AppImage
           if-no-files-found: error
+          retention-days: 7
