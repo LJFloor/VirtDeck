@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.VolumesTab">
+
+  <DockPanel Margin="16">
+
+    <TextBlock DockPanel.Dock="Top" Classes="note" Margin="0,0,0,12"
+               Text="A volume is storage docker manages and keeps when the container goes, picked from the ones already on the host; a bind mount is a path on the host, which the container sees exactly as it is. Both survive an edit, because an edit replaces the container and not what it mounted." />
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Volumes and bind mounts" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="MountTools" Margin="8,6,8,6" />
+
+        <!-- The same table the main window draws: a heading strip in JbGroupBoxHeader's
+             grey over a rule, and rows on the window's own background. 12px of padding, so
+             the headings sit over the cells rather than beside them, matching JbTableRow. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="110,*,*,70" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="Kind" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="Volume or host path" />
+            <TextBlock Grid.Column="2" Classes="columnheader" Text="Container path" />
+            <TextBlock Grid.Column="3" Classes="columnheader" Text="Read only" HorizontalAlignment="Center" />
+          </Grid>
+        </Border>
+
+        <!-- No border of its own: the group box already draws one, and the rows are meant to run
+             right up to it. -->
+        <ListBox Name="MountList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <!-- Not virtualised: an unrealised row has no cells for Tab to reach, and these lists are
+               a handful of rows, never a listing. -->
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="c:MountRow">
+              <Grid ColumnDefinitions="110,*,*,70" ColumnSpacing="6">
+                <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding Kinds}" SelectedItem="{Binding Kind, Mode=TwoWay}" />
+
+                <!-- Both source editors live here and swap on visibility, so changing the kind
+                     never discards what was picked or typed under the other one. A volume is chosen
+                     from the ones the host has; a bind mount is any path, so it is typed. -->
+                <Panel Grid.Column="1">
+                  <ComboBox IsVisible="{Binding IsVolume}" HorizontalAlignment="Stretch"
+                            ItemsSource="{Binding Volumes}"
+                            SelectedItem="{Binding Volume, Mode=TwoWay}" />
+                  <TextBox IsVisible="{Binding IsBind}"
+                           PlaceholderText="/srv/data"
+                           Text="{Binding HostPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Panel>
+
+                <TextBox Grid.Column="2" PlaceholderText="/data"
+                         Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <CheckBox Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          IsChecked="{Binding ReadOnly, Mode=TwoWay}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

@@ -31,13 +31,13 @@ publish.bat                         # Windows -> installer\output\VirtDeckSetup-
 
 ## What this is
 
-An app to manage libvirt/KVM VMs on a remote Linux host over SSH, with a **native C# SPICE console** (no WebView2, no spice-html5, no WebSocket bridge; raw TCP to the SSH-forwarded SPICE port).
+An app to manage a remote Linux host over SSH. Its first and largest subject is libvirt/KVM VMs, with a **native C# SPICE console** (no WebView2, no spice-html5, no WebSocket bridge; raw TCP to the SSH-forwarded SPICE port); Docker containers are the second. One SSH connection serves all of it, and the main window is a side menu of **modules** over that connection (see "Modules" below).
 
 **Cross-platform status:** done. Engine, services, the whole management UI, guest audio and USB redirection run on Linux and Windows from the single Avalonia front-end. The WinForms app that this was ported from is deleted (it is in git history if a WinForms detail ever needs checking).
 
 It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via spice-html5 in WebView2 and broke with "Protocol Error" (the WebSocket↔TCP bridge mangled SPICE's binary framing). The native client deletes that failure mode. The SPICE protocol was ported field-for-field from the bundled spice-html5 source at `..\VmManager\VmManager\WebContent\src\*.js`; that JS is the authoritative wire-format reference.
 
-**Flow:** `LoginWindow` → SSH connect → `VmListWindow` → double-click VM → `ConsoleWindow` (native SPICE).
+**Flow:** `LoginWindow` → SSH connect → `MainWindow` (module side menu) → Virtual machines → double-click VM → `ConsoleWindow` (native SPICE).
 
 ## Architecture
 
@@ -54,7 +54,9 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `CursorShape`: decoded ALPHA cursor (BGRA + hotspot).
 
 ### VirtDeck.Core (shared, cross-platform)
-- `Services/`: `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `NbdServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level (see below), not via `virt-xml`.
+- `Services/`: `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `DockerService`, `NbdServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level (see below), not via `virt-xml`.
+- **Interactive commands** go through `SshConnectionManager.OpenSudoPtyAsync` + `Services/SshPtySession`,
+  which is the only bidirectional channel in the app; see "Running a command in a container" below.
 - **SSH authentication**: `SshConnectionManager.ConnectWithPassword` / `ConnectWithKey` (host + **port**, no longer hardwired to 22). Both build a plain `ConnectionInfo` (the base class is not `IDisposable`, unlike `PasswordConnectionInfo`), so the manager owns the credential lifetime: the auth method and, for key auth, the `PrivateKeyFile` are **fields disposed after the client**, never `using`-scoped in the connect call, because `DownloadFileAsync` and `RunSudoCommandStreaming` each open a second client from `_client.ConnectionInfo` and would otherwise authenticate with disposed key material.
   **The sudo password is a separate secret** (`_sudoPassword`): with key auth there is no login password, and a NOPASSWD account has no sudo password either, which `FeedSudoPassword` already tolerated (sudo simply never reads stdin). `CheckSudo()` runs `sudo -S -p '' true` once from the login window and returns a message instead of throwing, so a wrong or missing sudo password is reported on the login screen rather than as a VM list that fails to load.
   `Services/SshKeyDiscovery` scans `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) for the key dropdown: a file counts as a key when it has a `.pub` sibling **or** its first line says `PRIVATE KEY`, stock names sorted strongest first. `NeedsPassphrase` probes with `new PrivateKeyFile(path)` and treats only `SshPassPhraseNullOrEmptyException` as "encrypted"; anything unreadable answers false on purpose, so the connect attempt reports the real error instead of the UI asking for a passphrase that would not help. SSH.NET 2024.2.0 has **no ssh-agent support**, so keys are always read from disk. `settings.json` persists the mode, key path and port and **never a secret**; the passwords themselves go to the OS secret store when the user opts in, see "Remembering passwords" below.
@@ -65,10 +67,19 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 
 ### VirtDeck.Avalonia (cross-platform UI)
 - `Controls/SpiceDisplay`: Avalonia `Control`. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; `Render` does a 1:1 `DrawImage` with interpolation `None`. Owns the exactly-one-cursor state machine, built from `Cursor(Bitmap, PixelPoint)` and `StandardCursorType.None`.
-- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). `JbErrorForeground` is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), themed for both light and dark, so no view hardcodes a red. `JbGroupBox` is a `ControlTheme` for `HeaderedContentControl` carrying the app's titled-frame idiom, and `JbGroupBoxBorder`/`JbGroupBoxHeader` are its two brushes, deliberately outside the theme dictionaries because both are grey with an alpha channel and so read correctly on either face. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
+- `Styles/JetBrainsClassic.axaml`: JetBrains Classic UI (Darcula / IntelliJ Light) trim, and the app's single source of visual scale. Replacement `ControlTheme`s for `Button`/`JbToolButton`, `CheckBox`, `RadioButton`, `TabControl`/`TabItem` (top-placed; `JbSideTabControl`/`JbSideTabItem` are the left-placed pair, keyed, for the Windows-setup customization window, and `JbModuleTabControl`/`JbModuleTabItem` derive from that pair with a taller row for the main window's module side menu), `JbTableRow`, and the menu family (`Menu`/`JbTopLevelMenuItem` for the console toolbar strip, `MenuItem`/`Separator`/`ContextMenu`/`MenuFlyoutPresenter` for the popups), plus overrides of Fluent's metric keys (`TextControl*`, `ComboBox*`, `ListBoxItemPadding`, `ToolTip*`). `JbErrorForeground` is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), themed for both light and dark, so no view hardcodes a red. `JbGroupBox` is a `ControlTheme` for `HeaderedContentControl` carrying the app's titled-frame idiom, with its content inset templated from `Padding` (12,10 by default) so a box whose whole content is a table can ask for `Padding="0"` and let the rows run to the frame instead of drawing a second border a few pixels inside the first, and `JbGroupBoxBorder`/`JbGroupBoxHeader` are its two brushes, deliberately outside the theme dictionaries because both are grey with an alpha channel and so read correctly on either face; `JbIconAdd`/`JbIconRemove` sit beside them, outside for the related reason that a green meaning "add" must not change meaning with the theme. Merged into `Application.Resources`, **not** `Application.Styles`, because resource lookup reaches `Application.Resources` before the `FluentTheme`'s own dictionaries; that is what makes those overrides win without `/template/` selectors per state.
   **One font baseline: 12.** A bare `TextBlock` defaults to 12 while every Fluent `ControlTheme` sets its own size from `ControlContentThemeFontSize` (14), so labels and the fields beside them rendered two points apart; each retemplated control here drops that setter and falls back to the inherited 12, which widened the gap further. The dictionary pulls the key down to 12, and every metric in it (24px fields and buttons, 22px tool buttons, a 14px check/radio box, `12,4` table rows) is sized for that. **Fields and buttons share one height (24)** (same 1px border, same 3px vertical inset), so a text box, dropdown or spinner lines up with the button next to it; `App.axaml` pins `ButtonSpinner`/`NumericUpDown` to the same key because Fluent sizes those outside `TextControl*`. Views should not set a local `FontSize` or `Height` to line controls up; fix the baseline instead. Headings (wizard title 15, login 16) are the deliberate exceptions.
+- `Controls/TerminalControl` + `VirtDeck.Core/Terminal/`: the container console's terminal, split the
+  same way SPICE is. `TerminalScreen` (cell grid, scrollback, alt screen, all under `SyncRoot`) and
+  `TerminalParser` (UTF-8 + the escape-sequence state machine) are toolkit-agnostic and live in Core,
+  exactly as `SpiceFramebuffer` does; the control draws them and turns keys into bytes. It knows
+  nothing about SSH or docker: bytes in through `Receive`, bytes out through `Input`.
+- `Input/TerminalKeyMap`: Avalonia `Key` to the bytes an xterm sends. The **logical** key, not the
+  physical one, which is the opposite of `PhysicalKeyMap` beside it: a guest OS applies its own
+  layout to a scancode, so there the position is the truth, while here the far end wants characters
+  and the layout has already been applied.
 - `Input/PhysicalKeyMap`: Avalonia `PhysicalKey` → AT set-1 scancode. `PhysicalKey` is positional (W3C `code`), so it is layout-independent, more correct than a VK table, which reads through the host layout. **Extended keys are `0xE0 | (atCode << 8)`** (e.g. PageUp = `0x49E0`), matching spice-html5 utils.js, NOT `0xE0XX`. The key-up high bit is applied in `InputsChannel.SendKey`.
-- `Views/`: `LoginWindow`, `VmListWindow` (+ `VmDetailsView`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` (+ its per-tab `UserControl`s), the small device dialogs, `LogWindow`, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window (`VmRow`, `NetworkRow`, `DiskEditRow`, `UsbDeviceRow`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
+- `Views/`: `LoginWindow`, `MainWindow` (the shell; its modules are `VirtualMachinesModule` + `VmDetailsView` and `ContainersModule`), `ConsoleWindow`, `CreateVmWizard`, `VmEditWindow`, `ExportVmDialog`, `RemoteFileBrowserDialog`, `UsbDeviceDialog`, `Unattend/UnattendWindow` and `Containers/ContainerEditWindow` (each + its per-tab `UserControl`s), `Containers/ContainerLogsWindow`, `Containers/ContainerConsoleDialog` + `Containers/ContainerConsoleWindow`, the small device dialogs, and `MessageDialog` (Avalonia has no `MessageBox`). Row view-models live beside their window or module (`VmRow`, `NetworkRow`, `ContainerRow`, `DiskEditRow`, `UsbDeviceRow`, `Containers/ContainerEditRows`, …); lists are `ListBox` + `DataTemplate`, not `ListView`.
 - `Services/FileDialogs`: the one place the WinForms filter string (`"ISO images (*.iso)|*.iso"`) is translated, into `IStorageProvider` picker types (XDG portal on Linux). Only local paths are accepted; everything downstream needs a real `FileStream`.
 - `Services/DropFiles`: the one place the drag-and-drop dialect is translated, the same way `FileDialogs` handles the filter string. Avalonia 12 replaced `IDataObject`/`DataFormats.FileDrop` with `IDataTransfer`/`DataFormat.File`, so Avalonia 11 snippets do not apply; `LocalFiles` filters a drop down to real local files (directories and portal handles are dropped) through the same `FileDialogs.LocalPathOf` the pickers use. **X11 drag-and-drop needs Avalonia 12.1+**: 12.0.x has no XDND in its X11 backend at all and raises no drop events on Linux, which is why the csproj pins 12.1 as the floor.
   Drop targets: the console window (below), the Create-VM wizard's General page (an ISO or floppy image fills the install media and switches to "stream from this PC"), a removable-drive row in `VmEditWindow` (staged as that drive's media; the extension must match the drive kind), and `LoginWindow`'s key panel (adds and selects a private key). Not `RemotePathBox`: its path is on the *server*, so a local path there would be meaningless.
@@ -78,6 +89,46 @@ It is a fresh rewrite of the older `..\VmManager` app, which rendered SPICE via 
 - `Input/AsciiScancodes`: char → AT set-1 scancode + shift, for "Type clipboard". Replaces `VkKeyScan`, which read the *host* layout; scancodes are positional, so the guest's layout decides; a fixed US table is exactly as correct and equally approximate elsewhere.
 - Clipboard: **text and images, both ways**; see "Clipboard sharing" below for the whole story. `Services/HostClipboard` is the one place the Avalonia clipboard dialect is translated, the way `DropFiles` is for drag-and-drop.
 - `Input/IKeyboardGrab`: `X11KeyboardGrab` (`XGrabKeyboard`) on Linux so Alt+Tab/Super reach the guest; no-op elsewhere. **Best-effort by design**; the console must work without it. The grab **must** be issued on Avalonia's own X display connection (dug out of `Window.PlatformImpl` by reflection): X reports key events during an active grab only to the grabbing *client*, and a client is a connection; a grab on a private `XOpenDisplay` takes every key away from Avalonia and the console goes deaf while grabbed. If the display can't be resolved, report unsupported (no grab) rather than falling back to a private connection.
+
+### Modules
+
+The main window is a **shell**, not a screen. `Views/MainWindow` owns the SSH connection, the status
+bar and the process lifetime; everything a user actually manages lives in an `IModule`, and the side
+menu is a `TabControl` themed with `JbModuleTabControl` (the settings-window side strip with a taller
+row, so a 16px glyph fits beside the label). Modules today: **Virtual machines** (`VirtualMachinesModule`,
+which is the whole former `VmListWindow` minus the shell: the VM list, the Networks tab, `VmDetailsView`
+and every per-VM command) and **Containers** (`ContainersModule`, below).
+
+**The shell never names its modules.** It walks its `TabControl`'s items and calls `IModule` on
+whichever contents implement it, exactly as `UnattendWindow` does for its section pages, so adding a
+module is a `TabItem` in `MainWindow.axaml` plus one `UserControl` and no line to maintain anywhere
+else. Two invariants follow, the same two the answer-file window lives by: every module is
+constructed with the shell (they are literal elements, not template output), so a module the user
+never opened must still behave; and modules own disjoint state, so activation order never matters.
+
+- **`Attach(ssh)` rather than a constructor parameter.** A `UserControl` declared in XAML needs a
+  parameterless constructor, and the modules are built before the connection exists. So the shell
+  hands each of them the same `SshConnectionManager` once, before the first `ActivateAsync`, and a
+  module builds its own service (`VirshService`, `DockerService`) on top of it. The connection stays
+  the shell's to dispose.
+- **The status bar is two slots, and a module owns both while it is on screen.** `Status` is the left
+  slot (row counts, "Starting win11 (1/2)..."), `HostCapabilities` the right ("KVM ready",
+  "docker 27.3.1", "docker not installed"), and one `StatusChanged` event covers them. The shell
+  repaints from the *incoming* module's own strings on every switch, because the outgoing module's
+  counts say nothing about what is now visible, and it ignores a raise from a module that is not
+  active. Throughput is the strip's third element and is the **shell's**: its 1 s timer never stops,
+  because `SpiceTraffic.BytesTransferred` and `NbdServer.TotalBytesServed` keep climbing from
+  consoles and media streams whichever module is on screen.
+- **`Deactivate` exists so a hidden module costs nothing.** It stops every timer and makes the
+  module ignore host lifecycle events; `ActivateAsync` refreshes immediately, so nothing is stale by
+  the time it is visible. The **event tails themselves keep running**, though (`virsh event --loop`,
+  `docker events`): each holds its own SSH connection, and reconnecting one on every module switch
+  would cost far more than dropping the events. Host capabilities are probed on the first activation
+  only, except where the answer was "not installed" and re-probing is the user's only way forward
+  (see Containers).
+- **`Shutdown` runs on every module, not just the visible one.** A hidden module still owns the
+  console windows and NBD media streams it opened while it was on screen, and those outlive a module
+  switch by design.
 
 ### Remote file browser icons
 
@@ -168,12 +219,12 @@ avoid ever seeing a keyring unlock prompt, because nothing reads the store at st
 
 ### Host capability checks
 
-`VirshService` probes the host once at login (`VmListWindow.LoadHostCapabilitiesAsync`) and caches the results as properties:
+`VirshService` probes the host once, on the Virtual machines module's first activation (`VirtualMachinesModule.LoadHostCapabilitiesAsync`), and caches the results as properties. `DockerService` does the same for its own module; each module owns the right-hand status-bar slot while it is on screen.
 
 | Property | Check | Used by |
 |---|---|---|
 | `VirtSparseAvailable` | `which virt-sparsify` | Export dialog: disables sparse checkbox |
-| `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VmListWindow` |
+| `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators in `VirtualMachinesModule` |
 
 All checks default to `true`/available on SSH error to avoid false negatives, **except `VirtSparseAvailable`** which defaults to `false` (safe: prevents a silent no-op export).
 
@@ -235,7 +286,7 @@ The Create-VM wizard identifies the install media and picks the guest's disk bus
 - **The last page is a summary**, built fresh on every entry (`BuildSummary`) by reading the pages
   themselves, not the fields `FinishAsync` captures, so going Back and changing something is reflected.
   Its **"Start the VM after creation"** checkbox is on by default and is the only thing that decides
-  whether Finish calls `StartVmAsync`; `VmStarted` reports what happened, and `VmListWindow` opens the
+  whether Finish calls `StartVmAsync`; `VmStarted` reports what happened, and `VirtualMachinesModule` opens the
   console only when it is true, because a defined-but-shut-off VM has no console to connect to.
 - **The OS dropdown is the source of truth**, not the ISO: `CreateVmWizard.GuestProfile()` reads the
   selection and only falls back to the detected family while it still says "generic". Detection
@@ -504,7 +555,7 @@ reboots, and libvirt refuses `startupPolicy` on network sources (see `AttachNetw
 that died with the VirtDeck session would leave a domain that will not start at all. `VirshService.WriteFile`
 uploads it with the same base64 idiom as the rest of the host file access, chunked because the payload
 rides on a command line. It lands at `/var/lib/libvirt/images/<vm>-unattend.iso`; `UnattendMedia` owns
-that naming rule, and `VmListWindow`'s delete path uses `UnattendMedia.IsAnswerIso` to offer it for
+that naming rule, and `VirtualMachinesModule`'s delete path uses `UnattendMedia.IsAnswerIso` to offer it for
 deletion alongside the disk images. It is the one CD-ROM `DeleteVmDialog` will delete, because it is
 the one VirtDeck generated.
 
@@ -671,6 +722,357 @@ guest only needs a USB controller + the device's normal driver.
   picker says why. Reliability: bulk/HID/mass-storage solid over the tunnel; isochronous
   (webcams/audio) is a known weak spot on both platforms. Pin a known-good `libusb-1.0.dll`
   (virt-viewer 10.x; v11's regressed redirection).
+
+## Containers
+
+`ContainersModule` lists what `docker ps --all` reports on the host, creates and edits containers
+through `Views/Containers/ContainerEditWindow`, can start, stop, restart and remove what it lists,
+and can read one container's log in `Views/Containers/ContainerLogsWindow` or open a shell in one
+in `Views/Containers/ContainerConsoleWindow`. Images, volumes and
+networks as objects of their own are not here yet; the module seam and the create path are the point
+of these passes, not feature parity with Portainer.
+
+- **`Services/DockerService` is a sibling of `VirshService`, not a layer over it**, and is written in
+  the same idioms: a `SshConnectionManager` in the constructor, a cached list plus a `ContainersChanged`
+  event, `Task.Run` around the blocking SSH calls, queries that swallow and answer empty while
+  mutators throw, and `SpiceLog.Log("[docker] ...")` for diagnostics.
+- **Always `sudo docker`.** The login user may or may not be in the `docker` group, VirtDeck already
+  holds a sudo password because `virsh` needs one, and `RunSudoCommand` is the same call either way.
+  One privileged path beats probing for an unprivileged one and carrying both.
+- **The listing is one round-trip, base64'd like `FetchAllVms`.** `docker ps --all --no-trunc --format`
+  with a Go template is nothing but braces, dots and quotes, so it goes through
+  `echo <b64> | base64 -d | bash` for the same reason the VM listing does. The separators are **real
+  tab characters**, not docker's own `\t` escape, so nothing depends on how the CLI expands a format
+  string. `{{.State}}` needs docker 20.10 or newer; on anything older the command fails outright and
+  the message reaches the status bar, which beats a state column that quietly says nothing.
+- **Uptime is ticked client-side, so the script has to fetch a start time `docker ps` will not give
+  it.** `{{.Status}}` is a rendered phrase ("Up 3 hours"), not a number, so the same script adds one
+  **batched** `docker inspect` over the running containers, never one per row: per-VM round-trips
+  were the VM list's original latency problem and this is the same trap. It emits **elapsed seconds**
+  rather than the RFC3339 timestamp, again matching the VM script, so host/client clock skew never
+  enters the number; `ContainerInfo.StartedAtUtc` and `ContainerRow.TickUptime` are then copies of
+  their `VmInfo`/`VmRow` counterparts. Two record kinds therefore come back, tagged `c` and `u` in
+  the first field. The uptime half is **fenced off from the exit status**, so a host whose `date`
+  cannot parse docker's timestamps still gets its list with the column blank, and docker's own
+  phrase survives as the tooltip on the state cell, which is where the exit code of a stopped
+  container still reads.
+- **The list refreshes itself the way the VM list does**, so the toolbar holds only "New container"
+  and there is still no Refresh button: a 30 s poll as the safety net, and `docker events` tailed on its own SSH connection as the fast path,
+  debounced 400 ms because one `docker run` fires create, start and more. The filter list is not
+  cosmetic: unfiltered, `type=container` also carries `exec_*` for every `docker exec` and a
+  `health_status` per health-check interval per container, which on a host running health-checked
+  containers would be a refresh treadmill. One deliberate difference from the libvirt tail beside it:
+  **no `stdbuf -oL`**. That exists to stop virsh block-buffering through libc stdio, and the docker
+  CLI is Go, whose `os.Stdout` is unbuffered; measured, `docker events` already arrives line by line
+  through a pipe, so stdbuf would have nothing to act on.
+- **Actions address a container by id, never by name.** A name is the user's own string and may hold
+  anything; the id is checked against `^[0-9a-fA-F]{12,64}$` before it is interpolated into a command,
+  the same guard `VirshService.DefineVmShell` applies to its untrusted tokens. The list also merges by
+  id, so a refresh keeps the selection.
+- **Absent docker is a stated answer, not an empty list.** `DockerAvailable` defaults **false** (unlike
+  the KVM probes, which default available to avoid a false negative), because here the safe default is
+  the one that explains itself: the status bar says "docker not installed", the list carries a centred
+  message saying so, and every command is disabled rather than hidden. Nothing polls or tails a
+  host with no docker on it, and because there is no Refresh button, **every re-entry to the module
+  re-probes** while the answer is no, so installing docker mid-session is not a dead end.
+
+### Creating and editing a container
+
+Unlike VMs, where `CreateVmWizard` and `VmEditWindow` are separate screens, containers get **one**
+window for both, `Views/Containers/ContainerEditWindow`: pages on the left in the `UnattendWindow`
+idiom (General, Volumes, Network, Environment, Devices), and the same tab walk over `IContainerTab`,
+so the window never names a page and adding one is a `TabItem` plus a `UserControl`. Both of that
+interface's invariants carry over unchanged, and where two pages constrain each other the resolution
+belongs in `DockerService.BuildCreateArgv`, not in `Apply` order.
+
+- **One window because a container is not editable.** Docker fixes the image, mounts, network,
+  ports, environment and devices at creation; `docker update` reaches only resource limits and the
+  restart policy. So editing *is* creating, with an old container in the way, and two screens would
+  be two shapes over one operation. `ContainerSpec` is the flat mutable model both directions use,
+  for the same reason `UnattendConfig` is flat: it is edited keystroke by keystroke and has to be
+  allowed to be invalid.
+- **Save replaces, and the order is what makes that safe.** `DockerService.SaveAsync` stops the old
+  container, **renames it out of the way**, creates the new one under the wanted name, and only then
+  removes the old; a rejected `docker create` renames the old back and restarts it if it was running.
+  The obvious order (stop, remove, create) leaves the user with nothing at all when docker refuses
+  the new container, which it does for something as ordinary as a host port somebody else already
+  holds. `docker create` plus a separate `docker start` rather than `docker run -d`, so the "start
+  primary button's "and start" is a real branch. No `-v` on the `docker rm`, so named volumes outlive
+  the container that mounted them, and the confirmation says so.
+- **The window ends in three buttons, not two.** Cancel, Save, and a primary that also runs the
+  container ("Save and start" on a new one, "Save and restart" on an existing one, because saving
+  replaced it). Saving without running is the second-most likely thing to want, so it is a button
+  rather than a check box somebody has to find on the General page, and which button was pressed is
+  the only thing that decides it. The replace confirmation is keyed on there **being** an existing
+  container, not on which button was pressed: a plain Save replaces it just as thoroughly, while a
+  new container has nothing to replace and so asks nothing.
+- **A user string never reaches the shell by interpolation.** Every command above this feature took
+  no argument or took an id `IdRegex` had already vetted; `docker create` is the first that has to
+  carry a name, an image reference, an environment value and a bind path. `RunSudoCommand` wraps
+  whatever it is given in a single-quoted `bash -c`, so building that by interpolation would be one
+  apostrophe from a broken command and one `$(...)` from a worse one. `DockerService.ArgvScript`
+  therefore builds the argv in C#, joins it **NUL-separated**, base64s the blob and rebuilds a bash
+  array on the host: base64 is `[A-Za-z0-9+/=]` and survives the quote rewrap untouched, and NUL is
+  the one byte an argv member cannot contain. `read -r -d ''` rather than `mapfile -d ''`, so nothing
+  depends on the host's bash being 4.4 or newer.
+- **The pull is written out longhand for a reason.** `RunSudoCommandStreaming` neither escapes its
+  argument nor wraps it in `bash -c`, unlike `RunSudoCommand`, so `Pull` spells the wrapper out
+  itself. It is worth the streaming call: it opens its own SSH connection, so the container list
+  keeps refreshing behind the dialog while a large image comes down, and docker's own output is what
+  the dialog's status line shows. Pulling only happens when `docker image inspect` says the image is
+  absent, so re-saving a container never re-pulls.
+- **Reading a container back uses `HostConfig.Binds`, not `.Mounts`.** `Binds` is exactly what `-v`
+  put there; `.Mounts` also lists the anonymous volumes the image's own `VOLUME` directive created,
+  which the user never asked for and which `docker create` produces again by itself. Same file,
+  `InspectAsync`, parses one `docker inspect` with `System.Text.Json` rather than a pile of Go
+  templates, because env, mounts, ports and devices are all multi-valued and a tab-separated record
+  cannot carry them. It starts parsing at the first `[`, since `RunSudoCommand` merges stderr in.
+- **The image field is an `AutoCompleteBox`, not a `ComboBox`.** Avalonia's `ComboBox` has no
+  editable mode, and the field has to be both: it lists what the host already has *and* accepts a
+  reference that is not there yet. The volume picker is the opposite case and is a plain `ComboBox`:
+  a volume that does not exist is not a useful thing to type. Either way the window opens before
+  `LoadCatalogAsync` answers, so a picker holds its own value whether or not the catalog ever
+  arrives; `MountRow.RebuildVolumes` is what makes that true for the closed one, by keeping whatever
+  the mount already says among its items.
+- **`DockerCatalog` is what the pickers need, not what docker was asked.** Its device nodes come off
+  the host filesystem (`find /dev`, pseudo terminals dropped, capped, in the same round-trip and the
+  same tagged-record script as the docker listings), because nothing else can say what is plugged
+  into the machine and `/dev/ttyUSB0` typed from memory is how that field goes wrong. The Devices
+  page suggests from it rather than binding to it, since a node can appear after the window opened.
+  Its permissions are three check boxes rather than a box holding `rwm`, which is the closed-set rule
+  the answer-file model already follows and which makes the two ways of writing nonsense (a letter
+  that is not one of the three, and the same letter twice) unrepresentable instead of validated.
+  Leaving the host box then fills the container path in from it (`DeviceRow.MirrorHostPath`), because
+  a device almost always appears inside at the path it has outside; it stops as soon as the container
+  path is one the user typed, the same rule the Create-VM wizard follows when it re-seeds a NIC after
+  the OS changes.
+- **The network decides whether ports exist.** On `host`, `none` or `container:x` there is no
+  namespace to publish into and docker refuses the pair, so the Network page takes the mappings off
+  screen entirely, and `BuildCreateArgv` drops them as well: a container inspected back with both
+  can still be saved. `PortRow` also carries a **host address the page does not show**, because
+  docker can bind a published port to one interface and an edit recreates the container from these
+  rows; dropping the field rather than carrying it would quietly move a port off loopback onto every
+  interface the host has. The mappings themselves are **kept** in the spec under such a network, the way
+  the answer-file window keeps what was typed under an unselected option.
+- **An editable list is a group box with a plus and a minus over it**, IntelliJ's own shape rather
+  than an "Add variable" button on top and a Remove button repeated down every row. Volumes, port
+  mappings, environment variables and devices are four of these in one window, so the strip is a
+  control (`Views/Containers/RowToolbar`) and the wiring is one call (`RowList.Bind`), which is what
+  keeps the glyphs, sizes and disabled rule defined once. `JbIconAdd` and `JbIconRemove` live beside
+  `JbGroupBoxBorder` in `JetBrainsClassic.axaml` and outside its theme dictionaries, for the same
+  reason: a green that means "add" should not change meaning with the theme.
+- **A table is a table wherever it appears.** The heading strip (`#11808080` over a `#22808080`
+  rule, `12,3` padding) and the transparent `JbTableRow` body inside these group boxes are the same
+  two elements the VM and container lists draw in the main window, copied rather than reinvented, so
+  a table in a dialog and a table in the shell read as the same control.
+- **Those lists are `ListBox`es, where the answer-file window's tables are `ItemsControl`s**, and the
+  difference is the minus button. A row there is only ever typed into, so selection would just fight
+  the editors for focus; here one row has to be *pointed at* as well. That brings a trap with it:
+  a `ListBox` selects a row on pointer press, but a `TextBox` marks the press handled, so clicking
+  into a cell would leave the minus button aimed at whatever was selected before. `RowList.Bind`
+  therefore selects a row when **anything inside it takes focus**, which is the honest signal and the
+  one thing that makes a selection-based Remove safe on a row full of text boxes.
+- **A typed-into table needs `JbFormRow`, not `JbTableRow`.** A selector is one tab stop by design,
+  which is right for a list you pick from and wrong for a grid of text boxes, so the derived theme
+  stops the row being a navigation boundary (`TabNavigation=Continue`) and stops it being a tab stop
+  itself (`IsTabStop=False`), or every row would cost an extra Tab on the way to its first cell. The
+  rows are also **not virtualised**: an unrealised row has no cells for Tab to reach, and these lists
+  are a handful of rows rather than a listing. Because focus drives selection, tabbing through the
+  cells also keeps the minus button pointed at the row being edited.
+- **Validation is per page and selects the page.** `IContainerTab.Validate` answers the first thing
+  the user has to change, and the window walks `TabItem`s rather than their contents so it can select
+  the page that said so. That is what lets a message read as a sentence about a field the reader is
+  looking at instead of one naming a tab.
+
+### Reading a container's log
+
+`ContainerLogsWindow` is opened from the list's right-click menu, one window per container, over
+`DockerService.TailLogsAsync` and `IsRunningAsync`. It is non-modal and outlives a module
+switch, exactly like a `ConsoleWindow`, so `ContainersModule` keeps the handles and closes them in
+`Shutdown` (each tail holds an SSH connection of its own, and the shell disposes the shared one
+straight after).
+
+- **`2>&1`, inside the inner `bash -c`.** `docker logs` demultiplexes the container's two streams
+  back onto the CLI's own stdout and stderr, and `RunSudoCommandStreaming` reads **stdout only**, so
+  without the redirect an image that logs to stderr (which is most of them) shows an empty window.
+  It goes inside the `bash -c` rather than on the `sudo` command so sudo's own stderr is not merged
+  into the log as well. The command is written out longhand for the same reason `Pull` writes one:
+  that call neither escapes its argument nor wraps it in a shell. Nothing is base64'd, because the
+  only thing interpolated is an id `RequireId` has already vetted.
+- **Follow is `--follow` plus the reconnect.** Ticked (the default) streams; unticking cancels the
+  tail and leaves the snapshot on screen; either edge, and Reload, restart from the top. The box is
+  emptied on restart, because a reload replays the same `--tail 1000` history and appending it would
+  show every line twice.
+- **A follow stream ends when the container does, so its clean end is not the end of the window's
+  job.** `docker logs --follow` returns the moment the container stops and does not resume when it
+  starts again, which would make a `docker restart` silently kill the window somebody is reading. So
+  the window then **watches**: `DockerService.ContainerEventReceived` (the module's own events tail,
+  already running before any log window can be opened) debounced 400 ms, with a 30 s poll behind it
+  for a listener that failed to start, and one `IsRunningAsync` probe per look. The reconnect is a
+  plain reload rather than an append with `--tail 0` or `--since`, and that is the whole reason it
+  can be late without losing anything: docker keeps a container's log **across** a restart, so
+  reloading the last 1000 lines shows the shutdown and the new startup in one piece, with no gap and
+  nothing shown twice, and no client clock ever has to be compared against the host's. An **error**
+  (a logging driver that cannot be read) does not start a watch: the reason it refused is still
+  there, and every host event would retry it.
+- **Lines are buffered on the read thread and drained by a 120 ms timer**, never posted one by one:
+  a chatty container emits hundreds a second and a `Dispatcher.UIThread.Post` per line would swamp
+  the UI thread. Each tail's `onLine` closes over its own token, so lines from a tail that has just
+  been replaced (a reload, a reconnect) are dropped instead of landing in the new box. The text is
+  capped at 1 MB, trimmed from the front on a line boundary, since a `TextBox` lays its whole text
+  out with no virtualization.
+- **Cancelling happens off the UI thread.** `RunSudoCommandStreaming` registers a callback that
+  disconnects its `SshClient` inline on whoever calls `Cancel`, so closing a window would otherwise
+  wait on the network. Nothing waits for the reader either; it unwinds on its own.
+
+### Running a command in a container
+
+`ContainerConsoleWindow` is a **real terminal** into `docker exec -it`, opened from the list's
+right-click menu after `ContainerConsoleDialog` asks what to run and as whom. Non-modal, one per
+container, outliving a module switch and closed by `ContainersModule.Shutdown`, exactly like a log
+window. It is the first thing in the app that needs a **bidirectional** channel, and the first that
+needs to understand escape sequences, so both had to be built.
+
+- **The menu item is gated on `running`, not on `IsRunning`.** `ContainerRow.IsRunning` deliberately
+  includes `restarting`, because Stop and Restart are worth offering on a container coming back up;
+  `docker exec` against one simply fails, so `CanExec` is the stricter predicate rather than a
+  loosening of the shared one. Logs, by contrast, have no state gate at all: a stopped container's
+  output is exactly what somebody comes to read.
+- **The image is asked what it has before the dialog opens, not after it is filled in.**
+  `DockerService.FindProgramAsync` walks `ShellCandidates` (`bash`, then `dash`, then `sh`) in one
+  `docker exec` with `command -v` (a POSIX builtin, so busybox answers it too) and the command box
+  starts out holding the full path of whichever it found. So the default is **correct rather than
+  merely likely**, and there is no substitution to explain afterwards; the order is what makes it
+  right, since bash is what muscle memory expects, dash is a real shell on a Debian image without
+  one, and sh is all a busybox image has. The probe **always exits 0**, answering with a path or with
+  nothing, because `RunSudoCommand` turns a non-zero exit into an exception and "this image has none
+  of them" is an answer rather than a failure; docker's own failures do still throw, and a container
+  that stopped between the menu and here says so in its own words. An image with no shell at all is
+  refused here, before a window that could not start is opened.
+- **Only an edited command is re-checked, and then it is checked rather than corrected.** The default
+  came from the host and is known good, so the common path costs no second round-trip; anything the
+  user typed themselves gets one, and a refusal leaves the dialog up with the text still in it, the
+  way `UnattendWindow` stays open when the answer file will not build.
+- **The command is split on whitespace with no quote handling**, and the field says so. That covers
+  what the box is for (`/bin/bash`, `bash -l`, `python3 -i`); implementing half of a shell's word
+  splitting would be worse, because it would work until it silently did not, and the shell being
+  opened is the right place for real quoting. An empty **User** passes no `-u` at all, so the image's
+  own user applies, which is a different thing from asking for root.
+- **`-e TERM=xterm-256color` is not decoration.** For a `-t` exec the daemon puts a bare
+  `TERM=xterm` into the container, and under that a coloured prompt or `htop` falls back to eight
+  colours or none. It has to name the terminal this client actually implements, which is also what
+  `SshPtySession` asks the host for.
+
+#### The PTY, and why the sudo password is not fed blind
+
+`Services/SshPtySession` is `SshClient.CreateShellStream` on a connection of its own (like
+`DownloadFileAsync` and `RunSudoCommandStreaming`, so it never holds `_ioLock`). Nothing existing
+could carry it: `RunSudoCommandStreaming` is line-oriented, stdout-only, and `FeedSudoPassword`
+writes the password and then **closes stdin**, which is the one thing an interactive session cannot
+allow.
+
+- **Nothing is shown until the container is reached.** Getting there means a login shell, so the MOTD,
+  the shell's prompt and sudo's password prompt all arrive first, and a console that opened on those
+  would be showing the plumbing rather than the container. So the session prints a per-session
+  sentinel and **everything ahead of it is buffered and dropped**. The sentinel is printed by a shell
+  *inside* sudo (`sudo -S -p '<marker>' bash -c 'printf "%s\n" "$0"; exec "$@"' '<sentinel>' ...`), so
+  it lands after sudo has authenticated and immediately before the command replaces that shell;
+  printing it before `exec sudo` would be simpler and wrong, because the password prompt would then
+  fall on the far side of the gate and be shown. Its **newline is load-bearing**: stdout is a
+  terminal and therefore line buffered, so a `printf %s` with nothing after it could still be in the
+  buffer when `exec` throws the process image away. The line ending is skipped with the token, in
+  whichever spelling the pty's output processing produced.
+- **A session that dies before the sentinel reports the buffer as its reason.** That is the only
+  account there is of a sudo refusal or a missing shell, and it means the failure path needs no
+  second mechanism. The buffer is capped, oldest-first, because only the tail of an error matters.
+- **The password is written only in answer to sudo's own prompt.** Feeding it blind is safe for a
+  one-shot command, which discards a stdin it is not reading; here stdin is the user's keyboard, so a
+  blind write would type the sudo password into their shell. So `sudo -S -p '<marker>'` is used with
+  a marker generated per session (`Guid`), which cannot collide with an MOTD or with container
+  output and so needs no time limit on the scan. Buffering everything ahead of the sentinel is also
+  what removes the need to withhold a partial marker between reads: while the gate is shut a token
+  split across two reads is contiguous by the time it is searched for. A **second** sighting means
+  sudo rejected the first answer, and repeating it would only spend the remaining attempts, so the
+  session ends with `CheckSudo`'s own wording. A NOPASSWD host never prints the marker and never sees
+  a byte of the password.
+- **The PTY is requested with `ECHO = 0`.** The line typed at the host's login shell and the password
+  that may follow it are ours, not the user's. It costs them no echo of their own: `docker exec -it`
+  puts the terminal into raw mode itself, and what they see while typing comes from the container's
+  PTY.
+- **An argv, not a command line.** The same rule `DockerService.ArgvScript` states: a shell path and
+  a user name are user text. The vector is rebuilt on the host from a NUL-separated base64 blob and
+  the rebuilding script is itself base64'd, so the only syntax the login shell has to understand is
+  `"$(...)"`. The outer `exec` replaces that login shell, so when the command ends the channel closes
+  rather than dropping the user at a host prompt.
+- **Resize is reflection, and fails soft.** SSH.NET 2024.2.0 exposes no way to resize a `ShellStream`
+  after it is made: the request lives on the channel and `ShellStream` keeps its channel private. So
+  `_channel` is reached by reflection and `SendWindowChangeRequest` invoked on it, under the same
+  rule `X11KeyboardGrab` follows when it digs Avalonia's display connection out of
+  `Window.PlatformImpl`: best effort, never throws, and the fallback is a **stated outcome** rather
+  than an improvisation. Here that outcome is a terminal stuck at the size it opened with, and the
+  failure latches so a drag does not retry it per frame. When it works the SIGWINCH path is real, so
+  `htop` reflows.
+- **Disposal goes to the pool thread**, for the reason `ContainerLogsWindow.StopStream` gives:
+  disconnecting an SSH client waits on the network and closing a window must not. The session is also
+  disposed when it *ends* on its own, because a window left open on a finished shell would otherwise
+  hold a connection for nothing.
+- **A clean exit closes the window; a failure keeps it.** Typing `exit` is how somebody says they are
+  finished, and leaving a dead terminal to be dismissed separately makes them say it twice. This is
+  the opposite of the log window and is deliberate: a log is a fact about the container that resumes
+  when it restarts, while a session is something the user started and ended. A session that ends by
+  *failing* stays on screen, because the reason is the only thing that explains what happened and a
+  window that vanished would take it with it; that is the one case **Reconnect** is for.
+
+#### The emulator
+
+`TerminalScreen` keeps scrollback and screen as **one list**, the screen being its last `Rows`
+entries, which is what makes an ordinary line feed at the bottom a plain append. Scrolling inside a
+`DECSTBM` region rotates within the region instead and feeds no history, because a program that set a
+smaller region is managing its own window and its discarded lines are not history. Mutations bump a
+single `Revision` rather than marking lines dirty, because Avalonia redraws a control whole, so
+per-line dirt would buy nothing; the control's 16 ms pump compares it and invalidates only when it
+moved, which is what keeps a flood of output from posting to the dispatcher thousands of times a
+second.
+
+What is implemented is what `vim`, `htop`, `top` and `less` use: the C0 set, `DECSC`/`DECRC`, `RI`,
+the cursor and erase and insert/delete families, `DECSTBM`, `SGR` including `38`/`48` in both the
+`;5;n` and `;2;r;g;b` spellings **and their colon forms**, `DSR`, and the DEC private modes for
+application cursor keys, autowrap, cursor visibility, bracketed paste and the alternate screen.
+**Everything else is consumed, never printed**, so the failure mode for something exotic is a missing
+effect and not a screen full of `[38;5;`. Deliberately absent, each with a comment saying so: mouse
+reporting (the modes are swallowed so a program does not also see them refused; everything these
+programs offer the mouse they also offer the keyboard), sixel, double-width lines, and character sets
+beyond consuming the selector.
+
+Three things in this area were bugs waiting to happen and are written the way they are on purpose:
+
+- **The deferred wrap flag.** Writing to the last column leaves the cursor there and wraps on the
+  *next* printable character. Getting it wrong makes a line drawn exactly to the right-hand edge
+  scroll a blank line, which is visible in anything that draws a box.
+- **A decoded scalar is validated before it reaches a cell.** A truncated or over-long UTF-8 sequence
+  can decode to a lone surrogate or past U+10FFFF, and both make `char.ConvertFromUtf32` throw in the
+  renderer, on the UI thread, with the whole window between it and any catch of ours.
+- **Parser replies leave the screen lock before they hit the network.** `Respond` fires inside
+  `Feed`, which runs under `SyncRoot`, and sending goes to a blocking channel write; the control
+  queues them and sends after the lock.
+
+Rendering is **runs of cells sharing a style**, not cell by cell, which would mean eighty
+`FormattedText` objects per row per frame. Runs of spaces are skipped entirely, and a full screen is
+mostly those. The cell size comes from measuring a hundred `M`s and dividing, because a monospace
+face still rounds each advance and measuring one drifts a whole cell across an 80-column line. The
+sixteen ANSI colours and the two defaults are **themed** in `JetBrainsClassic.axaml` so the terminal
+reads on Darcula and IntelliJ Light alike; the other 240 are arithmetic (a 6x6x6 cube and 24 greys)
+and are absolute values rather than a matter of taste, so they are not.
+
+The window registers its keyboard handler **tunnelled and `handledEventsToo`**, exactly as
+`ConsoleWindow` does for the guest: without it Tab moves focus to the footer buttons and the arrow
+keys drive them, so neither ever reaches the container. It forwards only while the terminal has
+focus, so the buttons stay usable, and no button on that bar carries `IsDefault` or `IsCancel`
+because Enter and Escape belong to the container. `Ctrl+Shift+C`/`V` are the two chords the window
+keeps, because Ctrl+C already means interrupt and that is the more important of the two. Printable
+text arrives through `TextInput`, so dead keys, compose and any layout work with no table to
+maintain; `TextInput` carries no modifiers, so the key press that preceded it is what says whether it
+was a chord and was already sent.
 
 ## Conventions
 

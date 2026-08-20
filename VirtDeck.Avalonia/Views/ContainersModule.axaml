@@ -1,0 +1,88 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.ContainersModule"
+             x:DataType="vm:ContainerRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by the header and every row, so they stay aligned. -->
+    <x:Double x:Key="ColName">220</x:Double>
+    <x:Double x:Key="ColImage">240</x:Double>
+    <x:Double x:Key="ColState">90</x:Double>
+    <x:Double x:Key="ColUptime">100</x:Double>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- Only the command that needs no selection lives here, exactly as in the VM list; everything
+         per-container is on the list's right-click menu. There is still no Refresh button, because
+         `docker events` refreshes the list on its own. -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Name="NewContainerButton" Content="New container…" Classes="accent" />
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <StackPanel Orientation="Horizontal">
+        <!-- Padding (not Margin) indents the heading over the rows' state dot without widening the column. -->
+        <TextBlock Text="Name"   Width="{StaticResource ColName}"   FontWeight="SemiBold" Padding="14,0,0,0" />
+        <TextBlock Text="Image"  Width="{StaticResource ColImage}"  FontWeight="SemiBold" />
+        <TextBlock Text="State"  Width="{StaticResource ColState}"  FontWeight="SemiBold" />
+        <TextBlock Text="Uptime" Width="{StaticResource ColUptime}" FontWeight="SemiBold" />
+        <TextBlock Text="Ports" FontWeight="SemiBold" />
+      </StackPanel>
+    </Border>
+
+    <Panel>
+      <ListBox Name="ContainerList" SelectionMode="Multiple" Background="Transparent"
+               Padding="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ContextMenu>
+          <ContextMenu Name="ContainerMenu">
+            <MenuItem Name="MenuEdit" Header="Edit…" />
+            <MenuItem Name="MenuLogs" Header="Logs…" />
+            <MenuItem Name="MenuConsole" Header="Console…" />
+            <Separator />
+            <MenuItem Name="MenuStart" Header="Start" />
+            <MenuItem Name="MenuStop" Header="Stop" />
+            <MenuItem Name="MenuRestart" Header="Restart" />
+            <Separator />
+            <MenuItem Name="MenuRemove" Header="Remove…" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:ContainerRow">
+            <StackPanel Orientation="Horizontal">
+              <!-- Same 9px state dot as the VM list, sharing the same three colours. -->
+              <DockPanel Width="{StaticResource ColName}">
+                <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                         VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+              <TextBlock Text="{Binding Image}"  Width="{StaticResource ColImage}"
+                         TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Image}" />
+              <!-- Docker's own rendered phrase ("Exited (0) 2 days ago") is the tooltip: the
+                   Uptime column replaces it for a running container, but the exit code of a
+                   stopped one is worth keeping one hover away. -->
+              <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}"
+                         ToolTip.Tip="{Binding Status}" />
+              <TextBlock Text="{Binding Uptime}" Width="{StaticResource ColUptime}" Opacity="0.75" />
+              <TextBlock Text="{Binding Ports}" Opacity="0.75"
+                         TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Ports}" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <!-- Why the list is empty, so an unusable module never just looks broken. Hidden as soon as
+           there is a row to show. -->
+      <TextBlock Name="EmptyText" Opacity="0.6" IsVisible="False"
+                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+
+  </DockPanel>
+</UserControl>

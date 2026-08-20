@@ -1,9 +1,6 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
-using SpiceClient;
 using VirtDeck.Imaging;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -11,10 +8,15 @@ using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views;
 
-public partial class VmListWindow : Window
+/// <summary>
+/// The Virtual machines module: the VM list, the Networks tab and the details sidebar, plus every
+/// per-VM command. Owns the consoles it opens and the host media streams they need; the shell owns
+/// the SSH connection and the status bar.
+/// </summary>
+public partial class VirtualMachinesModule : UserControl, IModule
 {
-    private readonly SshConnectionManager _ssh;
-    private readonly VirshService _virsh;
+    private SshConnectionManager? _ssh;
+    private VirshService? _virshOrNull;
 
     private readonly ObservableCollection<VmRow> _rows = new();
     private readonly Dictionary<string, VmRow> _byName = new();
@@ -30,20 +32,14 @@ public partial class VmListWindow : Window
     private readonly DispatcherTimer _eventDebounce;
 
     private int _previewGen;       // bumped on selection change; drops stale background results
-    private long _lastBytes;       // total tunnel bytes at the last throughput sample
-    private long _lastSampleTs;    // Stopwatch timestamp at the last sample
     private bool _refreshing;
+    private bool _active;          // false while another module is on screen: no polling, no events
+    private bool _capsProbed;      // host capabilities are a one-off, not per activation
 
-    /// <summary>Design-time only; the app always constructs this with a live SSH connection.</summary>
-    public VmListWindow() : this(new SshConnectionManager()) { }
-
-    public VmListWindow(SshConnectionManager ssh)
+    public VirtualMachinesModule()
     {
-        _ssh = ssh;
         InitializeComponent();
 
-        _virsh = new VirshService(ssh);
-        Title = $"VirtDeck - {ssh.Host}";
         VmList.ItemsSource = _rows;
         NetworkList.ItemsSource = _netRows;
 
@@ -65,7 +61,6 @@ public partial class VmListWindow : Window
         {
             foreach (var r in _rows) r.TickUptime();
             Details.TickUptime();
-            UpdateThroughput();
         });
 
         // Debounce the SSH-heavy detail fetch so arrowing down the list doesn't spam the host.
@@ -76,26 +71,14 @@ public partial class VmListWindow : Window
         _eventDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _eventDebounce.Tick += async (_, _) => { _eventDebounce.Stop(); await RefreshAsync(); };
 
-        _virsh.DomainEventReceived += OnDomainEvent;
-
-        Opened += async (_, _) =>
-        {
-            _lastBytes = TotalTunnelBytes();
-            _lastSampleTs = Stopwatch.GetTimestamp();
-            _refreshTimer.Start();
-            _tickTimer.Start();
-            await RefreshAsync();
-            await LoadHostCapabilitiesAsync();
-            try { _virsh.StartEventListener(); }
-            catch { /* events are an optimisation; the 30s poll still refreshes */ }
-        };
-
-        Closed += (_, _) => Shutdown();
         UpdateButtons();
     }
 
-    /// <summary>The service is shared with every console window this list opened.</summary>
-    public VirshService Virsh => _virsh;
+    /// <summary>The service is shared with every console window this module opened.</summary>
+    public VirshService Virsh => _virshOrNull ?? throw new InvalidOperationException("Module not attached.");
+
+    /// <summary>Dialogs need a Window; a UserControl only knows the tree it is in.</summary>
+    private Window Owner => (Window)TopLevel.GetTopLevel(this)!;
 
     private VmRow? Selected => SelectedRows.Count == 1 ? SelectedRows[0] : null;
 
@@ -104,6 +87,76 @@ public partial class VmListWindow : Window
 
     private List<NetworkRow> SelectedNetworks =>
         NetworkList.SelectedItems?.Cast<NetworkRow>().ToList() ?? new List<NetworkRow>();
+
+    // ---- IModule ------------------------------------------------------
+
+    public string Status { get; private set; } = "";
+    public string HostCapabilities { get; private set; } = "";
+    public event Action? StatusChanged;
+
+    private void SetStatus(string text)
+    {
+        Status = text;
+        StatusChanged?.Invoke();
+    }
+
+    private void SetCaps(string text)
+    {
+        HostCapabilities = text;
+        StatusChanged?.Invoke();
+    }
+
+    public void Attach(SshConnectionManager ssh)
+    {
+        _ssh = ssh;
+        _virshOrNull = new VirshService(ssh);
+        _virshOrNull.DomainEventReceived += OnDomainEvent;
+    }
+
+    public async Task ActivateAsync()
+    {
+        if (_virshOrNull is null) return; // design-time, or the shell never attached
+        _active = true;
+        _refreshTimer.Start();
+        _tickTimer.Start();
+
+        await RefreshAsync();
+
+        if (_capsProbed) return;
+        _capsProbed = true;
+        await LoadHostCapabilitiesAsync();
+        // The listener holds its own SSH connection for the session. It is deliberately not
+        // stopped on Deactivate: reconnecting `virsh event --loop` on every module switch would
+        // cost more than ignoring the events while hidden.
+        try { Virsh.StartEventListener(); }
+        catch { /* events are an optimisation; the 30s poll still refreshes */ }
+    }
+
+    public void Deactivate()
+    {
+        _active = false;
+        _refreshTimer.Stop();
+        _tickTimer.Stop();
+        _previewTimer.Stop();
+        _eventDebounce.Stop();
+    }
+
+    public void Shutdown()
+    {
+        Deactivate();
+
+        if (_virshOrNull is { } virsh)
+        {
+            virsh.DomainEventReceived -= OnDomainEvent;
+            try { virsh.StopEventListener(); } catch { /* ignore */ }
+        }
+
+        foreach (var console in _consoles.Values.ToList()) console.Close();
+        _consoles.Clear();
+
+        foreach (var s in _mediaServers) s.Dispose();
+        _mediaServers.Clear();
+    }
 
     // ---- Wiring -------------------------------------------------------
 
@@ -127,32 +180,33 @@ public partial class VmListWindow : Window
     private void WireNetworkMenu()
     {
         MenuNetActivate.Click += async (_, _) =>
-            await RunNetActionAsync("Activate Network", n => !n.IsActive, n => _virsh.StartNetwork(n.Name));
+            await RunNetActionAsync("Activate Network", n => !n.IsActive, n => Virsh.StartNetwork(n.Name));
         MenuNetDeactivate.Click += async (_, _) =>
-            await RunNetActionAsync("Deactivate Network", n => n.IsActive, n => _virsh.StopNetwork(n.Name));
+            await RunNetActionAsync("Deactivate Network", n => n.IsActive, n => Virsh.StopNetwork(n.Name));
         MenuNetAutostartOn.Click += async (_, _) =>
-            await RunNetActionAsync("Autostart Network", n => n.Autostart == "No", n => _virsh.SetNetworkAutostart(n.Name, true));
+            await RunNetActionAsync("Autostart Network", n => n.Autostart == "No", n => Virsh.SetNetworkAutostart(n.Name, true));
         MenuNetAutostartOff.Click += async (_, _) =>
-            await RunNetActionAsync("Autostart Network", n => n.Autostart == "Yes", n => _virsh.SetNetworkAutostart(n.Name, false));
+            await RunNetActionAsync("Autostart Network", n => n.Autostart == "Yes", n => Virsh.SetNetworkAutostart(n.Name, false));
     }
 
     // ---- Refresh ------------------------------------------------------
 
     private void OnDomainEvent() => Dispatcher.UIThread.Post(() =>
     {
+        if (!_active) return; // hidden module: the next activation refreshes anyway
         _eventDebounce.Stop();
         _eventDebounce.Start();
     });
 
     private async Task RefreshAsync()
     {
-        if (_refreshing) return;
+        if (_virshOrNull is null || _refreshing) return;
         _refreshing = true;
         try
         {
-            await Task.WhenAll(_virsh.RefreshAsync(), RefreshNetworksAsync());
-            Merge(_virsh.Vms.Values);
-            StatusText.Text = $"{_rows.Count} VM{(_rows.Count == 1 ? "" : "s")}";
+            await Task.WhenAll(Virsh.RefreshAsync(), RefreshNetworksAsync());
+            Merge(Virsh.Vms.Values);
+            SetStatus($"{_rows.Count} VM{(_rows.Count == 1 ? "" : "s")}");
 
             // State may have changed; re-capture the preview for the still-selected VM. This is
             // what gives the screenshot thumbnail its periodic refresh.
@@ -165,7 +219,7 @@ public partial class VmListWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Refresh failed: {ex.Message}";
+            SetStatus($"Refresh failed: {ex.Message}");
         }
         finally
         {
@@ -207,12 +261,12 @@ public partial class VmListWindow : Window
     {
         try
         {
-            var nets = await Task.Run(() => _virsh.ListNetworksInfo());
+            var nets = await Task.Run(() => Virsh.ListNetworksInfo());
             MergeNetworks(nets);
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Networks error: {ex.Message}";
+            SetStatus($"Networks error: {ex.Message}");
         }
     }
 
@@ -247,8 +301,8 @@ public partial class VmListWindow : Window
         {
             var (cpu, bios, libvirt) = await Task.Run(() =>
             {
-                var caps = _virsh.CheckHostCapabilities();
-                _virsh.CheckVirtSparseAvailable();
+                var caps = Virsh.CheckHostCapabilities();
+                Virsh.CheckVirtSparseAvailable();
                 return caps;
             });
 
@@ -257,11 +311,11 @@ public partial class VmListWindow : Window
             if (!bios) parts.Add("/dev/kvm missing");
             if (!string.Equals(libvirt, "active", StringComparison.OrdinalIgnoreCase))
                 parts.Add($"libvirtd {libvirt}");
-            HostCapsText.Text = parts.Count == 0 ? "KVM ready" : string.Join(" · ", parts);
+            SetCaps(parts.Count == 0 ? "KVM ready" : string.Join(" · ", parts));
         }
         catch
         {
-            HostCapsText.Text = "";
+            SetCaps("");
         }
     }
 
@@ -281,7 +335,7 @@ public partial class VmListWindow : Window
     /// <summary>Fetches the full config (+ a screenshot if running) for the selected VM, off the UI thread.</summary>
     private async Task LoadSelectedDetailsAsync()
     {
-        if (Selected is not { } row) return;
+        if (_virshOrNull is null || Selected is not { } row) return;
         int gen = _previewGen;
         string name = row.Name;
         bool running = row.IsRunning;
@@ -290,13 +344,13 @@ public partial class VmListWindow : Window
         PpmImage.Bgra? shot = null;
         await Task.Run(() =>
         {
-            try { cfg = _virsh.GetVmConfig(name); } catch { /* sidebar keeps its instant fields */ }
+            try { cfg = Virsh.GetVmConfig(name); } catch { /* sidebar keeps its instant fields */ }
             if (!running) return;
             try
             {
                 // PPM on older hosts, PNG on newer QEMU; ScreenshotImage handles both. Anything
                 // it can't read shows the placeholder and logs why.
-                var img = _virsh.CaptureScreenshotPpm(name);
+                var img = Virsh.CaptureScreenshotPpm(name);
                 if (img != null) shot = ScreenshotImage.Decode(img);
             }
             catch { /* placeholder shown */ }
@@ -306,34 +360,6 @@ public partial class VmListWindow : Window
         if (cfg != null) Details.SetConfig(cfg);
         Details.SetPreview(shot);       // null (off VM or capture failed) → placeholder
     }
-
-    // ---- Throughput ----------------------------------------------------
-
-    // All bytes that ride the SSH tunnel: management channel + forwarded SPICE console sockets +
-    // reverse-forwarded media streaming. Each path is a distinct socket, so there's no double-count.
-    private long TotalTunnelBytes() =>
-        _ssh.BytesReceived + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed;
-
-    private void UpdateThroughput()
-    {
-        long now = Stopwatch.GetTimestamp();
-        long bytes = TotalTunnelBytes();
-        double seconds = (now - _lastSampleTs) / (double)Stopwatch.Frequency;
-        _lastSampleTs = now;
-        if (seconds <= 0) return;
-
-        long bps = (long)((bytes - _lastBytes) / seconds);
-        _lastBytes = bytes;
-        ThroughputText.Text = FormatRate(bps);
-    }
-
-    private static string FormatRate(long bps) => bps switch
-    {
-        >= 1024L * 1024 * 1024 => $"{bps / (1024.0 * 1024 * 1024):0.#} GB/s",
-        >= 1024 * 1024         => $"{bps / (1024.0 * 1024):0.#} MB/s",
-        >= 1024                => $"{bps / 1024.0:0.#} KB/s",
-        _                      => $"{bps} B/s",
-    };
 
     // ---- Actions ------------------------------------------------------
 
@@ -373,24 +399,24 @@ public partial class VmListWindow : Window
     }
 
     private Task StartSelectedAsync() =>
-        RunVmActionAsync("Starting", r => r.State == "shut off", v => _virsh.StartVmAsync(v));
+        RunVmActionAsync("Starting", r => r.State == "shut off", v => Virsh.StartVmAsync(v));
 
     private Task StopSelectedAsync() =>
-        RunVmActionAsync("Shutting down", r => r.IsRunning, v => _virsh.StopVmAsync(v));
+        RunVmActionAsync("Shutting down", r => r.IsRunning, v => Virsh.StopVmAsync(v));
 
     private Task RebootSelectedAsync() =>
-        RunVmActionAsync("Rebooting", r => r.IsRunning, v => _virsh.RebootVmAsync(v));
+        RunVmActionAsync("Rebooting", r => r.IsRunning, v => Virsh.RebootVmAsync(v));
 
     private async Task ForceStopSelectedAsync()
     {
         var targets = SelectedRows.Where(r => r.IsRunning).Select(r => r.Name).ToList();
         if (targets.Count == 0) return;
         var what = targets.Count == 1 ? $"\"{targets[0]}\"" : $"{targets.Count} VMs";
-        if (!await MessageDialog.Confirm(this, "Force off",
+        if (!await MessageDialog.Confirm(Owner, "Force off",
                 $"Force off {what}?\n\nThis is equivalent to pulling the power cord; " +
                 "unsaved work in the guest is lost."))
             return;
-        await RunVmActionAsync("Forcing off", r => r.IsRunning, v => _virsh.ForceStopVmAsync(v));
+        await RunVmActionAsync("Forcing off", r => r.IsRunning, v => Virsh.ForceStopVmAsync(v));
     }
 
     /// <summary>
@@ -406,13 +432,13 @@ public partial class VmListWindow : Window
         int n = 0;
         foreach (var name in targets)
         {
-            StatusText.Text = $"{verb} {name} ({++n}/{targets.Count})…";
+            SetStatus($"{verb} {name} ({++n}/{targets.Count})…");
             try { await action(name); }
             catch (Exception ex) { errors.Add($"{name}: {ex.Message}"); }
         }
         await RefreshAsync(); // reflect the new state immediately, don't wait for the 30s tick
         if (errors.Count > 0)
-            await MessageDialog.Info(this, verb, string.Join("\n", errors));
+            await MessageDialog.Info(Owner, verb, string.Join("\n", errors));
     }
 
     /// <summary>
@@ -436,13 +462,14 @@ public partial class VmListWindow : Window
         await RefreshNetworksAsync();
         UpdateNetworkMenu();
         if (errors.Count > 0)
-            await MessageDialog.Info(this, title, string.Join("\n", errors));
+            await MessageDialog.Info(Owner, title, string.Join("\n", errors));
     }
 
     private async Task NewVmAsync()
     {
-        var wizard = new CreateVmWizard(_virsh, _ssh);
-        if (await wizard.ShowDialog<bool?>(this) is not true)
+        if (_ssh is null) return;
+        var wizard = new CreateVmWizard(Virsh, _ssh);
+        if (await wizard.ShowDialog<bool?>(Owner) is not true)
         {
             foreach (var s in wizard.StreamingServers) s.Dispose(); // cancelled: tear down any streams
             return;
@@ -457,10 +484,10 @@ public partial class VmListWindow : Window
 
     private async Task EditSelectedAsync()
     {
-        if (Selected is not { } row) return;
+        if (_ssh is null || Selected is not { } row) return;
         bool readOnly = row.State != "shut off"; // can only change config while shut off
-        var editor = new VmEditWindow(_virsh, _ssh, row.Name, readOnly);
-        if (await editor.ShowDialog<bool?>(this) is true)
+        var editor = new VmEditWindow(Virsh, _ssh, row.Name, readOnly);
+        if (await editor.ShowDialog<bool?>(Owner) is true)
         {
             _mediaServers.AddRange(editor.StreamingServers);
             await RefreshAsync();
@@ -473,8 +500,8 @@ public partial class VmListWindow : Window
 
     private async Task ExportSelectedAsync()
     {
-        if (Selected is not { } row) return;
-        await new ExportVmDialog(_ssh, _virsh, row.Name, row.IsRunning).ShowDialog(this);
+        if (_ssh is null || Selected is not { } row) return;
+        await new ExportVmDialog(_ssh, Virsh, row.Name, row.IsRunning).ShowDialog(Owner);
     }
 
     private async Task DeleteSelectedAsync()
@@ -492,7 +519,7 @@ public partial class VmListWindow : Window
         {
             foreach (var name in vmNames)
             {
-                var cfg = await Task.Run(() => _virsh.GetVmConfig(name));
+                var cfg = await Task.Run(() => Virsh.GetVmConfig(name));
                 // ISOs are the user's own media and are never offered, with one exception: an answer
                 // disc VirtDeck generated for this VM is ours, and leaving it behind would leave an
                 // orphan in the image directory.
@@ -506,12 +533,12 @@ public partial class VmListWindow : Window
         }
         catch (Exception ex)
         {
-            await MessageDialog.Info(this, "Delete VM", $"Couldn't read the VMs' disks:\n{ex.Message}");
+            await MessageDialog.Info(Owner, "Delete VM", $"Couldn't read the VMs' disks:\n{ex.Message}");
             return;
         }
 
         var dlg = new DeleteVmDialog(vmNames, fileDisks, owners);
-        if (await dlg.ShowDialog<bool?>(this) is not true) return;
+        if (await dlg.ShowDialog<bool?>(Owner) is not true) return;
         var checkedIdx = dlg.CheckedDiskIndices;
 
         var undefineErrors = new List<string>();
@@ -521,23 +548,23 @@ public partial class VmListWindow : Window
         {
             foreach (var name in vmNames)
             {
-                try { _virsh.UndefineVm(name); }
+                try { Virsh.UndefineVm(name); }
                 catch (Exception ex) { undefineErrors.Add($"{name}: {ex.Message}"); failed.Add(name); }
             }
             // Don't delete the disk images of a VM that failed to undefine; it still exists.
             foreach (var i in checkedIdx)
             {
                 if (failed.Contains(owners[i])) continue;
-                try { _virsh.DeleteFile(fileDisks[i].Source); }
+                try { Virsh.DeleteFile(fileDisks[i].Source); }
                 catch (Exception ex) { fileErrors.Add($"{fileDisks[i].Source}: {ex.Message}"); }
             }
         });
 
         if (undefineErrors.Count > 0)
-            await MessageDialog.Info(this, "Delete VM",
+            await MessageDialog.Info(Owner, "Delete VM",
                 "Some VMs could not be deleted:\n\n" + string.Join("\n", undefineErrors));
         if (fileErrors.Count > 0)
-            await MessageDialog.Info(this, "Delete VM",
+            await MessageDialog.Info(Owner, "Delete VM",
                 "Some files could not be removed:\n\n" + string.Join("\n", fileErrors));
 
         await RefreshAsync();
@@ -551,6 +578,7 @@ public partial class VmListWindow : Window
     /// <summary>Opens the console for a VM, or focuses its existing window if one is already open.</summary>
     private void OpenConsoleFor(string vmName)
     {
+        if (_ssh is null) return;
         if (_consoles.TryGetValue(vmName, out var existing))
         {
             if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
@@ -558,7 +586,7 @@ public partial class VmListWindow : Window
             return;
         }
 
-        var console = new ConsoleWindow(_ssh, _virsh, vmName);
+        var console = new ConsoleWindow(_ssh, Virsh, vmName);
         _consoles[vmName] = console;
         console.Closed += (_, _) =>
         {
@@ -566,29 +594,5 @@ public partial class VmListWindow : Window
                 _consoles.Remove(vmName);
         };
         console.Show();
-    }
-
-    // ---- Teardown -----------------------------------------------------
-
-    private void Shutdown()
-    {
-        _refreshTimer.Stop();
-        _tickTimer.Stop();
-        _previewTimer.Stop();
-        _eventDebounce.Stop();
-        _virsh.DomainEventReceived -= OnDomainEvent;
-
-        try { _virsh.StopEventListener(); } catch { /* ignore */ }
-
-        foreach (var console in _consoles.Values.ToList()) console.Close();
-        _consoles.Clear();
-
-        foreach (var s in _mediaServers) s.Dispose();
-        _mediaServers.Clear();
-
-        _ssh.Dispose();
-
-        if (global::Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.Shutdown();
     }
 }

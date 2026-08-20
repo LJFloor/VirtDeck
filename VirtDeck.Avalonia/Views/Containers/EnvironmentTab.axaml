@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.EnvironmentTab">
+
+  <DockPanel Margin="16">
+
+    <TextBlock DockPanel.Dock="Top" Classes="note" Margin="0,0,0,12"
+               Text="These are set in the container's own environment, on top of whatever the image already declares. A value is taken exactly as it is typed, spaces, quotes and all." />
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Environment variables" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="VariableTools" Margin="8,6,8,6" />
+
+        <!-- The same table the main window draws: a heading strip in JbGroupBoxHeader's
+             grey over a rule, and rows on the window's own background. 12px of padding, so
+             the headings sit over the cells rather than beside them, matching JbTableRow. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="220,*" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="Name" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+          </Grid>
+        </Border>
+
+        <!-- No border of its own: the group box already draws one, and the rows are meant to run
+             right up to it. -->
+        <ListBox Name="VariableList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <!-- Not virtualised: an unrealised row has no cells for Tab to reach, and these lists are
+               a handful of rows, never a listing. -->
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="c:EnvRow">
+              <Grid ColumnDefinitions="220,*" ColumnSpacing="6">
+                <TextBox Grid.Column="0" PlaceholderText="TZ"
+                         Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Grid.Column="1" PlaceholderText="Europe/Amsterdam"
+                         Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>
