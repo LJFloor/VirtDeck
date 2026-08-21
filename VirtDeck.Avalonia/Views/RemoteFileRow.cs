@@ -104,6 +104,25 @@ public sealed class RemoteFileRow : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// True while this row is the folder a drop would land in. The second property here to notify,
+    /// and for the same reason <see cref="IsEditing"/> does: it changes while the row is on screen,
+    /// where everything else is read once when the row is built. Unlike <see cref="IsCut"/>, which
+    /// is a fact about the entry at build time, this one follows the pointer.
+    /// </summary>
+    public bool IsDropTarget
+    {
+        get => _isDropTarget;
+        set
+        {
+            if (_isDropTarget == value) return;
+            _isDropTarget = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDropTarget)));
+        }
+    }
+
+    private bool _isDropTarget;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>

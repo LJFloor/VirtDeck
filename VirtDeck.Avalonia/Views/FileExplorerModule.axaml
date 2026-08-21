@@ -41,6 +41,15 @@
     <Style Selector="DockPanel.cut">
       <Setter Property="Opacity" Value="0.45" />
     </Style>
+
+    <!-- The folder a drop would land in. Painted on the row rather than shown as a selection,
+         because the selection means something else here and a drag must not disturb it. The blue is
+         literal for the same reason JbIconAdd's green is: it means "this one", and a highlight that
+         changed meaning with the theme would be worse than one that does not. Low alpha, so it reads
+         over either face. -->
+    <Style Selector="DockPanel.droptarget">
+      <Setter Property="Background" Value="#382f7feb" />
+    </Style>
   </UserControl.Styles>
 
   <DockPanel>
@@ -143,6 +152,25 @@
       </DockPanel>
     </Border>
 
+    <!-- The transfer strip: the same shape ConsoleWindow draws in its own status bar, so the app
+         has one look for "something is moving and you can stop it" rather than two. It lives in the
+         module because a module owns the shell's two status slots but has no footer, and that is
+         exactly why paste has had a cancellation token and nowhere to put a Cancel button; it drives
+         this strip too now. Hidden whenever nothing is running. -->
+    <Border Name="XferPanel" DockPanel.Dock="Bottom" IsVisible="False"
+            Padding="8" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel>
+        <Button Name="CancelXferButton" DockPanel.Dock="Right" Content="Cancel"
+                Theme="{StaticResource JbStatusBarButton}" Margin="8,0,0,0"
+                ToolTip.Tip="Stop what is running" />
+        <ProgressBar Name="XferProgress" DockPanel.Dock="Right" Width="160" Height="6"
+                     Minimum="0" Maximum="1000" IsIndeterminate="True"
+                     VerticalAlignment="Center" Margin="8,0,0,0" />
+        <TextBlock Name="XferText" Opacity="0.75" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
     <Panel>
       <ListBox Name="FileList" Background="Transparent" Padding="0"
                SelectionMode="Multiple"
@@ -151,6 +179,13 @@
           <ContextMenu Name="FileMenu">
             <MenuItem Name="MenuOpen" Header="Open" />
             <MenuItem Name="MenuCopyPath" Header="Copy path" />
+            <Separator />
+            <!-- Two upload items rather than one, because a picker chooses files or a folder and
+                 cannot offer both; the uploads target the directory on screen, so unlike everything
+                 below them they do not need a selection. -->
+            <MenuItem Name="MenuUploadFiles" Header="Upload files..." />
+            <MenuItem Name="MenuUploadFolder" Header="Upload folder..." />
+            <MenuItem Name="MenuDownload" Header="Download..." />
             <Separator />
             <!-- Display only: these carry Click handlers rather than commands, so naming the chord
                  here cannot also fire it. The keys themselves are bound to the list. -->
@@ -163,7 +198,7 @@
         </ListBox.ContextMenu>
         <ListBox.ItemTemplate>
           <DataTemplate DataType="vm:RemoteFileRow">
-            <DockPanel Classes.cut="{Binding IsCut}">
+            <DockPanel Classes.cut="{Binding IsCut}" Classes.droptarget="{Binding IsDropTarget}">
               <TextBlock DockPanel.Dock="Right" Text="{Binding Group}"       Width="{StaticResource ColGroup}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Owner}"       Width="{StaticResource ColOwner}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Permissions}" Width="{StaticResource ColPerms}"    Opacity="0.7" VerticalAlignment="Center" FontFamily="monospace" />
@@ -203,6 +238,16 @@
           </DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>
+
+      <!-- What a drop would do. Not hit-testable, for the reason ConsoleWindow gives: a hit-testable
+           hint becomes the element under the pointer and changes the drag's source mid-drag. -->
+      <Border Name="DropHint" IsVisible="False" IsHitTestVisible="False"
+              VerticalAlignment="Bottom" HorizontalAlignment="Stretch"
+              Padding="10,6" BorderThickness="0,1,0,0"
+              Background="{DynamicResource JbToolBarBackground}"
+              BorderBrush="{DynamicResource JbTabSelectedUnderline}">
+        <TextBlock Name="DropHintText" TextTrimming="CharacterEllipsis" />
+      </Border>
 
       <!-- Why the list is empty, so an unusable directory never just looks broken. The retry is
            offered on any failure, because a path inside a directory the account cannot search is

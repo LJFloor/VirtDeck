@@ -1124,8 +1124,10 @@ was a chord and was already sent.
 `FileExplorerModule` browses the host's filesystem: a path bar, one multi-select detail list (Name,
 Size, Modified, Permissions, Owner, Group), Back/Forward/Up/Home/Refresh and a hidden-files toggle.
 It also **moves and copies files about, on the host**: Cut, Copy and Paste, from the context menu
-and from Ctrl+X, Ctrl+C and Ctrl+V. Upload, download, rename and a Delete command of its own are not
-here, and neither is a viewer, a tree pane or a directory watch.
+and from Ctrl+X, Ctrl+C and Ctrl+V. It **uploads and downloads**, files and whole directory trees,
+by command or by dragging files in from the desktop, and dragging rows onto a folder row moves them
+on the host. A Delete command of its own is not here, and neither is a viewer, a tree pane or a
+directory watch.
 
 - **It lists as the logged-in user, and that is the point.** Every other remote file call in the app
   goes through `RunSudoCommand`, because every one of them is looking for a VM's disks under
@@ -1189,6 +1191,18 @@ here, and neither is a viewer, a tree pane or a directory watch.
   pure cache hits and an SVG icon theme never rasterises with that thread held. See "Remote file
   browser icons" above for the whole story; the same rule applies here, that the icon is the
   *client's* opinion of the extension because the person reading the list is at the client.
+- **The selection follows whatever just happened**, which is what makes a listing of several
+  hundred entries usable. Stepping out of a directory selects the one stepped out of; a rename, a
+  paste and an upload all select their result and scroll it into view. `_selectNext` is the one
+  channel for that, a set rather than a name because a paste moves any number of entries, and it
+  holds the names things **landed** under rather than the names they were called: under "keep both"
+  those differ, which is why `PasteOutcome.Landed` and `TransferOutcome.Landed` exist at all. The
+  paste script had been sending the final basename since it was written and nobody was reading it.
+  The navigation half is expressed as "is the place being left below the place being entered?"
+  (`ChildOnTheWayTo`) rather than as a rule about the Up button, so Back, a multi-level jump in
+  history and a path typed into the box all behave alike, a refresh names nothing, and `/etcfoo` is
+  not mistaken for a child of `/etc`. A paste sets it immediately before re-listing the same
+  directory, so navigation only fills it in when nothing else has.
 - **Cut, Copy and Paste, and the clipboard is the module's own.** It holds absolute host paths
   snapshotted at the gesture (a `RemoteEntry` carries no path, and the directory on screen has
   usually moved by the time Paste is pressed) plus the one bit saying which gesture it was. It
@@ -1255,6 +1269,129 @@ here, and neither is a viewer, a tree pane or a directory watch.
   here Backspace still belongs to the path box, so Backspace-for-Up, Alt+Left/Right and Enter live on
   the `ListBox` alone. Ctrl+X, Ctrl+C and Ctrl+V go there for the sharper form of the same reason:
   inside the path box those three have to keep meaning what they mean in any other text box.
+
+### Uploading and downloading
+
+`Services/RemoteTransferService` is the only thing in the app that moves a user's files between this
+PC and the host. It is a sibling of `RemoteFileService`, not part of it: that one is metadata and
+host-to-host operations, this one is bytes crossing the boundary.
+
+- **One mechanism, `tar` over exec, both directions.** It is the only option that covers files *and*
+  whole trees, elevated and not, in one shape: the recursion is tar's, and `sudo` is a prefix. SFTP
+  runs as the login user only, which would leave this module's one-shot "retry as root" working for
+  listing, paste and rename and not for a transfer, and it depends on the host's sftp subsystem.
+  **It would not buy speed either, so do not rewrite this for one:** measured at **112 MB/s** to
+  another machine over gigabit ethernet, which is about 90% of the 125 MB/s line rate and roughly
+  the ceiling once TCP/IP, SSH framing and encryption come off. A transfer here is network-bound, not
+  bound by the pipeline, which is the opposite of the NBD media path beside it (that one is
+  latency-bound on small reads, see "Removable media"). GNU tar is assumed, as GNU `find -printf`
+  already is.
+  `SshConnectionManager.RunPipeOutAsync`/`RunPipeInAsync` are the two primitives, each on a
+  **connection of its own** for the reason every long call here is: a multi-gigabyte transfer must
+  not hold `_ioLock` and stop every other module while it runs. `DownloadFileAsync` is now a wrapper
+  over the first of them, so the read loop exists once.
+- **`RunPipeInAsync` must not use `RemoteFileService.Wrap`, and that is not a style preference.**
+  `Wrap` is `echo <b64> | base64 -d | bash`, which makes **that pipe bash's stdin**; a payload command
+  under it inherits the exhausted script pipe instead of the SSH channel and reads nothing, which
+  `tar` reports as "This does not look like a tar archive". Every other script in the app can be piped
+  in because none of them reads stdin. So `RunPipeInAsync` takes a **script body** rather than a
+  command line and wraps it itself, as `bash -c "$(echo <b64> | base64 -d)"` in both the elevated and
+  the unelevated case, which hands bash the script as an argument and leaves stdin alone. The download
+  side is free to keep `Wrap`, because `tar -c` never reads stdin.
+- **The elevated upload cannot use `FeedSudoPassword`, and a sentinel is what replaces it.** That
+  helper writes the password and then **closes stdin**, which is exactly what an upload cannot allow,
+  since stdin is the payload. Writing the password and trusting `sudo -S` to stop at the newline is
+  only half an answer: sudo does read a byte at a time and never over-reads (measured: feed it ten
+  lines with a wrong password and lines four onward are still on the stream), but on a **NOPASSWD**
+  host, or with credentials cached, it does not read stdin *at all*, and the password line would then
+  be the first thing `tar` saw. So the client writes `password`, then a per-call `sentinel`, then the
+  payload, and the host skips lines until it has seen the sentinel: both cases converge. Same trick
+  and same reason as `SshPtySession`'s per-session marker. A *wrong* password needs no handling: sudo
+  spends its three attempts on the next three lines and exits, and the non-zero exit is reported;
+  `CheckSudo` has rejected it at the login window long before this anyway.
+- **The upload pre-flight is `InspectPaste`'s destination half.** `RemoteFileService.InspectIncoming`
+  runs the same `-d`/`-w`/`-x` checks and the same per-name probe, drops the "destination inside a
+  source" loop (a local directory cannot contain a remote one), and answers the same `PastePlan`, so
+  `PasteConflictDialog` and `ResolveConflictsAsync` settle an upload's conflicts **without changes**.
+  It also returns each name's free `name (copy)`, because a transfer has no host-side loop of its own
+  to resolve `KeepBoth` in; the extension rule is `PasteScript`'s exactly (a dot after the first
+  character only, never for a directory) so a copy is named the same whichever route created it, and
+  `FreeLocalName` repeats it on the client for a download. **That field is base64'd on the wire**: it
+  sits before the entry name so the name stays the unbounded last field, and a name holding a tab
+  would otherwise split the record in the middle.
+- **Extraction finishing is not proof a download worked.** A `tar` that cannot open a member still
+  writes the end-of-archive blocks and exits non-zero, so its stdout is a perfectly valid *empty*
+  archive and the client side sees nothing wrong. The pump task's exception is therefore kept and
+  awaited separately after extraction rather than swallowed; without that, a refused download
+  reported success with no files in it and an empty error message.
+- **A cancelled transfer takes back what it created.** Cutting `tar` off mid-entry leaves whatever
+  it was part way through, and a half-written file presented as a real one is worse than no file, so
+  cancelling removes the top-level names the transfer brought into being, the way `ExportVmDialog`
+  deletes its `.part`. **Only those**: an entry the user chose to **Overwrite** is left where it is,
+  because the tool truncated the original the moment it opened it and neither end ever held a copy,
+  so there is nothing to restore and removing it would destroy what was there before the transfer
+  started. That one case cannot be made clean, so it is **named in a dialog** instead of passed over
+  in silence. The `rm -rf` this adds is the second in the module, and it can only ever reach names
+  the pre-flight reported as free.
+- **Cancelling is the only trigger for that.** A transfer that *failed* keeps what did land, because
+  tar extracts the members it can and reports the ones it cannot; throwing those away over an
+  unrelated entry is not what a failure means, and it is the same rule paste follows when it reports
+  per-item failures and keeps the successes.
+- **A transfer retries whole where a paste retries per item**, and that is the one place the two
+  shapes differ. A paste is a loop the host reports on item by item, so a denial can re-run just the
+  items that failed; a transfer is a single `tar`, so a denial re-runs all of it. Neither touches
+  `_shownElevated`, which stays a fact about the listing on screen.
+- **`-h` and `--no-same-owner`.** Symlinks are dereferenced in both directions (`tar -h` going out;
+  plain recursion coming in, since `Directory.Exists` and `FileStream` follow links by themselves):
+  somebody downloading a folder wants the files, it behaves the same on either client OS, and it
+  never asks Windows to create a symlink, which needs a privilege there. The cost is that a cyclic
+  symlink makes tar recurse, which is GNU tar's own caveat under `-h`. `--no-same-owner` because the
+  archive is built here: as root, tar would otherwise restore whatever uid a client-built entry
+  carried, so instead the result belongs to whoever ran tar.
+- **`AttributesToSkip = 0` is load-bearing.** .NET's default `EnumerationOptions` skips `Hidden` and
+  `System`, which on Linux means every dotfile in an uploaded tree would be silently missing. Both the
+  archive walk and the size walk set it, or the bar would run past 100% on a tree it under-counted.
+- **Entry names off the host are checked before anything is created.** `Remap` swaps an entry's first
+  path segment for the local name the user settled on, drops anything whose first segment was not
+  asked for, and refuses a `..` anywhere; the resolved path is then required to stay under the chosen
+  directory. A tar's entry names are the far end's to write, so they are input.
+- **The transfer strip is the module's, and paste finally uses it too.** A module owns the shell's two
+  status slots and has no footer, which is why paste has had a `CancellationTokenSource` and nowhere
+  to put a Cancel button; a multi-gigabyte transfer with no way to stop it would be worse. The strip
+  is `ConsoleWindow`'s `XferPanel` markup copied rather than reinvented, hidden unless something is
+  running, and the service throttles progress to 120 ms so the hop to the UI thread is not paid per
+  64 KiB chunk. `Shutdown` cancels the one token for all three operations, because the shell disposes
+  the shared connection, and with it the auth material every second client borrows, straight after.
+- **`_busy` is one flag for paste, upload and download.** They are the same hazard: each runs on a
+  connection of its own and each ends by re-listing the directory underneath it.
+
+### Dragging
+
+Two gestures, and deliberately not a third.
+
+- **Files dragged in from the desktop upload** into the folder row under the pointer, or into the
+  directory on screen when the pointer is not over one. The handlers go on the module root, the idiom
+  all four older drop targets follow, so a drop on the empty space below the last row still lands.
+  `DropFiles.LocalItems` is the new sibling of `LocalFiles`: same translation, but a **directory is a
+  real answer** here, where to `LocalFiles` it is not (its callers all want one file to feed a VM).
+- **Rows dragged onto a folder row move on the host**, or copy with Ctrl held, reusing `InspectPaste`
+  + `ResolveConflictsAsync` + `Paste` unchanged; `HostMoveAsync` is the shared core Paste now calls
+  too. Only a folder row is a target: dropping on the listing itself would mean moving to where they
+  already are, and there is no `..` row to move up through.
+- **The selection is captured on the press, not when the drag starts.** A `ListBox` collapses a
+  multiple selection to the row under the pointer on press, so by the time the pointer has moved far
+  enough to be a drag the other rows are gone. The press handler is therefore **tunnelled**, ahead of
+  the `ListBox`, and a press inside the existing selection drags all of it while a press anywhere else
+  drags one row.
+- **There is no drag-out, and Avalonia is why.** Dragging a row to the desktop needs the bytes to
+  exist locally at the moment the drop target asks: `DragDrop.DoDragDropAsync` takes the *synchronous*
+  `IDataTransfer` (`IAsyncDataTransfer` is the clipboard's, not drag-and-drop's), and `DataFormat.File`
+  wants a real local `IStorageItem`, so there is no promised-file hook to hang a download off. The
+  bytes would have to be fetched inside a synchronous callback on the platform's drag thread, and on a
+  host whose files are routinely disk images that is a freeze, not a feature. Downloading is a command
+  instead. **That is also why the internal payload is an in-process format** carrying host paths and
+  nothing else, no text and no files: an in-process format cannot leave the app, so a drag can never
+  be accepted somewhere that would imply a transfer this module is not going to do.
 
 ## Terminal
 

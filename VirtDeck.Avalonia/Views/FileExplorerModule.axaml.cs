@@ -41,6 +41,7 @@ public partial class FileExplorerModule : UserControl, IModule
     private enum SortKey { Name, Size, Modified, Permissions, Owner, Group }
 
     private RemoteFileService? _files;
+    private RemoteTransferService? _transfers;
 
     private readonly ObservableCollection<RemoteFileRow> _rows = new();
     private List<RemoteEntry> _entries = new();
@@ -71,10 +72,12 @@ public partial class FileExplorerModule : UserControl, IModule
     /// <summary>What Cut or Copy set aside, or null when nothing is waiting to be pasted.</summary>
     private FileClip? _clip;
 
-    /// <summary>True while a paste is on the wire. Every command that could start a second one is
-    /// disabled meanwhile, and the token lets <see cref="Shutdown"/> drop the connection it holds.</summary>
-    private bool _pasting;
-    private CancellationTokenSource? _pasteCts;
+    /// <summary>True while a paste, an upload or a download is on the wire. Every command that could
+    /// start a second one is disabled meanwhile, and the token lets <see cref="Shutdown"/> drop the
+    /// connection it holds. One flag for all three, because they are the same hazard: each runs on a
+    /// connection of its own and each ends by re-listing the directory underneath it.</summary>
+    private bool _busy;
+    private CancellationTokenSource? _opCts;
 
     /// <summary>The top level this module's command keys hang off while it is on screen.</summary>
     private TopLevel? _keyboardRoot;
@@ -84,10 +87,16 @@ public partial class FileExplorerModule : UserControl, IModule
     private TextBox? _editor;
 
     /// <summary>
-    /// A name to select once the next listing lands. A rename re-reads the directory, and the entry
-    /// it renamed should still be the one picked afterwards.
+    /// Names to select once the next listing lands, replacing whatever was selected before.
+    ///
+    /// <para>Selection follows what you just did, which is what every file manager does and what
+    /// makes a listing of several hundred entries usable: a rename picks its result, a paste or an
+    /// upload picks what arrived, and stepping up out of a directory picks the one you came from.
+    /// It has to be a set rather than one name because a paste and an upload both move any number
+    /// of entries, and it has to be the names they <b>landed</b> under, which under "keep both" is
+    /// not what they were called.</para>
     /// </summary>
-    private string? _selectAfterList;
+    private List<string>? _selectNext;
 
     /// <summary>
     /// One Cut or Copy. The paths are absolute and snapshotted at the gesture, because
@@ -152,10 +161,31 @@ public partial class FileExplorerModule : UserControl, IModule
         MenuCut.Click += (_, _) => SetClip(cut: true);
         MenuCopy.Click += (_, _) => SetClip(cut: false);
         MenuPaste.Click += async (_, _) => await PasteAsync();
+        MenuUploadFiles.Click += async (_, _) => await UploadPickedAsync(folder: false);
+        MenuUploadFolder.Click += async (_, _) => await UploadPickedAsync(folder: true);
+        MenuDownload.Click += async (_, _) => await DownloadAsync();
+        CancelXferButton.Click += (_, _) =>
+        {
+            CancelXferButton.IsEnabled = false;
+            XferText.Text = "Cancelling…";
+            try { _opCts?.Cancel(); } catch { }
+        };
         MenuRename.Click += (_, _) => BeginRename();
+
+        SetUpDragDrop();
 
         PaintSortCarets();
         SyncHistoryButtons();
+    }
+
+    /// <summary>
+    /// Asks the next listing to select these names. Ignored when empty, so a caller never has to
+    /// check first and an operation that landed nothing leaves the selection alone.
+    /// </summary>
+    private void SelectAfterList(IEnumerable<string> names)
+    {
+        var wanted = names.Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        if (wanted.Count > 0) _selectNext = wanted;
     }
 
     /// <summary>Dialogs need a Window; a UserControl only knows the tree it is in.</summary>
@@ -180,6 +210,7 @@ public partial class FileExplorerModule : UserControl, IModule
     public void Attach(SshConnectionManager ssh)
     {
         _files = new RemoteFileService(ssh);
+        _transfers = new RemoteTransferService(ssh);
         // Nothing to probe: the connection already knows who and where it is, and that is exactly
         // the thing worth saying while somebody reads a filesystem as themselves.
         HostCapabilities = ssh.Port == 22
@@ -221,16 +252,37 @@ public partial class FileExplorerModule : UserControl, IModule
     public void Deactivate() { }
 
     /// <summary>
-    /// Nothing to tear down but a paste still on the wire. It owns no window and no NBD server, and
-    /// every listing rides the shell's shared connection; a running paste is the one thing here that
-    /// holds a connection of its own, and the shell disposes the shared one straight after this.
+    /// Nothing to tear down but a paste, upload or download still on the wire. This module owns no
+    /// window and no NBD server, and every listing rides the shell's shared connection; those three
+    /// are the only things here that hold a connection of their own, and the shell disposes the
+    /// shared one, with the auth material every second client borrows, straight after this.
     /// </summary>
     public void Shutdown()
     {
-        try { _pasteCts?.Cancel(); } catch { }
+        try { _opCts?.Cancel(); } catch { }
     }
 
     // ---- Navigation ----------------------------------------------------
+
+    /// <summary>
+    /// The name of <paramref name="ancestor"/>'s own child that <paramref name="path"/> lies under,
+    /// or null when <paramref name="path"/> is not below it at all (which includes the two being the
+    /// same). Purely textual, because both are already-normalised absolute POSIX paths from the
+    /// listing itself; a symlinked route would name the link, which is what the user clicked.
+    /// </summary>
+    private static string? ChildOnTheWayTo(string ancestor, string path)
+    {
+        if (string.IsNullOrEmpty(ancestor) || string.IsNullOrEmpty(path)) return null;
+
+        var root = ancestor == "/" ? "/" : ancestor.TrimEnd('/') + "/";
+        var below = path.TrimEnd('/');
+        if (below.Length <= root.Length || !below.StartsWith(root, StringComparison.Ordinal)) return null;
+
+        var rest = below[root.Length..];
+        var slash = rest.IndexOf('/');
+        var child = slash < 0 ? rest : rest[..slash];
+        return child.Length > 0 ? child : null;
+    }
 
     /// <summary>The directory the retry button should try, which is whatever last failed.</summary>
     private string _pendingDir = "/";
@@ -286,6 +338,15 @@ public partial class FileExplorerModule : UserControl, IModule
                 return false;
             }
 
+            // Stepping out of a directory selects the one stepped out of. Expressed as "is the
+            // place being left below the place being entered?" rather than as a rule about the Up
+            // button, so Back, a two-level jump in history and a path typed into the box all behave
+            // the same, and so a refresh (dir == _currentDir) names nothing. It does not overwrite a
+            // selection something else already asked for, because a paste sets that immediately
+            // before re-listing the very same directory.
+            if (_selectNext is null && ChildOnTheWayTo(dir, _currentDir) is { } cameFrom)
+                _selectNext = new List<string> { cameFrom };
+
             _entries = listing.Entries;
             _currentDir = dir;
             _shownElevated = elevated;
@@ -304,6 +365,10 @@ public partial class FileExplorerModule : UserControl, IModule
     private void ShowFailure(string message, bool offerRoot)
     {
         _failed = true;
+        // PopulateList is what normally consumes this, and it does not run on this path. Left set,
+        // a paste's or a rename's pending selection would be applied to whatever directory listed
+        // successfully next, which is not the one it was about.
+        _selectNext = null;
         _rows.Clear();
         _entries = new List<RemoteEntry>();
         EmptyText.Text = message;
@@ -471,7 +536,7 @@ public partial class FileExplorerModule : UserControl, IModule
     private void SetClip(bool cut)
     {
         var rows = SelectedRows;
-        if (rows.Count == 0 || _pasting) return;
+        if (rows.Count == 0 || _busy) return;
 
         var wasCut = _clip is { IsCut: true };
         _clip = new FileClip(
@@ -486,13 +551,17 @@ public partial class FileExplorerModule : UserControl, IModule
         var rows = SelectedRows;
         MenuOpen.IsEnabled = rows.Count == 1 && rows[0].IsDir;
         MenuCopyPath.IsEnabled = rows.Count > 0;
-        MenuCut.IsEnabled = MenuCopy.IsEnabled = rows.Count > 0 && !_pasting;
+        MenuCut.IsEnabled = MenuCopy.IsEnabled = rows.Count > 0 && !_busy;
         // There is nowhere to paste into while the failure panel is up, and a second paste must not
         // start on top of one still running.
-        MenuPaste.IsEnabled = _clip != null && !_failed && !_pasting;
+        MenuPaste.IsEnabled = _clip != null && !_failed && !_busy;
         // One entry answers to one name, so this is a single-target command however many rows are
         // picked, the same rule Open follows.
-        MenuRename.IsEnabled = rows.Count == 1 && !_pasting && _editing == null;
+        MenuRename.IsEnabled = rows.Count == 1 && !_busy && _editing == null;
+        // The uploads target the directory on screen, so they need no selection; what they do need
+        // is a directory that actually listed, which is the same thing Paste asks for.
+        MenuUploadFiles.IsEnabled = MenuUploadFolder.IsEnabled = _transfers != null && !_failed && !_busy;
+        MenuDownload.IsEnabled = rows.Count > 0 && !_busy;
     }
 
     /// <summary>
@@ -547,7 +616,7 @@ public partial class FileExplorerModule : UserControl, IModule
     /// </summary>
     private void BeginRename()
     {
-        if (_files is null || _failed || _pasting || _editing != null) return;
+        if (_files is null || _failed || _busy || _editing != null) return;
 
         var rows = SelectedRows;
         if (rows.Count != 1) return;
@@ -662,7 +731,7 @@ public partial class FileExplorerModule : UserControl, IModule
 
         if (result.Failure == RenameFailure.None)
         {
-            _selectAfterList = newName;
+            _selectNext = new List<string> { newName };
             FollowRenameInClip(RemoteFileService.CombinePath(dir, oldName),
                                RemoteFileService.CombinePath(dir, newName));
         }
@@ -746,42 +815,62 @@ public partial class FileExplorerModule : UserControl, IModule
     /// </summary>
     private async Task PasteAsync()
     {
-        if (_files is null || _clip is null || _failed || _pasting) return;
+        if (_clip is not { } clip || _failed || _busy) return;
+
+        if (await HostMoveAsync(clip.Paths, _currentDir, clip.IsCut, "Paste") &&
+            clip.IsCut && ReferenceEquals(_clip, clip))
+        {
+            // A cut is spent only once the move actually happened, so a partly refused one stays on
+            // the clipboard and can be retried somewhere the account can write.
+            _clip = null;
+            PopulateList();
+        }
+    }
+
+    /// <summary>
+    /// Moves or copies entries between two directories <b>on the host</b>: what Paste does, and what
+    /// dragging rows onto a folder row does. Answers true when every entry made it, which is what
+    /// tells a cut it has been spent.
+    ///
+    /// <para>The destination is a parameter rather than <see cref="_currentDir"/> because a drop
+    /// names the row it landed on, which is usually not the directory being shown.</para>
+    /// </summary>
+    private async Task<bool> HostMoveAsync(IReadOnlyList<string> sources, string dest, bool move, string title)
+    {
+        if (_files is null || _busy || sources.Count == 0) return false;
 
         var files = _files;
-        var clip = _clip;
-        var dest = _currentDir;
 
-        var plan = await InspectAsync(files, clip, dest, elevated: false);
-        if (plan is null) return;
+        var plan = await InspectAsync(files, sources, dest, elevated: false, title);
+        if (plan is null) return false;
 
         // A destination this account cannot write to is the same offer a directory it cannot read
-        // already makes, and it covers this one paste: nothing latches, so the next is read and
+        // already makes, and it covers this one operation: nothing latches, so the next is read and
         // written as the user again.
         var elevated = false;
         if (plan.Block == PasteBlock.DestinationDenied)
         {
-            if (!await MessageDialog.Confirm(Owner, "Paste",
-                    $"{plan.Message}\n\nRetry as root? That covers this one paste. The next one is " +
+            if (!await MessageDialog.Confirm(Owner, title,
+                    $"{plan.Message}\n\nRetry as root? That covers this one operation. The next is " +
                     "read and written as you again."))
-                return;
+                return false;
 
             elevated = true;
-            plan = await InspectAsync(files, clip, dest, elevated: true);
-            if (plan is null) return;
+            plan = await InspectAsync(files, sources, dest, elevated: true, title);
+            if (plan is null) return false;
         }
 
         if (plan.Block != PasteBlock.None)
         {
-            await MessageDialog.Info(Owner, "Paste", plan.Message);
-            return;
+            await MessageDialog.Info(Owner, title, plan.Message);
+            return false;
         }
 
-        if (plan.Items.Count == 0) return;
-        if (!await ResolveConflictsAsync(plan, dest, clip.IsCut)) return;
+        if (plan.Items.Count == 0) return false;
+        if (!await ResolveConflictsAsync(plan.Items, dest, move)) return false;
 
-        var outcome = await RunPasteAsync(plan.Items, dest, clip.IsCut, elevated);
-        if (outcome is null) return;
+        var outcome = await RunPasteAsync(plan.Items, dest, move, elevated);
+        if (outcome is null) return false;
 
         var failures = outcome.Failures;
 
@@ -789,43 +878,585 @@ public partial class FileExplorerModule : UserControl, IModule
         // failed for another reason simply fails again with the same words, which is what would have
         // been reported either way.
         if (!elevated && outcome.AnyDenied && failures.Count > 0 &&
-            await MessageDialog.Confirm(Owner, "Paste",
+            await MessageDialog.Confirm(Owner, title,
                 $"{Count(failures.Count, "entry", "entries")} could not be " +
-                $"{(clip.IsCut ? "moved" : "copied")}: the host refused permission.\n\n" +
-                "Retry those as root? That covers this one paste. The next one is read and written " +
+                $"{(move ? "moved" : "copied")}: the host refused permission.\n\n" +
+                "Retry those as root? That covers this one operation. The next is read and written " +
                 "as you again."))
         {
-            var retry = await RunPasteAsync(failures.Select(f => f.Item).ToList(), dest, clip.IsCut,
+            var retry = await RunPasteAsync(failures.Select(f => f.Item).ToList(), dest, move,
                                             elevated: true);
             if (retry is not null) failures = retry.Failures;
         }
 
-        // A cut is spent only once the move actually happened, so a partly refused one stays on the
-        // clipboard and can be retried somewhere the account can write.
-        if (clip.IsCut && failures.Count == 0 && ReferenceEquals(_clip, clip)) _clip = null;
+        // What landed gets selected, so long as it landed somewhere visible: dropping rows onto a
+        // folder row moves them out of the listing entirely, and there is nothing there to point at.
+        // Set before the re-list, because PopulateList is what consumes it.
+        if (dest == _currentDir) SelectAfterList(outcome.Landed);
 
         // Nothing on the host tells a client that a directory changed, which is why this module has
         // a Refresh button at all and why the re-list here has to be explicit.
         await NavigateTo(_currentDir, record: false, elevated: _shownElevated);
 
         if (failures.Count > 0)
-            await MessageDialog.Info(Owner, "Paste",
+            await MessageDialog.Info(Owner, title,
                 string.Join("\n", failures.Select(f => $"{f.Item.Name}: {f.Message}")));
+
+        return failures.Count == 0;
     }
 
-    /// <summary>Asks the host what the paste would run into. Null means it threw and was reported.</summary>
-    private async Task<PastePlan?> InspectAsync(RemoteFileService files, FileClip clip, string dest,
-                                                bool elevated)
+    // ---- Drag and drop ---------------------------------------------------
+    //
+    // Two gestures share the plumbing and mean different things:
+    //
+    //   files dragged in from the desktop  -> upload into the folder under the pointer
+    //   rows dragged onto a folder row     -> move on the host (copy with Ctrl held)
+    //
+    // There is deliberately no third one. Dragging a row OUT to the desktop would need the bytes to
+    // exist locally at the moment the drop target asks for them: Avalonia's drag source takes the
+    // synchronous IDataTransfer, and DataFormat.File wants a real local IStorageItem, so there is no
+    // promised-file hook to hang a download off. On a host whose files are routinely disk images
+    // that is a freeze rather than a feature, so downloading is a command instead.
+    //
+    // That is also why the internal payload is an in-process format carrying host paths and nothing
+    // else, no text and no files: an in-process format cannot leave the app, so a drag can never be
+    // accepted somewhere that would imply a transfer this module is not going to do.
+
+    private static readonly DataFormat<string[]> RemotePathsFormat =
+        DataFormat.CreateInProcessFormat<string[]>("VirtDeck.RemotePaths");
+
+    /// <summary>The press a drag would start from. Held because <c>DoDragDropAsync</c> takes the
+    /// press args and a drag must not begin until the pointer has actually moved.</summary>
+    private PointerPressedEventArgs? _pressArgs;
+    private Point _pressPoint;
+    private bool _dragging;
+
+    /// <summary>
+    /// What was selected at the moment of the press, and the row pressed. Both are needed because a
+    /// ListBox collapses a multiple selection to the row under the pointer on press, so by the time
+    /// the pointer has moved far enough to be a drag the other rows are no longer selected. Pressing
+    /// on a row that was already part of the selection therefore drags the whole of it, and pressing
+    /// anywhere else drags just that row, which is what every file manager does.
+    /// </summary>
+    private string[] _pressSelection = Array.Empty<string>();
+    private string? _pressedPath;
+
+    /// <summary>The row currently painted as the folder a drop would land in.</summary>
+    private RemoteFileRow? _dropRow;
+
+    private void SetUpDragDrop()
+    {
+        DragDrop.SetAllowDrop(this, true);
+        // On the module root rather than the list, the idiom every other drop target in the app
+        // follows, so a drop on the empty space below the last row still lands in the directory
+        // being shown instead of falling through to nothing.
+        AddHandler(DragDrop.DragEnterEvent, OnDragOver);
+        AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
+        AddHandler(DragDrop.DropEvent, OnDrop);
+
+        // Tunnelled, so the press is seen before the ListBox turns it into a selection; the drag
+        // itself still waits for movement, so a plain click is untouched.
+        FileList.AddHandler(PointerPressedEvent, OnListPointerPressed, RoutingStrategies.Tunnel);
+        FileList.PointerMoved += OnListPointerMoved;
+        FileList.PointerReleased += (_, _) => ClearPress();
+        FileList.PointerCaptureLost += (_, _) => ClearPress();
+    }
+
+    // ---- Starting a drag (rows -> a folder on the host) ------------------
+
+    private void OnListPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        ClearPress();
+        if (_busy || _editing != null) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is not RemoteFileRow row)
+            return;
+
+        // Tunnelled, so this runs before the ListBox has touched the selection.
+        _pressSelection = SelectedRows.Select(r => RemoteFileService.CombinePath(_currentDir, r.Name)).ToArray();
+        _pressedPath = RemoteFileService.CombinePath(_currentDir, row.Name);
+        _pressArgs = e;
+        _pressPoint = e.GetPosition(this);
+    }
+
+    private async void OnListPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_pressArgs is not { } press || _dragging || _busy) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { ClearPress(); return; }
+
+        var moved = e.GetPosition(this) - _pressPoint;
+        if (Math.Abs(moved.X) < 6 && Math.Abs(moved.Y) < 6) return;
+
+        // The whole selection when the press landed inside it, else just the row pressed.
+        var paths = _pressedPath is { } pressed && _pressSelection.Contains(pressed, StringComparer.Ordinal)
+            ? _pressSelection
+            : _pressedPath is { } only ? new[] { only } : Array.Empty<string>();
+        ClearPress();
+        if (paths.Length == 0) return;
+
+        _dragging = true;
+        try
+        {
+            var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.Create(RemotePathsFormat, paths));
+            // The system disposes the transfer when the drag ends; it must not be disposed here.
+            await DragDrop.DoDragDropAsync(press, transfer, DragDropEffects.Move | DragDropEffects.Copy);
+        }
+        catch { /* a drag the platform refused is not something the user needs told about */ }
+        finally
+        {
+            _dragging = false;
+            ClearDropTarget();
+        }
+    }
+
+    private void ClearPress()
+    {
+        _pressArgs = null;
+        _pressedPath = null;
+        _pressSelection = Array.Empty<string>();
+    }
+
+    // ---- Receiving a drop ------------------------------------------------
+
+    /// <summary>What a drop at this point would do. Everything else here is drawn from it.</summary>
+    private (string Dest, bool Internal, bool Move, string Hint)? DropPlan(DragEventArgs e)
+    {
+        if (_files is null || _failed || _busy) return null;
+
+        var row = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext as RemoteFileRow;
+        var folder = row is { IsDir: true } ? row : null;
+        var dest = folder is null ? _currentDir : RemoteFileService.CombinePath(_currentDir, folder.Name);
+        var where = folder is null ? _currentDir : folder.Name;
+
+        if (e.DataTransfer?.TryGetValue(RemotePathsFormat) is { Length: > 0 } paths)
+        {
+            // Rows can only be dropped onto a folder: onto the listing itself they would be moving
+            // to where they already are, and there is no ".." row to move up through.
+            if (folder is null) return null;
+            if (paths.Contains(dest, StringComparer.Ordinal)) return null; // onto itself
+
+            var copy = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+            var what = Count(paths.Length, "entry", "entries");
+            return (dest, true, !copy,
+                    copy ? $"Copy {what} into {where}" : $"Move {what} into {where}");
+        }
+
+        var items = DropFiles.LocalItems(e);
+        if (items.Count == 0) return null;
+
+        var name = items.Count == 1 ? $"\"{items[0].Name}\"" : Count(items.Count, "item", "items");
+        return (dest, false, false, $"Upload {name} to {where}");
+    }
+
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        var plan = DropPlan(e);
+        e.DragEffects = plan is null ? DragDropEffects.None
+                      : plan.Value.Internal ? (plan.Value.Move ? DragDropEffects.Move : DragDropEffects.Copy)
+                      : DragDropEffects.Copy;
+        e.Handled = true;
+
+        PaintDropTarget(e, plan?.Hint);
+    }
+
+    private void OnDragLeave(object? sender, DragEventArgs e)
+    {
+        ClearDropTarget();
+        e.Handled = true;
+    }
+
+    private async void OnDrop(object? sender, DragEventArgs e)
+    {
+        var plan = DropPlan(e);
+        ClearDropTarget();
+        e.Handled = true;
+        if (plan is not { } drop) return;
+
+        if (drop.Internal)
+        {
+            if (e.DataTransfer?.TryGetValue(RemotePathsFormat) is { Length: > 0 } paths)
+                await HostMoveAsync(paths, drop.Dest, drop.Move, drop.Move ? "Move" : "Copy");
+            return;
+        }
+
+        var items = DropFiles.LocalItems(e);
+        if (items.Count > 0) await UploadAsync(items, drop.Dest);
+    }
+
+    private void PaintDropTarget(DragEventArgs e, string? hint)
+    {
+        var row = hint is null
+            ? null
+            : (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext as RemoteFileRow;
+
+        var folder = row is { IsDir: true } ? row : null;
+        if (!ReferenceEquals(folder, _dropRow))
+        {
+            if (_dropRow is not null) _dropRow.IsDropTarget = false;
+            _dropRow = folder;
+            if (_dropRow is not null) _dropRow.IsDropTarget = true;
+        }
+
+        DropHintText.Text = hint ?? "";
+        DropHint.IsVisible = hint is not null;
+    }
+
+    private void ClearDropTarget()
+    {
+        if (_dropRow is not null) _dropRow.IsDropTarget = false;
+        _dropRow = null;
+        DropHint.IsVisible = false;
+    }
+
+    // ---- Uploading and downloading -------------------------------------
+    //
+    // Both follow PasteAsync's shape exactly, because that shape is already this module's answer to
+    // this problem: pre-flight in one round trip, offer root when the destination refuses, settle
+    // every conflict before a byte moves, run, offer a one-shot root retry on a denial, re-list
+    // explicitly, and report in one dialog. What differs is only where the bytes come from.
+    //
+    // The one honest difference is the retry. A paste is a loop the host reports per item, so it can
+    // retry just the items that failed; a transfer is a single tar, so a denial retries the whole
+    // thing. Neither touches _shownElevated, which stays a fact about the listing on screen.
+
+    /// <summary>Picks files or a folder on this PC and uploads them into the directory on screen.</summary>
+    private async Task UploadPickedAsync(bool folder)
+    {
+        if (_transfers is null || _failed || _busy) return;
+
+        var start = AppSettings.Current.LastLocalTransferDir;
+        List<DropFiles.LocalItem> picked;
+
+        if (folder)
+        {
+            var dir = await FileDialogs.OpenFolderAsync(Owner, "Upload folder", start);
+            if (dir is null) return;
+            picked = new List<DropFiles.LocalItem> { Describe(dir) };
+        }
+        else
+        {
+            var files = await FileDialogs.OpenFilesAsync(Owner, "Upload files", "All files (*.*)|*.*", start);
+            if (files.Count == 0) return;
+            picked = files.Select(Describe).ToList();
+        }
+
+        RememberLocalDir(Path.GetDirectoryName(picked[0].Path) ?? "");
+        await UploadAsync(picked, _currentDir);
+    }
+
+    /// <summary>
+    /// Uploads local files and folders into one host directory. Shared by the pickers and by a drop,
+    /// which is why the destination is a parameter: a drop names the folder row it landed on.
+    /// </summary>
+    private async Task UploadAsync(IReadOnlyList<DropFiles.LocalItem> sources, string dest)
+    {
+        if (_files is null || _transfers is null || _busy || sources.Count == 0) return;
+
+        var files = _files;
+        var transfers = _transfers;
+        var probe = sources.Select(x => (x.Path, x.Name, x.IsDir)).ToList();
+
+        var plan = await InspectIncomingAsync(files, probe, dest, elevated: false);
+        if (plan is null) return;
+
+        var elevated = false;
+        if (plan.Block == PasteBlock.DestinationDenied)
+        {
+            if (!await MessageDialog.Confirm(Owner, "Upload",
+                    $"{plan.Message}\n\nRetry as root? That covers this one upload. The next one is " +
+                    "written as you again."))
+                return;
+
+            elevated = true;
+            plan = await InspectIncomingAsync(files, probe, dest, elevated: true);
+            if (plan is null) return;
+        }
+
+        if (plan.Block != PasteBlock.None)
+        {
+            await MessageDialog.Info(Owner, "Upload", plan.Message);
+            return;
+        }
+
+        if (plan.Items.Count == 0) return;
+        if (!await ResolveConflictsAsync(plan.Items, dest, move: false)) return;
+
+        // Measuring is a local walk, so it is cheap enough to do up front and gives a real bar.
+        var wanted = plan.Items.Where(i => i.Resolution != PasteResolution.Skip).ToList();
+        if (wanted.Count == 0) return;
+        var total = await Task.Run(() => LocalSize(wanted));
+
+        var outcome = await RunTransferAsync("Upload", "Uploading", total,
+            (progress, ct) => transfers.UploadAsync(wanted, dest, total, elevated, progress, ct));
+
+        if (outcome is { Denied: true } && !elevated &&
+            await MessageDialog.Confirm(Owner, "Upload",
+                $"{outcome.Error}\n\nRetry as root? A transfer is a single command, so this retries " +
+                "the whole upload rather than part of it. The next one is written as you again."))
+        {
+            outcome = await RunTransferAsync("Upload", "Uploading", total,
+                (progress, ct) => transfers.UploadAsync(wanted, dest, total, elevated: true, progress, ct));
+        }
+
+        // Same rule as a paste: point at what arrived, unless it arrived in a folder row rather than
+        // in the directory on screen.
+        if (dest == _currentDir && outcome is not null) SelectAfterList(outcome.Landed);
+
+        // The re-list repaints the status slot, so a cancellation has to be said after it or the
+        // listing's own line would be the last word on a transfer that did not finish.
+        await NavigateTo(_currentDir, record: false, elevated: _shownElevated);
+        if (outcome is { Error: { } error }) await MessageDialog.Info(Owner, "Upload", error);
+        else if (outcome is null) await ReportCancelledAsync(wanted, "Upload");
+        else SetStatus($"{Count(outcome.Items, "entry", "entries")} uploaded to {dest}");
+    }
+
+    /// <summary>Downloads the selected entries into a directory chosen on this PC.</summary>
+    private async Task DownloadAsync()
+    {
+        if (_files is null || _transfers is null || _busy) return;
+
+        var rows = SelectedRows;
+        if (rows.Count == 0) return;
+
+        var files = _files;
+        var transfers = _transfers;
+        var remoteDir = _currentDir;
+
+        var localDir = await FileDialogs.OpenFolderAsync(Owner, "Download to",
+            AppSettings.Current.LastLocalTransferDir);
+        if (localDir is null) return;
+        RememberLocalDir(localDir);
+
+        // The remote side is already known from the listing, so the only question is what this PC
+        // already holds under those names. Built here rather than asked of the host, because the
+        // conflict is local.
+        var items = rows.Select(r => new PasteItem
+        {
+            Source = RemoteFileService.CombinePath(remoteDir, r.Name),
+            Name = r.Name,
+            SourceIsDir = r.IsDir,
+            TargetExists = File.Exists(Path.Combine(localDir, r.Name)) ||
+                           Directory.Exists(Path.Combine(localDir, r.Name)),
+            TargetIsDir = Directory.Exists(Path.Combine(localDir, r.Name)),
+        }).ToList();
+
+        if (!await ResolveConflictsAsync(items, localDir, move: false)) return;
+
+        var wanted = items.Where(i => i.Resolution != PasteResolution.Skip).ToList();
+        if (wanted.Count == 0) return;
+
+        // du -sb over SSH, so the bar is determinate; -1 leaves it a marquee rather than inventing
+        // a number to divide by.
+        var elevated = _shownElevated;
+        var total = await Task.Run(() => files.Measure(wanted.Select(i => i.Source).ToList(), elevated));
+
+        var outcome = await RunTransferAsync("Download", "Downloading", total,
+            (progress, ct) => transfers.DownloadAsync(wanted, remoteDir, localDir, total, elevated, progress, ct));
+
+        if (outcome is { Denied: true } && !elevated &&
+            await MessageDialog.Confirm(Owner, "Download",
+                $"{outcome.Error}\n\nRetry as root? A transfer is a single command, so this retries " +
+                "the whole download rather than part of it. The next one is read as you again."))
+        {
+            var again = await Task.Run(() => files.Measure(wanted.Select(i => i.Source).ToList(), true));
+            outcome = await RunTransferAsync("Download", "Downloading", again,
+                (progress, ct) => transfers.DownloadAsync(wanted, remoteDir, localDir, again, true, progress, ct));
+        }
+
+        if (outcome is { Error: { } error }) await MessageDialog.Info(Owner, "Download", error);
+        else if (outcome is null) await ReportCancelledAsync(wanted, "Download");
+        else SetStatus($"{Count(outcome.Items, "entry", "entries")} downloaded to {localDir}");
+    }
+
+    /// <summary>Asks the host what an upload would land on. Null means it threw and was reported.</summary>
+    private async Task<PastePlan?> InspectIncomingAsync(
+        RemoteFileService files, IReadOnlyList<(string Path, string Name, bool IsDir)> sources,
+        string dest, bool elevated)
     {
         Cursor = new Cursor(StandardCursorType.Wait);
         try
         {
-            return await Task.Run(() => files.InspectPaste(clip.Paths, dest, elevated));
+            return await Task.Run(() => files.InspectIncoming(sources, dest, elevated));
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Upload", $"Cannot upload into {dest}:\n{ex.Message}");
+            return null;
+        }
+        finally
+        {
+            Cursor = Cursor.Default;
+        }
+    }
+
+    /// <summary>
+    /// The progress-and-cancel shell both transfers run inside, the counterpart of
+    /// <see cref="RunPasteAsync"/>. Null means it was cancelled or threw and was reported.
+    /// </summary>
+    private async Task<TransferOutcome?> RunTransferAsync(
+        string title, string verb, long total,
+        Func<IProgress<TransferProgress>, CancellationToken, Task<TransferOutcome>> run)
+    {
+        TransferOutcome? outcome = null;
+        Exception? error = null;
+
+        _busy = true;
+        SyncMenu();
+        using var cts = new CancellationTokenSource();
+        _opCts = cts;
+        ShowXfer(verb, total);
+
+        // Progress arrives on the transfer's own thread; Progress<T> hops it to the UI thread, and
+        // the service throttles so that hop is not paid per 64 KiB chunk.
+        var progress = new Progress<TransferProgress>(p => PaintXfer(verb, p));
+
+        try
+        {
+            outcome = await run(progress, cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { error = ex; }
+        finally
+        {
+            _opCts = null;
+            _busy = false;
+            HideXfer();
+            SyncMenu();
+        }
+
+        // A null outcome means cancelled; the caller says so, because only it knows whether anything
+        // was being replaced (see ReportCancelledAsync).
+        if (error is null) return outcome;
+
+        await MessageDialog.Info(Owner, title, error.Message);
+        return null;
+    }
+
+    /// <summary>
+    /// What to say after a cancelled transfer. The entries that landed on a free name were taken
+    /// back by the service, so there is nothing to warn about there; an entry the user chose to
+    /// <b>replace</b> is the one case that cannot be undone, because the tool truncated the original
+    /// the moment it opened it and neither end ever held a copy. Saying nothing would leave somebody
+    /// with a half-written file exactly where a complete one used to be.
+    /// </summary>
+    private async Task ReportCancelledAsync(IReadOnlyList<PasteItem> wanted, string what)
+    {
+        var replaced = wanted.Where(i => i.Resolution == PasteResolution.Overwrite)
+                             .Select(i => i.Name).ToList();
+        SetStatus($"{what} cancelled.");
+        if (replaced.Count == 0) return;
+
+        await MessageDialog.Info(Owner, what,
+            $"{what} cancelled. Everything it had created was removed, but " +
+            $"{Count(replaced.Count, "entry that was", "entries that were")} being replaced " +
+            $"cannot be put back and may now be incomplete:\n\n" +
+            string.Join("\n", replaced));
+    }
+
+    // ---- The transfer strip ---------------------------------------------
+
+    private void ShowXfer(string verb, long total)
+    {
+        XferText.Text = verb + "…";
+        XferProgress.IsIndeterminate = total <= 0;
+        XferProgress.Value = 0;
+        CancelXferButton.IsEnabled = true;
+        XferPanel.IsVisible = true;
+    }
+
+    private void PaintXfer(string verb, TransferProgress p)
+    {
+        if (!XferPanel.IsVisible) return; // a late report from a transfer that has already ended
+
+        XferText.Text = p.Total > 0
+            ? $"{verb} {p.Current} · {FormatBytes(p.Bytes)} of {FormatBytes(p.Total)}"
+            : $"{verb} {p.Current} · {FormatBytes(p.Bytes)}";
+
+        if (p.Total > 0) XferProgress.Value = Math.Clamp(p.Bytes * 1000.0 / p.Total, 0, 1000);
+    }
+
+    private void HideXfer()
+    {
+        XferPanel.IsVisible = false;
+        XferProgress.Value = 0;
+        XferText.Text = "";
+    }
+
+    private static string FormatBytes(long b) => b switch
+    {
+        >= 1024L * 1024 * 1024 => $"{b / (1024.0 * 1024 * 1024):0.#} GB",
+        >= 1024 * 1024 => $"{b / (1024.0 * 1024):0.#} MB",
+        >= 1024 => $"{b / 1024.0:0.#} KB",
+        _ => $"{b} B",
+    };
+
+    // ---- Local-side helpers ---------------------------------------------
+
+    private static DropFiles.LocalItem Describe(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var isDir = Directory.Exists(path);
+        return new DropFiles.LocalItem(path, Path.GetFileName(trimmed), isDir);
+    }
+
+    /// <summary>Total bytes an upload will read, walked here so the bar has something to divide by.</summary>
+    private static long LocalSize(IEnumerable<PasteItem> items)
+    {
+        long total = 0;
+        foreach (var item in items)
+        {
+            try
+            {
+                if (!item.SourceIsDir) { total += new FileInfo(item.Source).Length; continue; }
+
+                // AttributesToSkip = 0 for the same reason the archive walk sets it: the default
+                // hides dotfiles on Linux, and a total that skipped them would run past 100%.
+                var options = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    AttributesToSkip = 0,
+                    IgnoreInaccessible = true,
+                };
+                foreach (var file in Directory.EnumerateFiles(item.Source, "*", options))
+                {
+                    try { total += new FileInfo(file).Length; } catch { }
+                }
+            }
+            catch { /* a size that cannot be read just leaves the bar short, never wrong-headed */ }
+        }
+        return total;
+    }
+
+    /// <summary>Remembers where on this PC something was last picked. Only a confirmed pick ever
+    /// gets here, never a half-typed path, the same rule <see cref="MediaLocations"/> follows.</summary>
+    private static void RememberLocalDir(string dir)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(dir)) return;
+            var settings = AppSettings.Current;
+            if (settings.LastLocalTransferDir == dir) return;
+            settings.LastLocalTransferDir = dir;
+            settings.Save(); // best-effort by contract; a failed write must never break a picker
+        }
+        catch { /* an unusable path is simply not remembered */ }
+    }
+
+    /// <summary>Asks the host what the move would run into. Null means it threw and was reported.</summary>
+    private async Task<PastePlan?> InspectAsync(RemoteFileService files, IReadOnlyList<string> sources,
+                                                string dest, bool elevated, string title)
+    {
+        Cursor = new Cursor(StandardCursorType.Wait);
+        try
+        {
+            return await Task.Run(() => files.InspectPaste(sources, dest, elevated));
         }
         catch (Exception ex)
         {
             Cursor = Cursor.Default;
-            await MessageDialog.Info(Owner, "Paste", $"Cannot paste into {dest}:\n{ex.Message}");
+            await MessageDialog.Info(Owner, title, $"Cannot write into {dest}:\n{ex.Message}");
             return null;
         }
         finally
@@ -838,9 +1469,9 @@ public partial class FileExplorerModule : UserControl, IModule
     /// Fills in every item's resolution, asking about each name the destination already holds.
     /// False means the user cancelled the whole paste, which leaves the clipboard alone.
     /// </summary>
-    private async Task<bool> ResolveConflictsAsync(PastePlan plan, string dest, bool move)
+    private async Task<bool> ResolveConflictsAsync(IReadOnlyList<PasteItem> items, string dest, bool move)
     {
-        foreach (var item in plan.Items)
+        foreach (var item in items)
             // A copy back into its own directory is not a clash with anything: replacing would mean
             // copying a file over itself, which cp refuses, and there is no rename here to offer any
             // other name, so it lands beside itself. A move there is the no-op it looks like.
@@ -848,7 +1479,7 @@ public partial class FileExplorerModule : UserControl, IModule
                 ? move ? PasteResolution.Skip : PasteResolution.KeepBoth
                 : PasteResolution.Fresh;
 
-        var conflicts = plan.Items.Where(i => i.Conflicts).ToList();
+        var conflicts = items.Where(i => i.Conflicts).ToList();
         PasteConflictDialog.Answer? forAll = null;
 
         for (var i = 0; i < conflicts.Count; i++)
@@ -897,10 +1528,10 @@ public partial class FileExplorerModule : UserControl, IModule
         PasteOutcome? outcome = null;
         Exception? error = null;
 
-        _pasting = true;
+        _busy = true;
         SyncMenu();
         using var cts = new CancellationTokenSource();
-        _pasteCts = cts;
+        _opCts = cts;
         Cursor = new Cursor(StandardCursorType.Wait);
         try
         {
@@ -914,8 +1545,8 @@ public partial class FileExplorerModule : UserControl, IModule
         catch (Exception ex) { error = ex; }
         finally
         {
-            _pasteCts = null;
-            _pasting = false;
+            _opCts = null;
+            _busy = false;
             Cursor = Cursor.Default;
             SyncMenu();
         }
@@ -979,24 +1610,38 @@ public partial class FileExplorerModule : UserControl, IModule
         // keeps a cut row selected and a hidden-files toggle from clearing what was picked.
         var wasSelected = SelectedRows.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
 
-        // A rename asks for its own result to be the selection, since the name it was picked by is
-        // the one thing that just stopped existing.
-        if (_selectAfterList is { } renamed)
+        // Something just happened that says what the selection should be: a rename's result, what a
+        // paste or upload landed, or the directory stepped out of. It replaces the old selection
+        // rather than adding to it, because the entries it names are the ones being pointed at.
+        if (_selectNext is { Count: > 0 } wanted)
         {
             wasSelected.Clear();
-            wasSelected.Add(renamed);
-            _selectAfterList = null;
+            foreach (var name in wanted) wasSelected.Add(name);
         }
+        _selectNext = null;
 
         _rows.Clear();
         foreach (var entry in ordered)
             _rows.Add(new RemoteFileRow(entry, _iconSize,
                 cut != null && cut.Contains(RemoteFileService.CombinePath(_currentDir, entry.Name))));
 
+        RemoteFileRow? first = null;
         if (wasSelected.Count > 0 && FileList.SelectedItems is { } selection)
             foreach (var row in _rows)
                 if (wasSelected.Contains(row.Name))
+                {
                     selection.Add(row);
+                    first ??= row;
+                }
+
+        // A selection nobody can see is no better than none, and these listings run to hundreds of
+        // entries. Posted at Loaded because an unarranged list cannot be scrolled, the same reason
+        // BeginRename waits before focusing its box.
+        if (first is { } target)
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_rows.Contains(target)) FileList.ScrollIntoView(target);
+            }, DispatcherPriority.Loaded);
 
         // Why the list is empty, so a directory with nothing in it never reads as a failed listing.
         // The hidden-only case is the one worth naming: the toggle that fixes it is right there.

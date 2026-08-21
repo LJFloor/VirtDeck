@@ -61,6 +61,15 @@ namespace VirtDeck.Services
         public string LastServerMediaDir { get; set; } = "";
 
         /// <summary>
+        /// Directory on this PC the file explorer last uploaded from or downloaded to. Separate from
+        /// <see cref="LastLocalMediaDir"/> for the reason that one is separate from its server twin:
+        /// install media lives where disk images live, and the files somebody moves in and out of the
+        /// explorer do not, so one shared value would send both pickers somewhere useless. Upload and
+        /// download share it, because both mean "where I keep things on this machine".
+        /// </summary>
+        public string LastLocalTransferDir { get; set; } = "";
+
+        /// <summary>
         /// Terminal font size, shared by the Terminal module and the container console: one font for
         /// every terminal the app draws. 13 matches <c>TerminalControl</c>'s own default, so an
         /// existing settings file that predates this key reads back exactly what it rendered before.

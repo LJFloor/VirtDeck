@@ -15,11 +15,47 @@ namespace VirtDeck.Avalonia.Services;
 /// </summary>
 internal static class DropFiles
 {
+    /// <summary>One dropped thing that exists on this filesystem.</summary>
+    public readonly record struct LocalItem(string Path, string Name, bool IsDir);
+
+    /// <summary>
+    /// Everything dropped that exists on this filesystem, files and directories alike, in the order
+    /// it was dropped; empty when the payload is not files at all. Anything without a local path is
+    /// still skipped, since every consumer walks it with <see cref="Directory"/> or opens it as a
+    /// <see cref="FileStream"/> rather than through a portal handle.
+    ///
+    /// <para>The file explorer is the only caller: it uploads a folder by recursing into it, so a
+    /// directory is a real answer here where it is not to <see cref="LocalFiles"/>.</para>
+    /// </summary>
+    public static List<LocalItem> LocalItems(DragEventArgs e)
+    {
+        var items = new List<LocalItem>();
+        var dropped = e.DataTransfer?.TryGetFiles();
+        if (dropped == null) return items;
+
+        foreach (var item in dropped)
+        {
+            if (FileDialogs.LocalPathOf(item) is not { } path) continue;
+            try
+            {
+                // A portal can hand back a folder as a plain item, so the filesystem decides which
+                // it is rather than the interface the item happens to implement.
+                var isDir = Directory.Exists(path);
+                if (!isDir && !File.Exists(path)) continue;
+                items.Add(new LocalItem(path, Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar,
+                                                                            Path.AltDirectorySeparatorChar)), isDir));
+            }
+            catch { /* unreadable is indistinguishable from absent here, and both mean "not dropped" */ }
+        }
+        return items;
+    }
+
     /// <summary>
     /// The dropped items that are real local files, in the order they were dropped; empty when the
-    /// payload is not files at all. Directories are skipped (the WinForms console skipped them too;
-    /// recursive upload was never implemented), and so is anything without a local path, since
-    /// every consumer needs a <see cref="FileStream"/> rather than a portal handle.
+    /// payload is not files at all. Directories are skipped, because every caller of this one wants
+    /// a single file to feed a VM (an ISO, a floppy image, a private key) and a directory is not one;
+    /// <see cref="LocalItems"/> is the variant that keeps them. Anything without a local path is
+    /// skipped too, since every consumer needs a <see cref="FileStream"/> rather than a portal handle.
     /// </summary>
     public static List<string> LocalFiles(DragEventArgs e)
     {

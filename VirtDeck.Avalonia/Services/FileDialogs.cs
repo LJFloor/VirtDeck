@@ -35,6 +35,42 @@ public static class FileDialogs
         catch { return null; }
     }
 
+    /// <summary>
+    /// Opens any number of local files; empty (never null) if cancelled. The multi-select sibling of
+    /// <see cref="OpenFileAsync"/>, for the file explorer's upload, where picking one file at a time
+    /// would be the wrong shape.
+    /// </summary>
+    public static async Task<List<string>> OpenFilesAsync(Window owner, string title, string filter,
+                                                          string? startDirectory = null)
+    {
+        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = true,
+            FileTypeFilter = ParseFilter(filter),
+            SuggestedStartLocation = await FolderOrNull(owner, startDirectory),
+        });
+        return files.Select(LocalPathOf).OfType<string>().ToList();
+    }
+
+    /// <summary>
+    /// Chooses one local directory; null if cancelled. Used both to pick a folder to upload and to
+    /// pick where a download lands, so the same <see cref="LocalPathOf"/> rule applies: a portal
+    /// handle with no path on this filesystem reads as "nothing picked", because everything
+    /// downstream walks it with <see cref="Directory"/> and <see cref="FileStream"/>.
+    /// </summary>
+    public static async Task<string?> OpenFolderAsync(Window owner, string title,
+                                                      string? startDirectory = null)
+    {
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            SuggestedStartLocation = await FolderOrNull(owner, startDirectory),
+        });
+        return LocalPathOf(folders.FirstOrDefault());
+    }
+
     /// <summary>Chooses a save location; null if cancelled.</summary>
     public static async Task<string?> SaveFileAsync(Window owner, string title, string filter,
                                                     string? suggestedName = null,

@@ -60,10 +60,21 @@ namespace VirtDeck.Services
     /// <summary>One entry of a paste, and what the destination already has under that name.</summary>
     public sealed class PasteItem
     {
-        /// <summary>Absolute path on the host, snapshotted when the user cut or copied.</summary>
+        /// <summary>
+        /// Absolute path of the thing being transferred, on whichever side it lives: on the host for
+        /// a cut or copy, snapshotted at the gesture; on this PC for an upload.
+        /// </summary>
         public string Source { get; init; } = string.Empty;
 
         public string Name { get; init; } = string.Empty;
+
+        /// <summary>
+        /// The first free "name (copy)" in the destination, filled by the pre-flight. A transfer
+        /// resolves <see cref="PasteResolution.KeepBoth"/> by naming the entry it writes, where a
+        /// paste resolves it in its own script; <see cref="RemoteFileService.InspectPaste"/> leaves
+        /// this empty and nothing reads it there.
+        /// </summary>
+        public string FreeName { get; init; } = string.Empty;
         public bool SourceIsDir { get; init; }
         public bool SourceMissing { get; init; }
         public bool TargetExists { get; init; }
@@ -130,6 +141,13 @@ namespace VirtDeck.Services
     {
         public int Transferred { get; init; }
         public int Skipped { get; init; }
+
+        /// <summary>
+        /// The names the entries actually landed under, which is not what they were called when the
+        /// script under "keep both" gave them a free one. The caller selects these afterwards, so it
+        /// has to be told the real names rather than the wanted ones.
+        /// </summary>
+        public List<string> Landed { get; init; } = new();
 
         /// <summary>The items that failed, kept whole so a retry as root can re-run just those.</summary>
         public List<(PasteItem Item, string Message)> Failures { get; init; } = new();
@@ -231,7 +249,7 @@ namespace VirtDeck.Services
         /// Hands a script to bash on the host without the login shell or sudo's single-quote rewrap
         /// getting a say: base64 is [A-Za-z0-9+/=] and survives both untouched.
         /// </summary>
-        private static string Wrap(string script) =>
+        internal static string Wrap(string script) =>
             $"echo {Convert.ToBase64String(Encoding.UTF8.GetBytes(script))} | base64 -d | bash";
 
         private static DirectoryListing Parse(string raw, string path)
@@ -315,6 +333,127 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// The destination half of <see cref="InspectPaste"/>, for an upload: the sources are on
+        /// this PC, so only the host side can be asked anything. Same round trip, same tagged
+        /// records, same <see cref="PastePlan"/>, which is what lets the conflict dialog and the
+        /// explorer's resolver settle an upload without knowing it is one.
+        ///
+        /// <para>There is no "destination inside a source" check, because a local directory cannot
+        /// contain a remote one. There is no <see cref="PasteItem.SameDirectory"/> either, for the
+        /// same reason: nothing local is ever already in the destination.</para>
+        /// </summary>
+        public PastePlan InspectIncoming(IReadOnlyList<(string Path, string Name, bool IsDir)> sources,
+                                         string destination, bool elevated)
+        {
+            var script = IncomingScript(sources, destination);
+            var raw = elevated ? _ssh.RunSudoCommand(script) : _ssh.RunCommand(script);
+            return ParseIncoming(raw, sources, destination);
+        }
+
+        /// <summary>
+        /// Total apparent size of some paths, for a download's progress bar. <c>-1</c> means the host
+        /// would not say, which leaves the bar indeterminate rather than inventing a number.
+        ///
+        /// <para><c>du -sb</c> is apparent size rather than blocks used, so it matches what the tar
+        /// will actually carry; it is GNU-only, as this file's <c>find -printf</c> already is.</para>
+        /// </summary>
+        public long Measure(IReadOnlyList<string> paths, bool elevated)
+        {
+            if (paths.Count == 0) return 0;
+
+            var body =
+                "export LC_ALL=C\n" +
+                ArrayFrom("a", paths) +
+                "du -sb -- \"${a[@]}\" 2>/dev/null | awk '{t+=$1} END {printf \"%d\\n\", t}'\n" +
+                "exit 0\n";
+
+            try
+            {
+                var raw = elevated ? _ssh.RunSudoCommand(Wrap(body)) : _ssh.RunCommand(Wrap(body));
+                return long.TryParse(raw.Trim(), out var total) && total > 0 ? total : -1;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// The upload pre-flight script. Shaped exactly like <see cref="InspectScript"/>: the same
+        /// destination checks, the same NUL-terminated tagged records with the name last and
+        /// therefore unbounded, and <c>exit 0</c> for every state modelled here.
+        ///
+        /// <para>It also answers the free "name (copy)" per source, because a transfer has no
+        /// host-side loop of its own to resolve <see cref="PasteResolution.KeepBoth"/> in. The
+        /// extension split is the one <see cref="PasteScript"/> uses, dot after the first character
+        /// only and never for a directory, so a name lands identically whichever route created it.
+        /// </para>
+        /// </summary>
+        private static string IncomingScript(IReadOnlyList<(string Path, string Name, bool IsDir)> sources,
+                                             string destination)
+        {
+            var d = Convert.ToBase64String(Encoding.UTF8.GetBytes(destination));
+
+            var body =
+                "export LC_ALL=C\n" +
+                $"d=$(echo {d} | base64 -d)\n" +
+                ArrayFrom("a", sources.Select(x => x.Name)) +
+                ArrayFrom("k", sources.Select(x => x.IsDir ? "d" : "f")) +
+                "if [ ! -d \"$d\" ]; then printf 'e\\tnodest\\0'; exit 0; fi\n" +
+                "if [ ! -w \"$d\" ] || [ ! -x \"$d\" ]; then printf 'e\\tdenied\\0'; exit 0; fi\n" +
+                "i=-1\n" +
+                "for n in \"${a[@]}\"; do\n" +
+                "  i=$((i+1))\n" +
+                "  t=\"$d/$n\"\n" +
+                // -L as well as -e, so a broken symlink in the way counts as present.
+                "  tt=-; if [ -e \"$t\" ] || [ -L \"$t\" ]; then tt=f; [ -d \"$t\" ] && tt=d; fi\n" +
+                "  base=$n; ext=\n" +
+                "  if [ \"${k[$i]}\" != d ]; then case \"$n\" in ?*.*) base=${n%.*}; ext=\".${n##*.}\";; esac; fi\n" +
+                "  c=1; f=\"$base (copy)$ext\"\n" +
+                "  while [ -e \"$d/$f\" ] || [ -L \"$d/$f\" ]; do c=$((c+1)); f=\"$base (copy $c)$ext\"; done\n" +
+                // The free name is base64'd, not raw: it sits before the entry name so the name can
+                // stay the unbounded last field, and a name holding a tab would otherwise split the
+                // record in the middle. Same reason PasteScript base64s its payload fields.
+                "  printf 'i\\t%s\\t%s\\t%s\\0' \"$tt\" \"$(printf '%s' \"$f\" | base64 | tr -d '\\n')\" \"$n\"\n" +
+                "done\n" +
+                "exit 0\n";
+
+            return Wrap(body);
+        }
+
+        private static PastePlan ParseIncoming(string raw, IReadOnlyList<(string Path, string Name, bool IsDir)> sources,
+                                               string destination)
+        {
+            var items = new List<PasteItem>();
+            var at = 0;
+
+            foreach (var record in raw.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = record.TrimStart('\n', '\r');
+                if (line.Length == 0) continue;
+
+                if (line.StartsWith("e\t", StringComparison.Ordinal))
+                    return Blocked(line[2..].Trim(), destination);
+
+                var f = line.Split('\t', 4);
+                if (f.Length < 4 || f[0] != "i") continue;
+                if (at >= sources.Count) break;
+
+                // By position, never by name, for the reason ParsePlan gives.
+                var source = sources[at++];
+
+                items.Add(new PasteItem
+                {
+                    Source = source.Path,
+                    Name = source.Name,
+                    SourceIsDir = source.IsDir,
+                    TargetExists = f[1] != "-",
+                    TargetIsDir = f[1] == "d",
+                    FreeName = Decode(f[2]),
+                });
+            }
+
+            return new PastePlan { Items = items };
+        }
+
+        /// <summary>
         /// Runs the paste, naming each entry through <paramref name="onItem"/> as it starts. It
         /// streams on a connection of its own, so a large copy never holds the shared client's lock
         /// and every other module keeps working while it runs.
@@ -326,6 +465,7 @@ namespace VirtDeck.Services
 
             var transferred = 0;
             var skipped = 0;
+            var landed = new List<string>();
             var failures = new List<(PasteItem Item, string Message)>();
             var denied = false;
 
@@ -342,6 +482,10 @@ namespace VirtDeck.Services
                         break;
                     case "o":
                         transferred++;
+                        // The script has been sending the final basename all along; it is what a
+                        // "keep both" landed under, so it is the only reliable thing to select by.
+                        if (Decode(f.Length > 2 ? f[2] : string.Empty) is { Length: > 0 } name)
+                            landed.Add(name);
                         break;
                     case "s":
                         skipped++;
@@ -365,6 +509,7 @@ namespace VirtDeck.Services
             {
                 Transferred = transferred,
                 Skipped = skipped,
+                Landed = landed,
                 Failures = failures,
                 AnyDenied = denied,
             };
@@ -572,7 +717,7 @@ namespace VirtDeck.Services
         /// contain. <c>read -r -d ''</c> rather than <c>mapfile -d ''</c>, so nothing depends on the
         /// host's bash being 4.4 or newer.
         /// </summary>
-        private static string ArrayFrom(string name, IEnumerable<string> values)
+        internal static string ArrayFrom(string name, IEnumerable<string> values)
         {
             var blob = string.Concat(values.Select(v => v + "\0"));
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(blob));
@@ -585,7 +730,7 @@ namespace VirtDeck.Services
         /// <c>RunSudoCommand</c> neither escapes its argument nor wraps it in a shell, so callers
         /// spell their own out. Same rule, same shape as <c>VirshService.SparsifyDisk</c>.
         /// </summary>
-        private static string SudoWrap(string script) =>
+        internal static string SudoWrap(string script) =>
             $"bash -c \"$(echo {Convert.ToBase64String(Encoding.UTF8.GetBytes(script))} | base64 -d)\"";
 
         private static string Decode(string b64)

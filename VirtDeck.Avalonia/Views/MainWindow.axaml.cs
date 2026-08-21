@@ -95,8 +95,10 @@ public partial class MainWindow : Window
 
     // All bytes that ride the SSH tunnel: management channel + forwarded SPICE console sockets +
     // reverse-forwarded media streaming. Each path is a distinct socket, so there's no double-count.
+    // BytesSent is here because the file explorer's uploads are the first thing in the app to send
+    // enough for the readout's claim to cover everything to be worth anything.
     private long TotalTunnelBytes() =>
-        _ssh.BytesReceived + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed;
+        _ssh.BytesReceived + _ssh.BytesSent + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed;
 
     private void UpdateThroughput()
     {

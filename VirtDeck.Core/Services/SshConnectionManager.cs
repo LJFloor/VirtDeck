@@ -32,6 +32,12 @@ namespace VirtDeck.Services
         private long _bytesReceived;
         public long BytesReceived => Interlocked.Read(ref _bytesReceived);
 
+        // The other direction. Nothing sent enough for this to be worth counting until the file
+        // explorer gained uploads; the shell's throughput readout claims to cover every byte that
+        // rides the tunnel, so it folds this in too.
+        private long _bytesSent;
+        public long BytesSent => Interlocked.Read(ref _bytesSent);
+
         public SshClient Client => _client ?? throw new InvalidOperationException("Not connected.");
 
         /// <summary>Connects with a password, which is also used for sudo.</summary>
@@ -204,6 +210,225 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// Runs a command on a dedicated connection and copies its stdout into
+        /// <paramref name="destination"/>. The connection is its own, like
+        /// <see cref="RunSudoCommandStreaming"/> and the PTY factories, so a transfer that runs for
+        /// minutes never holds <c>_ioLock</c> and every other module keeps working behind it.
+        ///
+        /// <para>Unlike <see cref="RunSudoCommand"/> this neither escapes <paramref name="command"/>
+        /// nor wraps it in a shell; callers spell out their own wrapper, the same rule
+        /// <see cref="RunSudoCommandStreaming"/> follows.</para>
+        /// </summary>
+        public async Task RunPipeOutAsync(string command, bool elevated, Stream destination,
+                                          Action<int>? onChunk, CancellationToken ct)
+        {
+            if (_client is not { IsConnected: true })
+                throw new InvalidOperationException("SSH is not connected.");
+
+            var info = _client.ConnectionInfo;
+
+            await Task.Run(() =>
+            {
+                using var ssh = new SshClient(info);
+                ssh.Connect();
+                try
+                {
+                    using var cmd = ssh.CreateCommand(elevated ? $"sudo -S -p '' {command}" : command);
+
+                    using var reg = ct.Register(() =>
+                    {
+                        try { cmd.CancelAsync(); } catch { }
+                        try { ssh.Disconnect(); } catch { }
+                    });
+
+                    var ar = cmd.BeginExecute();
+                    if (elevated) FeedSudoPassword(cmd);
+
+                    var buf = new byte[65536];
+                    try
+                    {
+                        int n;
+                        while ((n = cmd.OutputStream.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            if (ct.IsCancellationRequested) break;
+                            destination.Write(buf, 0, n);
+                            Interlocked.Add(ref _bytesReceived, n);
+                            onChunk?.Invoke(n);
+                        }
+                    }
+                    catch (Exception ex) when (ct.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException("Transfer cancelled.", ex, ct);
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    cmd.EndExecute(ar);
+
+                    if (cmd.ExitStatus != 0)
+                        throw new Exception($"Remote read failed (exit {cmd.ExitStatus}): {StripSudoPrompt(cmd.Error)}");
+                }
+                finally
+                {
+                    try { ssh.Disconnect(); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// The mirror of <see cref="RunPipeOutAsync"/>: runs a script on a dedicated connection and
+        /// lets <paramref name="writeBody"/> fill its stdin.
+        ///
+        /// <para>This one takes a <b>script body</b> where <see cref="RunPipeOutAsync"/> takes a
+        /// command line, and does its own base64 wrapping, because the sentinel below has to be
+        /// composed into the same script and is generated per call. So a caller writes plain bash
+        /// here and does not pick between <c>Wrap</c> and <c>SudoWrap</c>.</para>
+        ///
+        /// <para><b>The elevated path cannot use <see cref="FeedSudoPassword"/></b>, which writes the
+        /// password and then closes stdin: here stdin is the payload. So both travel the one stream,
+        /// and a sentinel line between them is what makes the handover deterministic.</para>
+        ///
+        /// <para>Writing the password and trusting <c>sudo -S</c> to stop at the newline is only half
+        /// right. Sudo does read a byte at a time and never over-reads past the newline (measured:
+        /// feed it ten lines with a wrong password and lines four onward are still on the stream).
+        /// But on a NOPASSWD host, or with its credentials still cached, it does not read stdin
+        /// <b>at all</b>, and the password line would then be the first thing the payload command
+        /// saw, which for a tar means a corrupt archive. So the client writes <c>password</c>, then
+        /// <c>sentinel</c>, then the payload, and the host skips lines until it has seen the
+        /// sentinel: sudo having eaten the first line or not, both cases arrive at the same place.
+        /// Same trick, and the same reason, as <see cref="SshPtySession"/>'s per-session marker.</para>
+        ///
+        /// <para>bash's <c>read</c> consumes one byte at a time from a pipe for that same reason, so
+        /// the payload is still intact for the <c>exec</c> that follows.</para>
+        ///
+        /// <para>A <i>wrong</i> sudo password needs no handling here: sudo spends its three attempts
+        /// on the next three lines and exits, this end's writes then fail, and the non-zero exit is
+        /// reported. It cannot silently swallow a large upload. In practice the login window's
+        /// <see cref="CheckSudo"/> has already rejected a bad password long before this.</para>
+        /// </summary>
+        public async Task RunPipeInAsync(string script, bool elevated,
+                                         Func<Stream, CancellationToken, Task> writeBody,
+                                         CancellationToken ct)
+        {
+            if (_client is not { IsConnected: true })
+                throw new InvalidOperationException("SSH is not connected.");
+
+            var info = _client.ConnectionInfo;
+            var password = _sudoPassword;
+            var sentinel = "__VD_" + Guid.NewGuid().ToString("N") + "__";
+
+            string full;
+            if (elevated)
+            {
+                var inner = $"while IFS= read -r __l; do [ \"$__l\" = \"{sentinel}\" ] && break; done\n"
+                            + script;
+                var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(inner));
+                full = $"sudo -S -p '' bash -c \"$(echo {b64} | base64 -d)\"";
+            }
+            else
+            {
+                // bash -c "$(...)" and NOT the "echo | base64 -d | bash" that RemoteFileService.Wrap
+                // uses: piping a script INTO bash makes that pipe bash's stdin, so the payload
+                // command would inherit the exhausted script pipe instead of this channel and read
+                // nothing. (tar answers "This does not look like a tar archive".) Every other script
+                // in the app can be piped in because none of them reads stdin; these are the ones
+                // that do, so the script has to arrive as an argument and leave stdin alone.
+                var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(script));
+                full = $"bash -c \"$(echo {b64} | base64 -d)\"";
+            }
+
+            await Task.Run(async () =>
+            {
+                using var ssh = new SshClient(info);
+                ssh.Connect();
+                try
+                {
+                    using var cmd = ssh.CreateCommand(full);
+
+                    using var reg = ct.Register(() =>
+                    {
+                        try { cmd.CancelAsync(); } catch { }
+                        try { ssh.Disconnect(); } catch { }
+                    });
+
+                    var ar = cmd.BeginExecute();
+
+                    try
+                    {
+                        using (var stdin = cmd.CreateInputStream())
+                        {
+                            if (elevated)
+                            {
+                                var preamble = System.Text.Encoding.UTF8.GetBytes(
+                                    password + "\n" + sentinel + "\n");
+                                stdin.Write(preamble, 0, preamble.Length);
+                                stdin.Flush();
+                            }
+
+                            await writeBody(new CountingStream(stdin, n => Interlocked.Add(ref _bytesSent, n)), ct);
+                        }
+                        // Disposing the input stream is the EOF the far end waits for.
+                    }
+                    catch (Exception ex) when (ct.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException("Transfer cancelled.", ex, ct);
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    cmd.EndExecute(ar);
+
+                    if (cmd.ExitStatus != 0)
+                        throw new Exception($"Remote write failed (exit {cmd.ExitStatus}): {StripSudoPrompt(cmd.Error)}");
+                }
+                finally
+                {
+                    try { ssh.Disconnect(); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// Counts what passes through on the way to the inner stream. Write-only: the SSH input
+        /// substream is not readable or seekable, and nothing here needs it to be.
+        /// </summary>
+        private sealed class CountingStream(Stream inner, Action<int> onWrote) : Stream
+        {
+            public override bool CanRead => false;
+            public override bool CanSeek => false;
+            public override bool CanWrite => true;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() => inner.Flush();
+            public override int Read(byte[] b, int o, int c) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                inner.Write(buffer, offset, count);
+                onWrote(count);
+            }
+
+            public override void Write(ReadOnlySpan<byte> buffer)
+            {
+                inner.Write(buffer);
+                onWrote(buffer.Length);
+            }
+
+            // Deliberately not disposing the inner stream: RunPipeInAsync owns it, and its dispose
+            // is the EOF that ends the remote command.
+            protected override void Dispose(bool disposing) => base.Dispose(disposing);
+        }
+
+        /// <summary>
+        /// Sudo's own prompt is not part of a command's error message: <c>sudo -S</c> always echoes
+        /// "[sudo] password for user: " to stderr, and reporting that as the reason a command failed
+        /// says nothing.
+        /// </summary>
+        private static string StripSudoPrompt(string error) =>
+            System.Text.RegularExpressions.Regex.Replace(
+                error.Trim(), @"\[sudo\] password for [^:]+:\s*", "").Trim();
+
+        /// <summary>
         /// Streams a remote file to <paramref name="destination"/> using a dedicated SSH connection
         /// (does not hold <c>_ioLock</c>) via <c>sudo dd</c>. Reports (bytesDownloaded, totalBytes)
         /// where totalBytes is -1 when the size could not be determined.
@@ -219,71 +444,24 @@ namespace VirtDeck.Services
             if (_client is not { IsConnected: true })
                 throw new InvalidOperationException("SSH is not connected.");
 
-            await Task.Run(() =>
+            var pathB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(remotePath));
+
+            var total = knownSize;
+            if (total < 0)
             {
-                using var sshDown = new SshClient(_client.ConnectionInfo);
-                sshDown.Connect();
                 try
                 {
-                    var pathB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(remotePath));
-
-                    var total = knownSize;
-                    if (total < 0)
-                    {
-                        try
-                        {
-                            using var sizeCmd = sshDown.CreateCommand(
-                                $"sudo -S -p '' stat -c %s \"$(echo {pathB64} | base64 -d)\" 2>/dev/null");
-                            var sizeAr = sizeCmd.BeginExecute();
-                            FeedSudoPassword(sizeCmd);
-                            sizeCmd.EndExecute(sizeAr);
-                            if (long.TryParse(sizeCmd.Result.Trim(), out var sz)) total = sz;
-                        }
-                        catch { }
-                    }
-
-                    using var cmd = sshDown.CreateCommand(
-                        $"sudo -S -p '' dd if=\"$(echo {pathB64} | base64 -d)\" bs=4M 2>/dev/null");
-
-                    using var reg = ct.Register(() =>
-                    {
-                        try { cmd.CancelAsync(); } catch { }
-                        try { sshDown.Disconnect(); } catch { }
-                    });
-
-                    var ar = cmd.BeginExecute();
-                    FeedSudoPassword(cmd);
-                    var buf = new byte[65536];
-                    long done = 0;
-
-                    try
-                    {
-                        int n;
-                        while ((n = cmd.OutputStream.Read(buf, 0, buf.Length)) > 0)
-                        {
-                            if (ct.IsCancellationRequested) break;
-                            destination.Write(buf, 0, n);
-                            done += n;
-                            Interlocked.Add(ref _bytesReceived, n);
-                            progress.Report((done, total));
-                        }
-                    }
-                    catch (Exception ex) when (ct.IsCancellationRequested)
-                    {
-                        throw new OperationCanceledException("Download cancelled.", ex, ct);
-                    }
-
-                    ct.ThrowIfCancellationRequested();
-                    cmd.EndExecute(ar);
-
-                    if (cmd.ExitStatus != 0)
-                        throw new Exception($"Remote read failed (exit {cmd.ExitStatus}): {cmd.Error.Trim()}");
+                    total = long.TryParse(
+                        RunSudoCommand($"stat -c %s \"$(echo {pathB64} | base64 -d)\" 2>/dev/null").Trim(),
+                        out var sz) ? sz : -1;
                 }
-                finally
-                {
-                    try { sshDown.Disconnect(); } catch { }
-                }
-            }, ct);
+                catch { }
+            }
+
+            long done = 0;
+            await RunPipeOutAsync($"dd if=\"$(echo {pathB64} | base64 -d)\" bs=4M 2>/dev/null",
+                                  elevated: true, destination,
+                                  n => progress.Report((done += n, total)), ct);
         }
 
         /// <summary>
@@ -319,10 +497,7 @@ namespace VirtDeck.Services
                 cmd.EndExecute(ar);
                 if (cmd.ExitStatus == 0) return;
                 
-                // sudo -S always echoes "[sudo] password for user: " to stderr; strip it.
-                var err = System.Text.RegularExpressions.Regex.Replace(
-                    cmd.Error.Trim(), @"\[sudo\] password for [^:]+:\s*", "").Trim();
-                throw new Exception($"Command failed (exit {cmd.ExitStatus}): {err}");
+                throw new Exception($"Command failed (exit {cmd.ExitStatus}): {StripSudoPrompt(cmd.Error)}");
             }
             finally
             {
