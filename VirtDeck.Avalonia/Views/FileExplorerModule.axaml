@@ -188,12 +188,16 @@
             <MenuItem Name="MenuDownload" Header="Download..." />
             <Separator />
             <!-- Display only: these carry Click handlers rather than commands, so naming the chord
-                 here cannot also fire it. The keys themselves are bound to the list. -->
+                 here cannot also fire it. The keys themselves are bound in the code-behind. -->
             <MenuItem Name="MenuCut" Header="Cut" InputGesture="Ctrl+X" />
             <MenuItem Name="MenuCopy" Header="Copy" InputGesture="Ctrl+C" />
             <MenuItem Name="MenuPaste" Header="Paste" InputGesture="Ctrl+V" />
             <Separator />
+            <!-- Rename and Delete are the two commands that act on the picked entries where they
+                 are, so they share a group. Delete needs no separator of its own to slow the hand
+                 down: it asks before it does anything. -->
             <MenuItem Name="MenuRename" Header="Rename" InputGesture="F2" />
+            <MenuItem Name="MenuDelete" Header="Delete" InputGesture="Delete" />
           </ContextMenu>
         </ListBox.ContextMenu>
         <ListBox.ItemTemplate>

@@ -25,10 +25,16 @@ namespace VirtDeck.Avalonia.Views;
 /// that elevation covers one listing only. It never latches, so nothing is ever quietly showing
 /// root's view of the machine.</para>
 ///
-/// <para>It navigates, sorts, and moves and copies files about <b>on the host</b>: Cut, Copy and
-/// Paste, from the context menu or from Ctrl+X, Ctrl+C and Ctrl+V. There is still no upload, no
-/// download, no rename, and no Delete command of its own; the one recursive delete anywhere in here
-/// is of a move's source, which is what a move is.</para>
+/// <para>It navigates and sorts, moves and copies files about <b>on the host</b> (Cut, Copy and
+/// Paste, from the context menu or from Ctrl+X, Ctrl+C and Ctrl+V), renames an entry in its own row,
+/// uploads and downloads whole trees, and deletes. There is still no viewer, no tree pane and no
+/// directory watch.</para>
+///
+/// <para>Delete is permanent: one <c>rm -rf</c> per entry, with no trash on the host to take it back
+/// out of, which is why it is the one command here that asks before it does anything. Nothing else
+/// in this module removes what the user did not name, and that is deliberate: a paste's merge leaves
+/// whatever was only in the target, and the other recursive deletes in here are of a move's source,
+/// which is what a move is, and of what a cancelled transfer had just created.</para>
 ///
 /// <para>The clipboard is this module's own and never the desktop's: a path on the server would mean
 /// nothing pasted into a local application. ("Copy path" is the separate command that does put text
@@ -72,10 +78,10 @@ public partial class FileExplorerModule : UserControl, IModule
     /// <summary>What Cut or Copy set aside, or null when nothing is waiting to be pasted.</summary>
     private FileClip? _clip;
 
-    /// <summary>True while a paste, an upload or a download is on the wire. Every command that could
-    /// start a second one is disabled meanwhile, and the token lets <see cref="Shutdown"/> drop the
-    /// connection it holds. One flag for all three, because they are the same hazard: each runs on a
-    /// connection of its own and each ends by re-listing the directory underneath it.</summary>
+    /// <summary>True while a paste, a delete, an upload or a download is on the wire. Every command
+    /// that could start a second one is disabled meanwhile, and the token lets <see cref="Shutdown"/>
+    /// drop the connection it holds. One flag for all four, because they are the same hazard: each
+    /// runs on a connection of its own and each ends by re-listing the directory underneath it.</summary>
     private bool _busy;
     private CancellationTokenSource? _opCts;
 
@@ -171,6 +177,7 @@ public partial class FileExplorerModule : UserControl, IModule
             try { _opCts?.Cancel(); } catch { }
         };
         MenuRename.Click += (_, _) => BeginRename();
+        MenuDelete.Click += async (_, _) => await DeleteSelectedAsync();
 
         SetUpDragDrop();
 
@@ -252,10 +259,11 @@ public partial class FileExplorerModule : UserControl, IModule
     public void Deactivate() { }
 
     /// <summary>
-    /// Nothing to tear down but a paste, upload or download still on the wire. This module owns no
-    /// window and no NBD server, and every listing rides the shell's shared connection; those three
-    /// are the only things here that hold a connection of their own, and the shell disposes the
-    /// shared one, with the auth material every second client borrows, straight after this.
+    /// Nothing to tear down but a paste, a delete, an upload or a download still on the wire. This
+    /// module owns no window and no NBD server, and every listing rides the shell's shared
+    /// connection; those four are the only things here that hold a connection of their own, and the
+    /// shell disposes the shared one, with the auth material every second client borrows, straight
+    /// after this.
     /// </summary>
     public void Shutdown()
     {
@@ -456,17 +464,17 @@ public partial class FileExplorerModule : UserControl, IModule
     }
 
     /// <summary>
-    /// Cut, Copy, Paste and Rename hang off the <b>top level</b>, unlike the navigation keys beside
-    /// them, and the reason is focus. Repopulating the list destroys the <c>ListBoxItem</c> that had
+    /// Cut, Copy, Paste, Rename and Delete hang off the <b>top level</b>, unlike the navigation keys
+    /// beside them, and the reason is focus. Repopulating the list destroys the <c>ListBoxItem</c> that had
     /// keyboard focus, and both cutting and navigating repopulate, so by the moment Paste is wanted
     /// the list has usually just stopped being focused and a list-scoped handler would never see the
     /// chord at all. Registering here and unregistering on detach is what scopes it to this module
     /// being on screen, the way <c>TerminalModule</c> scopes its own.
     ///
     /// <para>Bubbling, and deliberately <b>not</b> handled-too: that is the entire gate. A TextBox
-    /// has already consumed Ctrl+X, Ctrl+C and Ctrl+V by the time the event would reach here, so
-    /// inside the path box those three keep meaning what they mean in any other text box, with
-    /// nothing to test for.</para>
+    /// has already consumed Ctrl+X, Ctrl+C, Ctrl+V and Delete by the time the event would reach
+    /// here, so inside the path box and inside the rename editor those keep meaning what they mean
+    /// in any other text box, with nothing to test for.</para>
     /// </summary>
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -501,6 +509,10 @@ public partial class FileExplorerModule : UserControl, IModule
             case Key.F2:
                 e.Handled = true;
                 BeginRename();
+                break;
+            case Key.Delete:
+                e.Handled = true;
+                await DeleteSelectedAsync();
                 break;
         }
     }
@@ -562,6 +574,9 @@ public partial class FileExplorerModule : UserControl, IModule
         // is a directory that actually listed, which is the same thing Paste asks for.
         MenuUploadFiles.IsEnabled = MenuUploadFolder.IsEnabled = _transfers != null && !_failed && !_busy;
         MenuDownload.IsEnabled = rows.Count > 0 && !_busy;
+        // Acts on what is picked, the way Cut and Copy do, and must not start on top of an operation
+        // already running or on top of a rename in progress.
+        MenuDelete.IsEnabled = rows.Count > 0 && !_busy && _editing == null;
     }
 
     /// <summary>
@@ -804,6 +819,217 @@ public partial class FileExplorerModule : UserControl, IModule
         _clip = new FileClip(clip.Paths.Select(path => path == from ? to : path).ToList(), clip.IsCut);
     }
 
+    // ---- Deleting -------------------------------------------------------
+
+    /// <summary>
+    /// Removes the picked entries from the host, permanently. There is no trash to take them back
+    /// out of, so the confirmation in front of this is the whole safety mechanism and there is no
+    /// way to skip it.
+    ///
+    /// <para>Unlike a paste there is no pre-flight, because a delete has nothing to ask. Whether an
+    /// entry is still there is answered by <c>rm -f</c>, which is silent about a path that has
+    /// already gone and is right to be: the user asked for it not to be there. Whether they may is
+    /// answered by the run itself, per entry, and that answer is what drives the retry as root.</para>
+    /// </summary>
+    private async Task DeleteSelectedAsync()
+    {
+        if (_files is null || _failed || _busy || _editing != null) return;
+
+        var rows = SelectedRows;
+        if (rows.Count == 0) return;
+
+        if (!await MessageDialog.Confirm(Owner, "Delete", DeletePrompt(rows))) return;
+
+        var paths = rows.Select(r => RemoteFileService.CombinePath(_currentDir, r.Name)).ToList();
+
+        // Read off the rows on screen, before anything goes and before the re-list rebuilds them.
+        var survivor = NearestSurvivor(rows);
+
+        // Always as the user first, however the listing on screen happened to be read. An elevated
+        // listing covers one listing and does not latch, and a delete is the last thing in this app
+        // that should escalate unasked: the host refusing is what earns the offer.
+        var outcome = await RunDeleteAsync(paths, elevated: false);
+        if (outcome is null) return;
+
+        var gone = outcome.Gone;
+        var failures = outcome.Failures;
+        var cancelled = outcome.Cancelled;
+
+        // The retry covers the entries the host refused and nothing else, and it leaves
+        // _shownElevated alone, exactly as a paste's does. Not offered after a cancel: the user has
+        // just said stop, and asking them to escalate would be answering a different question.
+        if (!cancelled && outcome.AnyDenied && failures.Count > 0 &&
+            await MessageDialog.Confirm(Owner, "Delete",
+                $"{Count(failures.Count, "entry", "entries")} could not be deleted: the host refused " +
+                "permission.\n\nRetry those as root? That covers this one delete. The next is read " +
+                "and written as you again."))
+        {
+            var retry = await RunDeleteAsync(failures.Select(f => f.Path).ToList(), elevated: true);
+            if (retry is not null)
+            {
+                gone = gone.Concat(retry.Gone).ToList();
+                failures = retry.Failures;
+                cancelled = retry.Cancelled;
+            }
+        }
+
+        DropFromClip(gone);
+
+        // The selection follows what just happened, and what just happened to an entry that failed
+        // is nothing: it is still there and it is the work left over, so that is what gets pointed
+        // at. A clean delete has nothing of its own to point at and takes the nearest survivor.
+        IEnumerable<string> next = failures.Count > 0
+            ? failures.Select(f => f.Name)
+            : survivor is { } name ? new[] { name } : Array.Empty<string>();
+        SelectAfterList(next);
+
+        // Nothing on the host tells a client that a directory changed, so the re-list is explicit.
+        // It happens after a cancel too, unlike a cancelled paste's: whatever went is gone, and the
+        // listing would otherwise still be showing it.
+        await NavigateTo(_currentDir, record: false, elevated: _shownElevated);
+
+        // After the re-list, which repaints the status slot with the listing's own line.
+        if (cancelled)
+            SetStatus($"Delete cancelled. {Count(gone.Count, "entry", "entries")} had already gone, " +
+                      "and nothing can be put back.");
+        else if (failures.Count > 0)
+            await MessageDialog.Info(Owner, "Delete",
+                string.Join("\n", failures.Select(f => $"{f.Name}: {f.Message}")));
+        else
+            SetStatus($"{Count(gone.Count, "entry", "entries")} deleted");
+    }
+
+    /// <summary>
+    /// What the confirmation says. Up to five entries are named and past that it falls back to a
+    /// count, because <see cref="MessageDialog"/> is a fixed 420 wide and sizes to its content, so a
+    /// selection of three hundred would draw a window taller than the screen. A folder is always
+    /// said to take everything in it, because that is the part somebody can be wrong about.
+    /// </summary>
+    private static string DeletePrompt(IReadOnlyList<RemoteFileRow> rows)
+    {
+        const string Gone = "There is no trash on the host to take it back out of.";
+
+        if (rows.Count == 1)
+            return rows[0].IsDir
+                ? $"Delete {rows[0].Name} and everything in it?\n\nIt is removed for good. {Gone}"
+                : $"Delete {rows[0].Name}?\n\nIt is removed for good. {Gone}";
+
+        var folders = rows.Count(r => r.IsDir);
+
+        if (rows.Count <= 5)
+            return $"Delete these {rows.Count} entries?\n\n" +
+                   string.Join("\n", rows.Select(r => r.Name)) +
+                   (folders > 0 ? "\n\nA folder goes with everything in it." : "") +
+                   $"\n\nThey are removed for good. {Gone}";
+
+        var folderNote = folders switch
+        {
+            0 => "",
+            1 => "One of them is a folder and goes with everything in it. ",
+            _ => $"{folders} of them are folders and go with everything in them. ",
+        };
+
+        return $"Delete {rows.Count} entries?\n\n{folderNote}They are removed for good. {Gone}";
+    }
+
+    /// <summary>
+    /// Runs one pass of the delete, the counterpart of <see cref="RunPasteAsync"/>. Null means it
+    /// threw and has been reported; a cancelled run comes back as a real outcome, because what it
+    /// already removed is the one thing the caller has to know.
+    /// </summary>
+    private async Task<DeleteOutcome?> RunDeleteAsync(IReadOnlyList<string> paths, bool elevated)
+    {
+        if (_files is null || paths.Count == 0) return null;
+
+        var files = _files;
+        var total = paths.Count;
+        var done = 0;
+        DeleteOutcome? outcome = null;
+        Exception? error = null;
+
+        _busy = true;
+        SyncMenu();
+        using var cts = new CancellationTokenSource();
+        _opCts = cts;
+        Cursor = new Cursor(StandardCursorType.Wait);
+
+        // The strip rather than the status line a paste counts into: this is the one command in the
+        // module that cannot be undone, so it is the one that most needs a Cancel button beside it.
+        // Progress here is over entries rather than bytes, which the bar takes perfectly well, and
+        // PaintXfer is the byte-shaped half of the strip, so this paints the two controls itself.
+        ShowXfer("Deleting", total);
+        try
+        {
+            outcome = await Task.Run(() => files.Delete(paths, elevated,
+                // The callback arrives on the delete's own read thread; ++done is safe because every
+                // post runs on the one UI thread.
+                name => Dispatcher.UIThread.Post(() =>
+                {
+                    done++;
+                    // A late post from a run that has already ended, or one that would paint over
+                    // the Cancel button's own "Cancelling…".
+                    if (!XferPanel.IsVisible || !CancelXferButton.IsEnabled) return;
+                    XferText.Text = $"Deleting {name} ({done}/{total})";
+                    XferProgress.Value = Math.Clamp(done * 1000.0 / total, 0, 1000);
+                }),
+                cts.Token));
+        }
+        catch (OperationCanceledException) { outcome = new DeleteOutcome { Cancelled = true }; }
+        catch (Exception ex) { error = ex; }
+        finally
+        {
+            _opCts = null;
+            _busy = false;
+            Cursor = Cursor.Default;
+            HideXfer();
+            SyncMenu();
+        }
+
+        if (error is null) return outcome;
+        await MessageDialog.Info(Owner, "Delete", error.Message);
+        return null;
+    }
+
+    /// <summary>
+    /// Takes deleted paths off this module's clipboard, along with anything that was under one of
+    /// them. The clipboard holds paths and one of them may have just stopped existing, which would
+    /// only fail at paste time saying so; a cut whose every entry is gone stops being a cut rather
+    /// than becoming an empty one. Same rule, and the same reason, as
+    /// <see cref="FollowRenameInClip"/>. No repaint here: the caller re-lists straight after, and
+    /// <c>PopulateList</c> reads the clipboard fresh on every rebuild.
+    /// </summary>
+    private void DropFromClip(IReadOnlyList<string> gone)
+    {
+        if (_clip is not { } clip || gone.Count == 0) return;
+
+        var left = clip.Paths
+            .Where(p => !gone.Any(g => p == g || p.StartsWith(g + "/", StringComparison.Ordinal)))
+            .ToList();
+
+        if (left.Count == clip.Paths.Count) return;
+        _clip = left.Count > 0 ? new FileClip(left, clip.IsCut) : null;
+    }
+
+    /// <summary>
+    /// What to point at once these rows are gone: the first row below the block that went, or the
+    /// last one above it when the block ran to the end of the listing, or null when nothing
+    /// survives. Read off the rows on screen, because the re-list is what consumes
+    /// <see cref="_selectNext"/>.
+    /// </summary>
+    private string? NearestSurvivor(IReadOnlyList<RemoteFileRow> doomed)
+    {
+        var going = doomed.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
+
+        var last = -1;
+        for (var i = 0; i < _rows.Count; i++) if (going.Contains(_rows[i].Name)) last = i;
+
+        for (var i = last + 1; i < _rows.Count; i++)
+            if (!going.Contains(_rows[i].Name)) return _rows[i].Name;
+        for (var i = last - 1; i >= 0; i--)
+            if (!going.Contains(_rows[i].Name)) return _rows[i].Name;
+
+        return null;
+    }
     // ---- Moving and copying --------------------------------------------
 
     /// <summary>

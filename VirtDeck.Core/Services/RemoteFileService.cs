@@ -93,7 +93,7 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// A file and a directory of the same name. Neither can replace nor merge into the other,
-        /// and there is no rename in this module, so the only answer left is to skip it.
+        /// and the conflict dialog offers no rename, so the only answer left is to skip it.
         /// </summary>
         public bool KindMismatch => TargetExists && SourceIsDir != TargetIsDir;
     }
@@ -154,6 +154,30 @@ namespace VirtDeck.Services
 
         /// <summary>True when at least one failure was the host refusing permission.</summary>
         public bool AnyDenied { get; init; }
+    }
+
+    /// <summary>What one delete actually did.</summary>
+    public sealed class DeleteOutcome
+    {
+        /// <summary>
+        /// The paths the host says are gone, which is not the paths that were asked for: a partly
+        /// refused delete has to be able to tell the two apart, both for the clipboard and for the
+        /// retry as root.
+        /// </summary>
+        public List<string> Gone { get; init; } = new();
+
+        /// <summary>The entries that failed, path kept whole so a retry as root re-runs just those.</summary>
+        public List<(string Path, string Name, string Message)> Failures { get; init; } = new();
+
+        /// <summary>True when at least one failure was the host refusing permission.</summary>
+        public bool AnyDenied { get; init; }
+
+        /// <summary>
+        /// True when the run was stopped part way. Unlike a cancelled transfer there is nothing to
+        /// take back, because what a delete created is absence, so <see cref="Gone"/> is a record of
+        /// what happened rather than a list of things to undo.
+        /// </summary>
+        public bool Cancelled { get; init; }
     }
 
     /// <summary>
@@ -607,6 +631,124 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// Removes paths from the host, permanently and recursively, naming each one through
+        /// <paramref name="onItem"/> as it starts on it. There is no trash here and nothing to undo.
+        ///
+        /// <para>It streams on a connection of its own for the reason <see cref="Paste"/> does:
+        /// <see cref="SshConnectionManager.RunCommand"/> holds the shared client's lock for its whole
+        /// call, and an <c>rm -rf</c> over a large tree is not a call the VM list and every other
+        /// module can wait behind. Streaming is also what gives a per-entry counter, a token to
+        /// cancel, and a message per refused entry, which is what lets a retry as root re-run only
+        /// the entries the host actually refused.</para>
+        ///
+        /// <para>Cancellation is caught here rather than thrown on. A half-finished delete cannot be
+        /// undone, so what has already gone is the one thing the caller has to be told.</para>
+        /// </summary>
+        public DeleteOutcome Delete(IReadOnlyList<string> paths, bool elevated,
+                                    Action<string> onItem, CancellationToken ct)
+        {
+            var script = DeleteScript(paths);
+
+            var gone = new List<string>();
+            var failures = new List<(string Path, string Name, string Message)>();
+            var denied = false;
+
+            void OnLine(string line)
+            {
+                var f = line.Split('\t');
+                if (f.Length < 2 || !int.TryParse(f[1], out var at) || at < 0 || at >= paths.Count)
+                    return;
+
+                switch (f[0])
+                {
+                    // The name is not on the wire: the client already knows it by index, and
+                    // BaseName is the same expression the script splits with. A path the script
+                    // refused for having no basename has nothing to be called, so it is named by
+                    // the whole path rather than by the empty string it would otherwise get.
+                    case "p": onItem(Label(paths[at])); break;
+
+                    case "o": gone.Add(paths[at]); break;
+
+                    case "f":
+                        var message = Decode(f.Length > 2 ? f[2] : string.Empty);
+                        if (message.Length == 0) message = "The host refused it without saying why.";
+
+                        // The script exports LC_ALL=C, so rm's wording is the C locale's and this
+                        // match is what decides whether root is worth offering.
+                        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
+                            denied = true;
+                        failures.Add((paths[at], Label(paths[at]), message));
+                        break;
+                }
+            }
+
+            static string Label(string path) => BaseName(path) is { Length: > 0 } n ? n : path;
+
+            var cancelled = false;
+            try
+            {
+                if (elevated) _ssh.RunSudoCommandStreaming(SudoWrap(script), OnLine, ct);
+                else _ssh.RunCommandStreaming(Wrap(script), OnLine, ct);
+            }
+            // Not just OperationCanceledException: cancelling disconnects the client from under the
+            // read loop, so the failure can arrive as an I/O exception instead.
+            catch (Exception) when (ct.IsCancellationRequested) { cancelled = true; }
+
+            return new DeleteOutcome
+            {
+                Gone = gone,
+                Failures = failures,
+                AnyDenied = denied,
+                Cancelled = cancelled,
+            };
+        }
+
+        /// <summary>
+        /// The delete script. Line-oriented with base64'd payload fields and index-tagged records,
+        /// exactly like <see cref="PasteScript"/> and for the same reasons: it streams, the callback
+        /// is a line at a time, and a name holding a newline must not be able to split a record. It
+        /// exits 0 for every state modelled here, so a refused entry arrives as a record.
+        ///
+        /// <para>Returned unwrapped, so <see cref="Delete"/> picks <see cref="Wrap"/> or
+        /// <see cref="SudoWrap"/> according to which streaming runner it is about to use.</para>
+        /// </summary>
+        private static string DeleteScript(IReadOnlyList<string> paths) =>
+            "export LC_ALL=C\n" +
+            ArrayFrom("a", paths) +
+            "i=-1\n" +
+            "for s in \"${a[@]}\"; do\n" +
+            "  i=$((i+1))\n" +
+            // Every path here was built from the directory on screen and a name out of that
+            // directory's own listing, so none of these can occur. rm -rf is the command where
+            // "cannot occur" is not a good enough reason not to check, and one test on the basename
+            // catches the empty string, "/", a trailing slash, "." and "..". A case word is neither
+            // split nor globbed, so this needs no further quoting.
+            "  n=${s##*/}\n" +
+            "  case \"$n\" in\n" +
+            "    ''|.|..)\n" +
+            "      printf 'f\\t%s\\t%s\\n' \"$i\" " +
+            $"'{B64("That is not an entry in a directory, so it was left alone.")}'\n" +
+            "      continue;;\n" +
+            "  esac\n" +
+            "  printf 'p\\t%s\\n' \"$i\"\n" +
+            // rm never follows a symlink, so a link to a directory loses the link and keeps the
+            // directory, which is what somebody deleting the row in front of them means. -f is what
+            // makes an entry that has already gone a success: the user asked for it not to be there.
+            "  err=$(rm -rf -- \"$s\" 2>&1); rc=$?\n" +
+            "  if [ $rc -eq 0 ]; then\n" +
+            "    printf 'o\\t%s\\n' \"$i\"\n" +
+            "  else\n" +
+            // Only rm's first line. It prints one line per entry it could not remove, so one refused
+            // tree can produce thousands, and every line after the first is a consequence of it: rm
+            // descends, fails on the child, then reports the parent as not empty. The first line is
+            // the reason, and it is the line matched for "Permission denied".
+            "    printf 'f\\t%s\\t%s\\n' \"$i\" " +
+            "\"$(printf '%s' \"$err\" | head -n 1 | base64 | tr -d '\\n')\"\n" +
+            "  fi\n" +
+            "done\n" +
+            "exit 0\n";
+
+        /// <summary>
         /// The pre-flight script. NUL-terminated tagged records like the listing's, with the name
         /// last and therefore unbounded: "i" is one source, "e" is a refusal. It exits 0 for every
         /// state modelled here, because <see cref="SshConnectionManager.RunCommand"/> turns a
@@ -688,9 +830,10 @@ namespace VirtDeck.Services
                 "    while [ -e \"$t\" ] || [ -L \"$t\" ]; do k=$((k+1)); t=\"$d/$base (copy $k)$ext\"; done\n" +
                 "  fi\n" +
                 // A directory onto a directory merges: the contents go in, and whatever was only in
-                // the target stays. The target is never removed, so this module still cannot delete
-                // anything the user did not name. The one rm -rf is of a move's source, which is
-                // what a move is.
+                // the target stays. The target is never removed, so a paste cannot delete anything
+                // the user did not name; removing something on purpose is what the Delete command is
+                // for, and it names every entry and asks first. The rm -rf below is of a move's
+                // source, which is what a move is.
                 "  if [ \"$mode\" = over ] && [ -d \"$s\" ] && [ -d \"$t\" ]; then\n" +
                 "    err=$(cp -a -f -- \"$s/.\" \"$t/\" 2>&1); rc=$?\n" +
                 "    if [ $rc -eq 0 ] && [ \"$op\" = mv ]; then err=$(rm -rf -- \"$s\" 2>&1); rc=$?; fi\n" +
@@ -738,6 +881,10 @@ namespace VirtDeck.Services
             try { return Encoding.UTF8.GetString(Convert.FromBase64String(b64)); }
             catch { return string.Empty; }
         }
+
+        /// <summary>The other direction, for a literal a script has to carry back out again.</summary>
+        private static string B64(string text) =>
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
 
         private static PastePlan ParsePlan(string raw, IReadOnlyList<string> sources, string destination)
         {
@@ -807,5 +954,15 @@ namespace VirtDeck.Services
         /// <summary>Joins a directory and child name with a single POSIX separator.</summary>
         public static string CombinePath(string dir, string name) =>
             dir == "/" ? "/" + name : dir.TrimEnd('/') + "/" + name;
+
+        /// <summary>
+        /// The last segment of a POSIX path, which is bash's <c>${s##*/}</c> exactly, so a name
+        /// means the same thing at both ends of a script.
+        /// </summary>
+        public static string BaseName(string path)
+        {
+            var slash = path.LastIndexOf('/');
+            return slash < 0 ? path : path[(slash + 1)..];
+        }
     }
 }

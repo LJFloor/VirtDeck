@@ -1126,8 +1126,8 @@ Size, Modified, Permissions, Owner, Group), Back/Forward/Up/Home/Refresh and a h
 It also **moves and copies files about, on the host**: Cut, Copy and Paste, from the context menu
 and from Ctrl+X, Ctrl+C and Ctrl+V. It **uploads and downloads**, files and whole directory trees,
 by command or by dragging files in from the desktop, and dragging rows onto a folder row moves them
-on the host. A Delete command of its own is not here, and neither is a viewer, a tree pane or a
-directory watch.
+on the host. It **renames** in the row itself (F2) and **deletes**, permanently and with a
+confirmation in front of it. There is still no viewer, no tree pane and no directory watch.
 
 - **It lists as the logged-in user, and that is the point.** Every other remote file call in the app
   goes through `RunSudoCommand`, because every one of them is looking for a VM's disks under
@@ -1238,12 +1238,13 @@ directory watch.
   also what gives the status bar a live "Copying x (3/5)" and `Shutdown` something to cancel. There
   is no Cancel button in this pass, because a module owns the shell's two status slots and has no
   footer to put one in; the token is there for when there is somewhere to put it.
-- **A folder onto a folder merges, and nothing ever deletes what the user did not name.** The
+- **A folder onto a folder merges, and a paste never deletes what the user did not name.** The
   conflict dialog's primary is **Replace** for a file and **Merge** for a folder, because that is
   what actually happens: `cp -a "$s/." "$t/"` puts the contents in, same-named files are overwritten,
   and whatever was only in the target stays. Deleting the target first would be the literal reading
-  of "replace" and would destroy files nobody was asked about, in a module that has no Delete command
-  at all. The one `rm -rf` in the whole feature is of a **move's source**, which is what a move is.
+  of "replace" and would destroy files nobody was asked about. Removing something on purpose is the
+  Delete command's job, and it names every entry it is about and asks first. The `rm -rf` inside the
+  paste script is of a **move's source**, which is what a move is.
 - **A copy back into its own directory has no question to ask, so it is not asked.** Replacing would
   mean copying a file over itself, which `cp` refuses, and there is no rename here to offer any other
   name, so it lands beside itself as the first free `name (copy)`, `name (copy 2)`. The free-name
@@ -1264,11 +1265,92 @@ directory watch.
   is decided by matching the tool's own words, which is reliable because the script exports
   `LC_ALL=C`. A cut is **spent only once the move happened**, so a partly refused one stays on the
   clipboard.
-- **Keys are bound to the list, not tunnelled at the top level.** `ConsoleWindow` and
-  `TerminalModule` register theirs on the window because the guest and the container need every key;
-  here Backspace still belongs to the path box, so Backspace-for-Up, Alt+Left/Right and Enter live on
-  the `ListBox` alone. Ctrl+X, Ctrl+C and Ctrl+V go there for the sharper form of the same reason:
-  inside the path box those three have to keep meaning what they mean in any other text box.
+- **Keys are split between the list and the top level, and focus is what splits them.** `ConsoleWindow`
+  and `TerminalModule` register theirs on the window because the guest and the container need every
+  key; here Backspace still belongs to the path box, so Backspace-for-Up, Alt+Left/Right and Enter
+  live on the `ListBox` alone. The **commands** cannot: repopulating the list destroys the
+  `ListBoxItem` that had keyboard focus, and cutting, deleting and navigating all repopulate, so by
+  the time Ctrl+V is wanted the list has usually stopped being focused and a list-scoped handler
+  would never see the chord. Ctrl+X, Ctrl+C, Ctrl+V, F2 and Delete therefore hang off the top level,
+  added on attach and removed on detach so another module's keys stay its own. They are registered
+  **bubbling and deliberately not handled-too**, and that is the entire gate: a focused `TextBox` has
+  already consumed all of those by the time the event would arrive, so inside the path box and inside
+  the rename editor they keep meaning what they mean in any other text box, with nothing to test for.
+
+### Deleting
+
+One `rm -rf` per entry, permanently, with a single confirmation in front of it. There is no trash:
+`gio trash` needs the host's own desktop session and would put files somewhere the person at this
+end cannot see, and a VirtDeck-owned trash directory would be a second filesystem to explain.
+
+- **The confirmation is the whole safety mechanism, so it is not optional.** No Shift to skip it, and
+  no per-entry prompt either: the question is asked once, about the whole selection, before anything
+  runs. It names up to five entries and falls back to a count past that, because `MessageDialog` is a
+  fixed 420 wide and sizes to its content, so a selection of three hundred would draw a window taller
+  than the screen. A folder is always said to take everything in it, because that is the part
+  somebody can be wrong about. It is `MessageDialog.Confirm` rather than a window of its own:
+  `PasteConflictDialog` earns a window for the two things `Choose` cannot carry, a "do the same for
+  the rest" box and a disabled **primary**, and a delete has neither, so a new window here would be
+  `MessageDialog` with one word changed. `DeleteVmDialog` is the same story from the other end and
+  collapses to exactly this dialog when the VM has no disk images to offer. Enter confirms, because
+  the primary is `IsDefault`, which is what `DeleteVmDialog` does for a strictly larger delete: the
+  dialog is modal with nothing to type in it, so Enter is a second deliberate gesture rather than a
+  keystroke carried in from the list, and Esc cancels.
+- **There is no pre-flight, and that is the difference from paste.** `InspectPaste` exists because a
+  paste has questions to settle before a byte moves: is the destination there, is it writable, what
+  is already called that. A delete has no destination and no conflict. "Is it still there" is
+  answered by `rm -f` itself, which is silent about a path that has already gone and is right to be,
+  because the user asked for it not to be there. "May I" is answered by the run, per entry, and that
+  answer is what drives the root retry, so asking first would be a round trip and a race for nothing.
+- **One script, streamed, in `PasteScript`'s shape.** Line-oriented, index-tagged, payload fields
+  base64'd, `exit 0`, over `RunCommandStreaming` / `RunSudoCommandStreaming`. It streams for the
+  reason a paste does: `RunCommand` holds `_ioLock` for its whole call, and an `rm -rf` over a large
+  tree is not a call the VM list and every other module can wait behind. Streaming is also what gives
+  a per-entry counter, a token to cancel and a **message per refused entry**, which is what lets the
+  root retry re-run only the entries the host actually refused.
+- **Only the first line of `rm`'s stderr is kept, and the host is what trims it.** `rm -rf` prints one
+  line per entry it could not remove, so one refused tree can produce thousands, and every line after
+  the first is a consequence of it: `rm` descends, fails on the child, then reports the parent as not
+  empty. The first line is the reason, and it is the line matched for "Permission denied", which is
+  reliable because the script exports `LC_ALL=C`. Measured on a directory holding one unreadable
+  child, the reported failure is the child's `Permission denied` rather than the parent's
+  `Directory not empty`, which is the message worth showing.
+- **The script refuses a path with no basename.** The empty string, `/`, a trailing slash, `.` and
+  `..` are all the same test, `${s##*/}`, and every one of them comes back as a per-entry failure
+  rather than being run. Every path here is built from the directory on screen and a name out of that
+  directory's own listing, so none of them can occur; `rm -rf` is the command where "cannot occur" is
+  not a good enough reason not to check.
+- **`rm` never follows a symlink**, so deleting a link to a directory loses the link and leaves the
+  directory, which is what somebody deleting the row in front of them means. Worth stating because
+  `RemoteEntry.IsDir` is the **dereferenced** type (`%Y`), so a link to a directory reads as a folder
+  in the list and in the confirmation.
+- **The first pass is always as the user, however the listing was read.** An elevated listing covers
+  one listing and does not latch, and a delete is the last thing in the app that should quietly
+  escalate; being refused is what earns the offer. The retry re-runs only the refused entries and
+  `_shownElevated` is untouched, exactly as paste's retry is.
+- **Cancelling leaves a partly deleted tree, and there is nothing to undo.** A cancelled transfer
+  takes back what it created; that rule cannot apply here, because what a delete created is absence.
+  So the service catches the cancellation rather than throwing it on and hands back what it got
+  through, the module says so plainly with a count, and the re-list is **not** skipped the way a
+  cancelled paste's is: whatever went is gone, and the listing would otherwise still be showing it.
+  The Cancel button is there anyway, because the alternative is no way out of a delete of the wrong
+  three hundred entries, and the half-deleted state is one the operation passes through whether or
+  not anybody can stop it.
+- **It uses the transfer strip rather than the status line a paste counts into.** A paste counts into
+  the status slot because it had nowhere to put a Cancel button when it was written; this is the one
+  command in the module that cannot be undone, so it is the one that most needs the button beside it.
+  Progress is over entries rather than bytes, which the bar takes perfectly well, since `XferProgress`
+  is a plain 0 to 1000 range and `PaintXfer` is the only byte-shaped part of the strip, which a
+  delete does not call.
+- **The selection still follows what just happened, and a delete leaves nothing to follow.** So what
+  **failed** is what gets selected, since it is still there and is the work left over; a clean delete
+  takes the nearest surviving row instead, the first below the block that went or the last above it,
+  read off the rows on screen before the re-list. A directory the delete emptied simply says it is
+  empty.
+- **A deleted path comes off the module's clipboard**, and so does anything that was under a deleted
+  directory: the clipboard holds paths and one of them may have just stopped existing, which would
+  otherwise fail at paste time saying so. A cut whose every entry is gone stops being a cut rather
+  than becoming an empty one. Same rule, and the same reason, as `FollowRenameInClip`.
 
 ### Uploading and downloading
 
@@ -1331,8 +1413,8 @@ host-to-host operations, this one is bytes crossing the boundary.
   because the tool truncated the original the moment it opened it and neither end ever held a copy,
   so there is nothing to restore and removing it would destroy what was there before the transfer
   started. That one case cannot be made clean, so it is **named in a dialog** instead of passed over
-  in silence. The `rm -rf` this adds is the second in the module, and it can only ever reach names
-  the pre-flight reported as free.
+  in silence. The `rm -rf` this adds can only ever reach names the pre-flight reported as free,
+  which is what makes it a tidy-up rather than a delete.
 - **Cancelling is the only trigger for that.** A transfer that *failed* keeps what did land, because
   tar extracts the members it can and reports the ones it cannot; throwing those away over an
   unrelated entry is not what a failure means, and it is the same rule paste follows when it reports
@@ -1355,15 +1437,17 @@ host-to-host operations, this one is bytes crossing the boundary.
   path segment for the local name the user settled on, drops anything whose first segment was not
   asked for, and refuses a `..` anywhere; the resolved path is then required to stay under the chosen
   directory. A tar's entry names are the far end's to write, so they are input.
-- **The transfer strip is the module's, and paste finally uses it too.** A module owns the shell's two
-  status slots and has no footer, which is why paste has had a `CancellationTokenSource` and nowhere
-  to put a Cancel button; a multi-gigabyte transfer with no way to stop it would be worse. The strip
+- **The transfer strip is the module's, and a delete uses it too.** A module owns the shell's two
+  status slots and has no footer, which is why paste has a `CancellationTokenSource` and nowhere to
+  put a Cancel button; a multi-gigabyte transfer with no way to stop it would be worse. The strip
   is `ConsoleWindow`'s `XferPanel` markup copied rather than reinvented, hidden unless something is
   running, and the service throttles progress to 120 ms so the hop to the UI thread is not paid per
-  64 KiB chunk. `Shutdown` cancels the one token for all three operations, because the shell disposes
+  64 KiB chunk. **Paste still does not show it**, which is why its own Cancel button is unreachable;
+  it counts into the status slot instead, and wiring it up is a change nobody has made yet.
+  `Shutdown` cancels the one token for every one of these operations, because the shell disposes
   the shared connection, and with it the auth material every second client borrows, straight after.
-- **`_busy` is one flag for paste, upload and download.** They are the same hazard: each runs on a
-  connection of its own and each ends by re-listing the directory underneath it.
+- **`_busy` is one flag for paste, delete, upload and download.** They are the same hazard: each runs
+  on a connection of its own and each ends by re-listing the directory underneath it.
 
 ### Dragging
 

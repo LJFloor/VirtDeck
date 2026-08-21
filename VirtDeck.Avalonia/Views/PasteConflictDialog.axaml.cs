@@ -12,11 +12,12 @@ namespace VirtDeck.Avalonia.Views;
 ///
 /// <para>The primary is <b>Replace</b> for a file over a file and <b>Merge</b> for a folder over a
 /// folder, because that is genuinely what happens: a folder's contents go in and whatever was only
-/// in the target stays, since nothing in this module deletes what the user did not name. Where the
-/// two sides are different kinds neither can replace the other, and with no rename here the only
-/// answer left is to skip it; the primary is then disabled with its reason on hover rather than
-/// hidden, so the dialog asks the same question every time instead of quietly becoming a different
-/// one.</para>
+/// in the target stays, since a paste never deletes what the user did not name. Removing something
+/// on purpose is the Delete command's job, and it names every entry it is about and asks first.
+/// Where the two sides are different kinds neither can replace the other, and with no rename here
+/// the only answer left is to skip it; the primary is then disabled with its reason on hover rather
+/// than hidden, so the dialog asks the same question every time instead of quietly becoming a
+/// different one.</para>
 /// </summary>
 public partial class PasteConflictDialog : Window
 {
