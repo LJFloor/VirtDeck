@@ -97,7 +97,8 @@ bar and the process lifetime; everything a user actually manages lives in an `IM
 menu is a `TabControl` themed with `JbModuleTabControl` (the settings-window side strip with a taller
 row, so a 16px glyph fits beside the label). Modules today: **Virtual machines** (`VirtualMachinesModule`,
 which is the whole former `VmListWindow` minus the shell: the VM list, the Networks tab, `VmDetailsView`
-and every per-VM command), **Containers** (`ContainersModule`, below), **File explorer**
+and every per-VM command), **Containers** (`ContainersModule`, below), **User accounts**
+(`UserAccountsModule`, below: the host's own logins and groups), **File explorer**
 (`FileExplorerModule`, below: the host's filesystem as the login user) and **Terminal**
 (`TerminalModule`, below: a shell on the host itself).
 
@@ -1118,6 +1119,192 @@ keeps, because Ctrl+C already means interrupt and that is the more important of 
 text arrives through `TextInput`, so dead keys, compose and any layout work with no table to
 maintain; `TextInput` carries no modifiers, so the key press that preceded it is what says whether it
 was a chord and was already sent.
+
+## User accounts
+
+`UserAccountsModule` manages the host's own login accounts: a Users table and a Groups table in the
+tab pair the VM module uses for its VMs and networks, add and delete for both, one dialog to add or
+edit a user, and from it a password, a login shell, a home directory at creation, and supplementary
+group membership. `Views/Users/UserEditDialog` and `GroupAddDialog` are the two dialogs;
+`VirtDeck.Core/Services/UserAccountService` is the whole of the host vocabulary.
+
+**The tab strip is the top of the module and each page carries its own toolbar**, which is also how
+`VirtualMachinesModule` is laid out. A toolbar then only ever shows what applies to the table under
+it, and the alternative is visibly wrong here: the system-accounts toggle is a fact about the user
+list and would mean nothing sitting above the groups. It also settles which button is accented,
+which a shared toolbar could not: that class is for the one command that creates something, so with
+one create command per page both New user and New group carry it. Refresh is on both pages and is
+one handler, since a single round trip fills both tables. The VM module's Networks page gets no
+toolbar at all, because every network command needs a selection and so lives on the right-click
+menu; an empty toolbar bar would be worse chrome than none.
+
+**It is modelled on Cockpit's Accounts page wherever that has already settled a question**, because
+it is the reference implementation everybody administering a Linux box has seen, and three of its
+answers look like omissions until you know why.
+
+- **Group membership is supplementary only**, applied with `gpasswd -a` / `gpasswd -d`. The primary
+  group is shown ticked and **disabled with its reason on hover**, so it is visible without being
+  changeable: moving an account to a different primary group leaves every file it owns grouped to
+  the old one, with no undo and nothing on screen to say so. Creation is the one place `usermod -G`'s
+  cousin is used instead (`useradd -G`), because there is no existing membership to diff against;
+  everywhere else the delta is per group, since `-G` replaces the whole set and would silently drop
+  a group added on the host since the dialog opened.
+- **The home directory is set at creation and read only afterwards.** Moving one means
+  `usermod -d -m`, which relocates the files and can fail part way across a filesystem boundary or
+  on an open file. The box is disabled in edit rather than hidden, with a note saying why.
+- **The Groups tab is unfiltered**, where the Users tab hides system accounts behind a toolbar
+  toggle. `docker`, `libvirt` and `sudo` are all system groups by GID, so a GID filter would hide
+  exactly the rows somebody opens that tab to find.
+
+One divergence, deliberate: Cockpit *also* hides any account whose shell is `nologin` or
+`/bin/false`, which hides sftp-only and service accounts that are real accounts somebody has to
+administer. The filter here is UID only, and it is **the host's own range, both ends**
+(`UID_MIN`..`UID_MAX` out of `/etc/login.defs`, plus root). The upper end is not decoration:
+`nobody` is uid 65534 and clears `UID_MIN` by a mile, so a lower bound alone lists it as an ordinary
+login account. Cockpit reaches the same place by naming `nobody`; the host's own number covers the
+whole convention, `nfsnobody` included.
+
+**The user name and the home directory follow the full name as it is typed**, which is the one place
+the model is the Fedora installer rather than Cockpit, since Cockpit fills nothing in. "John Doe"
+suggests `jdoe` and "Hans van den Berg" suggests `hvdberg`: the last word whole, prefixed with the
+initial of every word before it. Anaconda's own `guess_username`, which is the rule every Fedora and
+RHEL install has already taught its user, takes only the **first** word's initial; that is the same
+answer for a two-word name and the wrong one for a surname with a tussenvoegsel in front of it,
+where it drops "van den" and suggests `hberg`. Keeping every initial gets both right with no word
+list to maintain and no language to detect, at the price of a written-out middle name contributing
+its initial too ("Anne Marie van der Berg" suggests `amvdberg`), which is the same convention applied
+to a name it has nothing else to say about.
+`UserAccountService.SuggestUserName` sits beside `IsValidNewUserName` deliberately, because a
+suggestion the app then refuses is worse than no suggestion: it folds accents (Jose, not `jos_`),
+**drops** what the rule still disallows rather than folding it to an underscore, and trims a leading
+character a name may not start with, so "3M Corp" suggests `corp`. Dropping is right there and
+folding is right in the name box itself, where the user is typing the name and one character for one
+is what keeps their caret in place. Each box stops following the moment the user types in it, the
+`_nicsTouched` rule the Create-VM wizard follows when it re-seeds a NIC after the OS changes;
+emptying one hands it back but **does not refill it there and then**, because a refill lands a whole
+name under a caret at its end, which would turn backspacing a suggestion away into appending to it.
+Which text is the user's is decided by **comparing the box against the last suggestion written into
+it**, never by a flag held across the write, and that is not a preference: Avalonia's `TextBox`
+raises `TextChanging` inline but **posts** `TextChanged` to the dispatcher, so such a flag is back to
+false by the time the handler runs and the dialog's own writes all read as the user taking the box
+over. Measured, with the flag: "Hans Berg" froze the user name at `h`. A comparison does not care
+when the event arrives, and an empty box compares as untouched, which is the same rule saying a box
+nobody has answered is one the suggestion may have.
+The home directory's base is the **host's own** (`useradd -D`, tag `h`), not a hardcoded `/home`: an
+ostree host says `/var/home`, and where the box was left empty `useradd` picked the base itself, so a
+box the app fills in has to hold the path the host would have chosen anyway.
+
+- **Always `sudo`, and this is the counterexample to `FileExplorerModule`.** That module is the app's
+  one un-elevated caller because somebody browsing wants their own view of the machine. Here every
+  mutation needs root whatever happens, and the lock state can only be read from the shadow file, so
+  there is one privileged path and none of the "retry as root" machinery the file explorer carries.
+- **The listing is one round trip in `DockerService.ListScript`'s shape**: a tag in field 0, real tab
+  characters, every best-effort half fenced with `2>/dev/null` so it cannot take the exit status with
+  it, and a closing `exit 0`. Only `getent` carries `|| exit $?`, because its failing is the one
+  failure that means the listing failed. Seven tags: `u` a passwd line, `g` a group line, `s` a shell
+  from `/etc/shells`, `d` a `login.defs` bound, `p` a `passwd -S -a` status, `h` the home base out of
+  `useradd -D`, `v` the tools' presence.
+- **The passwd and group lines are emitted whole and split on `:` by the client.** No field of either
+  file may contain a colon, so that parse is exact and needs no escaping and no delimiter of our own
+  choosing. It is the same instinct as the unbounded-field-last rule in `RemoteFileService.Parse`,
+  arriving at the same place by a shorter route. Group members then split on `,`, which they equally
+  cannot contain.
+- **GECOS is stored raw and edited in place.** The field is comma-separated
+  (`Full Name,Room,Work Phone,Home Phone,Other`) and the full name is only element 0, so writing it
+  back rejoins the tail rather than discarding somebody's room number. `GecosHead`/`GecosTail`/
+  `JoinGecos` are public precisely because that is a contract two assemblies share: the dialog
+  carries the tail through untouched while the user edits the head.
+- **The capability probe reports presence, not a version, and that is not laziness.** Debian and
+  Ubuntu's shadow-utils build supports no `--version` on any of its binaries: `useradd`, `passwd` and
+  `chage` all answer "unrecognized option" on stderr and print usage. The only version on such a host
+  is the package manager's, which is a different question in a different vocabulary per distro. So
+  the probe is `command -v useradd`, the slot says `shadow-utils`, and a host that does volunteer a
+  version has it shown. Absent tools default to **unavailable**, `DockerService.DockerAvailable`'s
+  rule rather than the KVM probes': the safe default is the one that explains itself, so the list
+  carries a message and every command is disabled rather than hidden. **Every re-entry re-probes**
+  while the answer is no, so installing the package mid-session is not a dead end.
+- **No poll and no event tail, so there is a Refresh button.** Nothing on the host announces a new
+  account the way `docker events` announces a container, and polling `getent` would buy nothing
+  against how often accounts change. That is `FileExplorerModule`'s reasoning and its conclusion, and
+  it is why `Deactivate` and `Shutdown` are both empty here: no timer, no poll, no tail, no window,
+  and no second SSH connection. `ActivateAsync` still reloads on every return, per the contract that
+  nothing is stale by the time it is visible.
+
+### The password path
+
+**A password never touches a command line, and `SetPasswordAsync` is the only thing in this service
+that does not go through `ShellScript.Argv`.** `RunSudoCommand` puts whatever it is given on the
+host's command line, where `ps` shows it to every local user; base64 would hide it from a glance and
+from nobody at all. `SshConnectionManager.RunSudoCommand` already treats the sudo password this way
+for exactly this reason.
+
+So it goes over **stdin**, through `SshConnectionManager.RunPipeInAsync`, which was built for the
+elevated upload and does precisely what is needed: it writes the sudo password and a per-call
+sentinel to stdin, and the remote script skips lines until it has seen the sentinel, so everything
+after it is the payload. The payload is `chpasswd`, the body is one `name:password` line, and
+disposing the stream is the EOF `chpasswd` waits for. `chpasswd` splits on the **first** colon, so a
+password containing one is fine; a line break is not, and is refused in the dialog and again in the
+service.
+
+Ordering is load-bearing twice. On create, `useradd` runs first and a failing password step is
+reported as **what it is** ("the account was created, but"), because the account exists from that
+point and saying the whole thing failed would be a lie. On edit, the password is set **before** the
+lock, because writing a new hash clears the `!` that locks an account, so doing it after would
+quietly unlock what the user just asked to lock.
+
+Password quality is the host's business. The dialog checks only what it can answer without asking:
+that the two boxes agree.
+
+### Names, and the two rules that are not one
+
+`ShellScript` is where the app's four ways of handing a command to bash now live (`Wrap`, `SudoWrap`,
+`Argv`, `ArrayFrom`); `DockerService.ArgvScript` and `RemoteFileService.Wrap`/`SudoWrap`/`ArrayFrom`
+are one-line forwarders onto it. This module is what made one home worth having: it is the first
+whose every mutation carries user text, and a third copy of the one function in the app that stops
+shell injection was the wrong answer.
+
+**What VirtDeck will create and what it will address are different questions, and conflating them is
+a bug.** `IsValidNewUserName` is strict (`^[a-z_][a-z0-9_-]{0,31}$`, what shadow-utils accepts
+without `--badname`) and is only ever asked about a *new* account. Addressing an existing one is
+checked by `RequireSafe`, which refuses only an empty name, a line break and a leading hyphen,
+because an account already on the host may be called `Debian-snmp` or `systemd-network` and refusing
+to lock or delete one because our creation rule dislikes it would be indefensible. Addressing is safe
+without a strict rule anyway: `ShellScript.Argv` means a name is never read as syntax, and every
+vector carries a literal `--` before it so it cannot be read as an option either.
+
+The user-name box folds illegal characters to `_` as it is typed, reusing `CreateVmWizard.SanitizeName`'s
+caret-preserving idiom, so the strict check is a backstop that owns the rule rather than something
+anybody meets. What stops that fold looping is the fold being idempotent rather than the flag it
+holds across its own write, for the reason above: the `TextChanged` it raises is posted, so it
+arrives after the flag has been cleared, and the second pass ends because there is nothing left to
+fold.
+
+### Deleting
+
+`MessageDialog.Choose` rather than `Confirm`, because a delete has a second question and asking it in
+a follow-up dialog would put it after the point of no return. **Keeping the home directories is the
+primary**, which is the accented default button, because the primary is what Enter presses and the
+more destructive of two irreversible options must not be the one a reflex chooses; Cockpit defaults
+its "delete files" box to unticked for the same reason. Both buttons say "Delete" out loud, since
+neither is a way out. The prompt names up to five accounts and falls back to a count past that,
+because `MessageDialog` is a fixed 420 wide and sizes to its content, and it says that files owned
+elsewhere on the host stay where they are, still owned by a UID that no longer has a name.
+
+A group that is somebody's primary group cannot be deleted; that refusal is `groupdel`'s to make and
+is reported in its own words rather than pre-empted, because the host is the thing that has to agree.
+
+### The group tick list
+
+The four answer-file checklist pages and this dialog's group list are the same widget, so they share
+`Views/Unattend/CheckRow` and the single `DataTemplate` in `App.axaml`'s `Application.DataTemplates`
+rather than growing a fifth near-copy. `CheckRow` gained a plain `(id, label, checked, enabled, hint)`
+constructor beside its `UnattendOption` one, plus `IsEnabled` and `Hint`.
+
+**The `Border` the template now wraps its `CheckBox` in is load-bearing, not padding**: a disabled
+control is not hit-testable in Avalonia, so the tooltip explaining why the primary group cannot be
+unticked has to hang off an enabled parent. `MessageDialog.axaml` already carries the same workaround
+for its disabled alternative button. `Hint` is null on all four answer-file pages, so nothing appears
+there.
 
 ## File explorer
 

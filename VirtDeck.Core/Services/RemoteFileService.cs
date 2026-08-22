@@ -273,8 +273,7 @@ namespace VirtDeck.Services
         /// Hands a script to bash on the host without the login shell or sudo's single-quote rewrap
         /// getting a say: base64 is [A-Za-z0-9+/=] and survives both untouched.
         /// </summary>
-        internal static string Wrap(string script) =>
-            $"echo {Convert.ToBase64String(Encoding.UTF8.GetBytes(script))} | base64 -d | bash";
+        internal static string Wrap(string script) => ShellScript.Wrap(script);
 
         private static DirectoryListing Parse(string raw, string path)
         {
@@ -860,31 +859,20 @@ namespace VirtDeck.Services
         /// contain. <c>read -r -d ''</c> rather than <c>mapfile -d ''</c>, so nothing depends on the
         /// host's bash being 4.4 or newer.
         /// </summary>
-        internal static string ArrayFrom(string name, IEnumerable<string> values)
-        {
-            var blob = string.Concat(values.Select(v => v + "\0"));
-            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(blob));
-            return $"{name}=(); while IFS= read -r -d '' x; do {name}+=(\"$x\"); done " +
-                   $"< <(echo {b64} | base64 -d)\n";
-        }
+        internal static string ArrayFrom(string name, IEnumerable<string> values) =>
+            ShellScript.ArrayFrom(name, values);
 
         /// <summary>
         /// The wrapper for <see cref="SshConnectionManager.RunSudoCommandStreaming"/>, which unlike
         /// <c>RunSudoCommand</c> neither escapes its argument nor wraps it in a shell, so callers
         /// spell their own out. Same rule, same shape as <c>VirshService.SparsifyDisk</c>.
         /// </summary>
-        internal static string SudoWrap(string script) =>
-            $"bash -c \"$(echo {Convert.ToBase64String(Encoding.UTF8.GetBytes(script))} | base64 -d)\"";
+        internal static string SudoWrap(string script) => ShellScript.SudoWrap(script);
 
-        private static string Decode(string b64)
-        {
-            try { return Encoding.UTF8.GetString(Convert.FromBase64String(b64)); }
-            catch { return string.Empty; }
-        }
+        private static string Decode(string b64) => ShellScript.Decode(b64);
 
         /// <summary>The other direction, for a literal a script has to carry back out again.</summary>
-        private static string B64(string text) =>
-            Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
+        private static string B64(string text) => ShellScript.B64(text);
 
         private static PastePlan ParsePlan(string raw, IReadOnlyList<string> sources, string destination)
         {

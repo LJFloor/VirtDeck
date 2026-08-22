@@ -1,0 +1,174 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.UserAccountsModule"
+             x:DataType="vm:UserRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. Prefixed
+         per tab, because the two tables have nothing to do with each other. -->
+    <x:Double x:Key="ColUserName">170</x:Double>
+    <x:Double x:Key="ColUid">60</x:Double>
+    <x:Double x:Key="ColFullName">160</x:Double>
+    <x:Double x:Key="ColHome">180</x:Double>
+    <x:Double x:Key="ColShell">140</x:Double>
+
+    <x:Double x:Key="ColGroupName">200</x:Double>
+    <x:Double x:Key="ColGid">60</x:Double>
+    <x:Double x:Key="ColMemberCount">70</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, exactly as the VM module's
+       own two-tab pair does. JbSideTabControl and JbModuleTabControl are the vertical pair and
+       belong to the shell's side menu and the answer-file window.
+
+       The tab strip is the top of the module and each page carries its own commands, so a toolbar
+       only ever shows what applies to the table under it: the system-accounts toggle is a fact about
+       the user list and would mean nothing over the groups. Each page's create command is accented,
+       because on its own page it is the one command that creates something. Refresh is on both and
+       is one handler, since a single round trip fills both tables. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Header="Users">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Button Name="NewUserButton" Content="New user…" Classes="accent" />
+              <!-- A real Refresh button, as in the file explorer and unlike the VM and container
+                   lists: those have an event tail telling them when to re-read, and nothing on the
+                   host announces that an account changed. -->
+              <Button Name="RefreshUsersButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the accounts again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <CheckBox DockPanel.Dock="Right" Name="SystemBox" Content="System accounts" Margin="10,0,0,0"
+                      ToolTip.Tip="Show the accounts outside the host's own UID_MIN to UID_MAX range, which are the ones services run as" />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <StackPanel Orientation="Horizontal">
+            <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
+                 the column. -->
+            <TextBlock Text="Name"      Width="{StaticResource ColUserName}" FontWeight="SemiBold" Padding="14,0,0,0" />
+            <TextBlock Text="UID"       Width="{StaticResource ColUid}"      FontWeight="SemiBold" />
+            <TextBlock Text="Full name" Width="{StaticResource ColFullName}" FontWeight="SemiBold" />
+            <TextBlock Text="Home"      Width="{StaticResource ColHome}"     FontWeight="SemiBold" />
+            <TextBlock Text="Shell"     Width="{StaticResource ColShell}"    FontWeight="SemiBold" />
+            <TextBlock Text="Groups" FontWeight="SemiBold" />
+          </StackPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="UserList" SelectionMode="Multiple" Background="Transparent"
+                   Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="UserMenu">
+                <MenuItem Name="MenuEditUser" Header="Edit…" />
+                <Separator />
+                <MenuItem Name="MenuLock" Header="Lock" />
+                <MenuItem Name="MenuUnlock" Header="Unlock" />
+                <Separator />
+                <MenuItem Name="MenuDeleteUser" Header="Delete…" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:UserRow">
+                <StackPanel Orientation="Horizontal">
+                  <!-- The same 9px state dot the VM and container lists draw, sharing the same three
+                       colours. Here it says whether the account can be logged into. -->
+                  <DockPanel Width="{StaticResource ColUserName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding PasswordText}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding Uid}"      Width="{StaticResource ColUid}" Opacity="0.75" />
+                  <TextBlock Text="{Binding FullName}" Width="{StaticResource ColFullName}"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding FullName}" />
+                  <TextBlock Text="{Binding Home}"     Width="{StaticResource ColHome}" Opacity="0.75"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Home}" />
+                  <TextBlock Text="{Binding Shell}"    Width="{StaticResource ColShell}" Opacity="0.75"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Shell}" />
+                  <TextBlock Text="{Binding Groups}" Opacity="0.75"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Groups}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Why the list is empty, so an unusable module never just looks broken. -->
+          <TextBlock Name="EmptyText" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="Groups">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Name="NewGroupButton" Content="New group…" Classes="accent" />
+            <Button Name="RefreshGroupsButton" Theme="{StaticResource JbIconButton}"
+                    ToolTip.Tip="Read the accounts again">
+              <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                    Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="Name"    Width="{StaticResource ColGroupName}"   FontWeight="SemiBold" />
+            <TextBlock Text="GID"     Width="{StaticResource ColGid}"         FontWeight="SemiBold" />
+            <TextBlock Text="Members" Width="{StaticResource ColMemberCount}" FontWeight="SemiBold" />
+            <TextBlock Text="Accounts" FontWeight="SemiBold" />
+          </StackPanel>
+        </Border>
+
+        <!-- Unfiltered on purpose, where the Users tab hides system accounts behind a toggle:
+             docker, libvirt and sudo are all system groups by GID, so a GID filter would hide the
+             rows people come to this tab for. Cockpit filters neither list either. -->
+        <ListBox Name="GroupList" SelectionMode="Multiple" Background="Transparent"
+                 Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ContextMenu>
+            <ContextMenu Name="GroupMenu">
+              <MenuItem Name="MenuDeleteGroup" Header="Delete…" />
+            </ContextMenu>
+          </ListBox.ContextMenu>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:GroupRow">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding Name}" Width="{StaticResource ColGroupName}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Gid}"         Width="{StaticResource ColGid}" Opacity="0.75" />
+                <TextBlock Text="{Binding MemberCount}" Width="{StaticResource ColMemberCount}" Opacity="0.75" />
+                <TextBlock Text="{Binding Members}" Opacity="0.75"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Members}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+      </DockPanel>
+    </TabItem>
+
+  </TabControl>
+</UserControl>

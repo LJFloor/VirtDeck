@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Users.UserEditDialog"
+        Title="New user"
+        Width="560" Height="640" MinWidth="480" MinHeight="520"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="SaveButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
+               TextWrapping="Wrap" IsVisible="False" Margin="0,12,0,0" />
+
+    <ScrollViewer>
+      <!-- Spacing over the .page class's 12: that is tuned for a full-window section page, and
+           three boxes this close together in a 560 dialog read as one block. -->
+      <StackPanel Classes="page" Spacing="18">
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Account">
+          <StackPanel Classes="options">
+            <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Full name" VerticalAlignment="Center" />
+              <TextBox Grid.Row="0" Grid.Column="1" Name="FullNameBox" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="User name" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" Name="NameBox" />
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Home directory" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" Name="HomeBox" />
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Shell" VerticalAlignment="Center" />
+              <AutoCompleteBox Grid.Row="3" Grid.Column="1" Name="ShellBox"
+                               FilterMode="ContainsOrdinal" MinimumPrefixLength="0" />
+            </Grid>
+
+            <!-- Said out loud rather than left to be discovered: the box is disabled when editing,
+                 because moving a home directory means usermod -d -m, which relocates the files and
+                 can fail part way. Cockpit makes it read-only after creation for the same reason. -->
+            <TextBlock Name="HomeNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False"
+                       Text="The home directory is set when the account is created. Moving one afterwards means relocating its files, which this app does not do." />
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Password">
+          <StackPanel Classes="options">
+            <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Password" VerticalAlignment="Center" />
+              <TextBox Grid.Row="0" Grid.Column="1" Name="PasswordBox" PasswordChar="•" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Confirm" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" Name="ConfirmBox" PasswordChar="•" />
+            </Grid>
+
+            <TextBlock Name="PasswordNote" Classes="note" TextWrapping="Wrap" />
+            <CheckBox Name="LockBox" Content="Lock the account" />
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Groups">
+          <StackPanel Classes="options">
+            <ItemsControl Name="GroupItems">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel ItemWidth="200" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <TextBlock Classes="note" TextWrapping="Wrap"
+                       Text="The primary group is ticked and cannot be changed here: moving an account to a different primary group leaves every file it owns grouped to the old one." />
+          </StackPanel>
+        </HeaderedContentControl>
+
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

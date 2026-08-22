@@ -252,20 +252,11 @@ namespace VirtDeck.Services
         // single-quoted `bash -c`, so building that command by interpolation would be one apostrophe
         // away from a broken command and one `$(...)` away from a worse one.
         //
-        // So it is not built by interpolation at all. The argument vector is assembled in C#, joined
-        // NUL-separated, base64'd, and rebuilt as a bash array on the host: base64 is
-        // [A-Za-z0-9+/=] and therefore survives RunSudoCommand's own quote rewrap untouched, and NUL
-        // is the one byte an argv member cannot contain. `read -r -d ''` rather than `mapfile -d ''`
-        // so nothing depends on the host's bash being 4.4 or newer.
+        // So it is not built by interpolation at all: see ShellScript.Argv, which assembles the
+        // vector in C#, joins it NUL-separated and rebuilds it as a bash array on the host.
 
         /// <summary>One remote command built from an argument vector, with nothing quoted and nothing interpolated.</summary>
-        private static string ArgvScript(IReadOnlyList<string> argv)
-        {
-            var blob = string.Concat(argv.Select(a => a + "\0"));
-            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(blob));
-            return "a=(); while IFS= read -r -d '' x; do a+=(\"$x\"); done " +
-                   $"< <(echo {b64} | base64 -d); \"${{a[@]}}\"";
-        }
+        private static string ArgvScript(IReadOnlyList<string> argv) => ShellScript.Argv(argv);
 
         private string RunArgv(IReadOnlyList<string> argv) => _ssh.RunSudoCommand(ArgvScript(argv));
 

@@ -5,11 +5,10 @@ using VirtDeck.Unattend;
 namespace VirtDeck.Avalonia.Views.Unattend;
 
 /// <summary>
-/// One tickable entry of a list that comes from the generator's own tables: a bloatware removal, a
-/// desktop icon, a folder on Start, a visual effect.
-///
-/// Four pages render one of these lists, so there is one row type and one <c>DataTemplate</c>, in
-/// <c>App.axaml</c>'s <c>Application.DataTemplates</c> rather than repeated per page. The pages differ
+/// One tickable entry of a list. Four answer-file pages render one of these lists (a bloatware
+/// removal, a desktop icon, a folder on Start, a visual effect), and so does the group membership
+/// list in <c>UserEditDialog</c>, so there is one row type and one <c>DataTemplate</c>, in
+/// <c>App.axaml</c>'s <c>Application.DataTemplates</c> rather than repeated per page. They differ
 /// only in which catalog they fill from and how many columns they flow into.
 ///
 /// Like <see cref="LocalAccountRow"/> this row is written to rather than rendered from, so it raises
@@ -26,10 +25,38 @@ public sealed class CheckRow : INotifyPropertyChanged
         _isChecked = isChecked;
     }
 
+    /// <summary>
+    /// A row whose id and label are simply two strings, for a list that does not come out of the
+    /// generator's tables at all.
+    /// </summary>
+    public CheckRow(string id, string label, bool isChecked = false, bool isEnabled = true, string? hint = null)
+    {
+        Id = id;
+        Label = label;
+        _isChecked = isChecked;
+        IsEnabled = isEnabled;
+        Hint = hint;
+    }
+
     /// <summary>The generator's id, and the only thing the model stores.</summary>
     public string Id { get; }
 
     public string Label { get; }
+
+    /// <summary>
+    /// False for a row that is shown but cannot be changed, which is how the group list marks a
+    /// user's primary group: visible, so it is clear where the membership came from, and not
+    /// removable, because dropping it is not something this app does.
+    /// </summary>
+    public bool IsEnabled { get; } = true;
+
+    /// <summary>
+    /// Why a row is disabled, or null. It reaches the user through a tooltip on the wrapper the
+    /// template puts round the check box, which is not tidiness: a disabled control is not
+    /// hit-testable in Avalonia, so the tooltip explaining the disabling has to hang off an enabled
+    /// parent. <c>MessageDialog</c> carries the same workaround for its disabled button.
+    /// </summary>
+    public string? Hint { get; }
 
     public bool IsChecked
     {

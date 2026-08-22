@@ -5,12 +5,19 @@
              x:Class="VirtDeck.Avalonia.App"
              RequestedThemeVariant="Default">
   <!-- The answer-file window's four checklist pages (bloatware, desktop icons, folders on Start,
-       visual effects) all render the same row, so the template lives here once instead of in each
-       page's resources. The pages differ only in the catalog they fill from and the column width
-       they flow into, both of which are set on the ItemsControl. -->
+       visual effects) and the user module's group membership list all render the same row, so the
+       template lives here once instead of in each page's resources. They differ only in the catalog
+       they fill from and the column width they flow into, both of which are set on the ItemsControl.
+
+       The Border is load-bearing, not padding: a disabled control is not hit-testable in Avalonia,
+       so the tooltip saying why a row cannot be ticked has to hang off an enabled parent. Hint is
+       null everywhere except the primary group row, so nothing appears anywhere else. -->
   <Application.DataTemplates>
     <DataTemplate DataType="unattend:CheckRow">
-      <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+      <Border ToolTip.Tip="{Binding Hint}" Background="Transparent">
+        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                  IsEnabled="{Binding IsEnabled}" />
+      </Border>
     </DataTemplate>
   </Application.DataTemplates>
 
