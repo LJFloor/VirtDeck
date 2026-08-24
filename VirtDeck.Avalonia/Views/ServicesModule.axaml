@@ -1,0 +1,216 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.ServicesModule"
+             x:DataType="vm:ServiceRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. Prefixed
+         per tab, because the two tables list two different managers. -->
+    <x:Double x:Key="ColSysName">280</x:Double>
+    <x:Double x:Key="ColSysState">150</x:Double>
+    <x:Double x:Key="ColSysAutostart">130</x:Double>
+
+    <x:Double x:Key="ColUsrName">280</x:Double>
+    <x:Double x:Key="ColUsrState">150</x:Double>
+    <x:Double x:Key="ColUsrAutostart">130</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, exactly as the user
+       accounts and VM modules do. The tabs are the systemd *scope*, not a filter over one list: the
+       system manager and the user manager are separate processes with separate unit trees, and a
+       unit name means nothing without saying which of them it belongs to.
+
+       Each page carries its own toolbar, because its search box is a fact about the table under it.
+       Nothing here is accented: that class is for the one command on a page that creates something,
+       and this module creates nothing, exactly as the file explorer's toolbar does not. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Header="System services">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <!-- A real Refresh button, as in the file explorer and the accounts module: nothing on
+                   the host announces that a unit changed the way `docker events` announces a
+                   container. The 10 second poll behind it is what keeps the table honest between
+                   presses. -->
+              <Button Name="RefreshSystemButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the units again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <TextBox DockPanel.Dock="Right" Name="SystemSearch" Width="220" Margin="10,0,0,0"
+                     PlaceholderText="Search name or description"
+                     ToolTip.Tip="Narrows the table in hand. An ordinary host has a few hundred service units, so this is how the one you want is found." />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <StackPanel Orientation="Horizontal">
+            <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
+                 the column. -->
+            <TextBlock Text="Unit"        Width="{StaticResource ColSysName}"      FontWeight="SemiBold" Padding="14,0,0,0" />
+            <TextBlock Text="State"       Width="{StaticResource ColSysState}"     FontWeight="SemiBold" />
+            <TextBlock Text="Autostart"   Width="{StaticResource ColSysAutostart}" FontWeight="SemiBold" />
+            <TextBlock Text="Description" FontWeight="SemiBold" />
+          </StackPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="SystemList" SelectionMode="Multiple" Background="Transparent"
+                   Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="SystemMenu">
+                <MenuItem Name="MenuSysStart" Header="Start" />
+                <MenuItem Name="MenuSysStop" Header="Stop" />
+                <MenuItem Name="MenuSysRestart" Header="Restart" />
+                <MenuItem Name="MenuSysReload" Header="Reload" />
+                <Separator />
+                <MenuItem Name="MenuSysEnable" Header="Enable" />
+                <MenuItem Name="MenuSysDisable" Header="Disable" />
+                <Separator />
+                <MenuItem Name="MenuSysMask" Header="Mask…" />
+                <MenuItem Name="MenuSysUnmask" Header="Unmask" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:ServiceRow">
+                <StackPanel Orientation="Horizontal">
+                  <!-- The same 9px state dot the VM, container and account lists draw, sharing the
+                       same three colours plus one this module needs and they do not: red for a unit
+                       that failed. -->
+                  <DockPanel Width="{StaticResource ColSysName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding StateText}" Width="{StaticResource ColSysState}"
+                             Foreground="{Binding StateBrush}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                  <!-- The Border is load-bearing, not padding: a disabled control is not
+                       hit-testable in Avalonia, so the tooltip saying why a static unit cannot be
+                       enabled has to hang off an enabled parent. Same workaround as CheckRow's
+                       template and MessageDialog's alternative button.
+
+                       The file-state word sits beside the tick because a tick alone cannot tell
+                       `static` from `disabled`, and those are different facts about a unit. -->
+                  <Border Width="{StaticResource ColSysAutostart}" Background="Transparent"
+                          ToolTip.Tip="{Binding AutostartHint}">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <CheckBox Classes="autostart" IsChecked="{Binding AutostartOn}"
+                                IsEnabled="{Binding AutostartChangeable}" />
+                      <TextBlock Text="{Binding FileState}" Opacity="0.75" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Text="{Binding Description}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Why the list is empty, so an unusable module never just looks broken. -->
+          <TextBlock Name="SystemEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="User services">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Button Name="RefreshUserButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the units again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <TextBox DockPanel.Dock="Right" Name="UserSearch" Width="220" Margin="10,0,0,0"
+                     PlaceholderText="Search name or description" />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="Unit"        Width="{StaticResource ColUsrName}"      FontWeight="SemiBold" Padding="14,0,0,0" />
+            <TextBlock Text="State"       Width="{StaticResource ColUsrState}"     FontWeight="SemiBold" />
+            <TextBlock Text="Autostart"   Width="{StaticResource ColUsrAutostart}" FontWeight="SemiBold" />
+            <TextBlock Text="Description" FontWeight="SemiBold" />
+          </StackPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="UserList" SelectionMode="Multiple" Background="Transparent"
+                   Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="UserMenu">
+                <MenuItem Name="MenuUsrStart" Header="Start" />
+                <MenuItem Name="MenuUsrStop" Header="Stop" />
+                <MenuItem Name="MenuUsrRestart" Header="Restart" />
+                <MenuItem Name="MenuUsrReload" Header="Reload" />
+                <Separator />
+                <MenuItem Name="MenuUsrEnable" Header="Enable" />
+                <MenuItem Name="MenuUsrDisable" Header="Disable" />
+                <Separator />
+                <MenuItem Name="MenuUsrMask" Header="Mask…" />
+                <MenuItem Name="MenuUsrUnmask" Header="Unmask" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:ServiceRow">
+                <StackPanel Orientation="Horizontal">
+                  <DockPanel Width="{StaticResource ColUsrName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding StateText}" Width="{StaticResource ColUsrState}"
+                             Foreground="{Binding StateBrush}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                  <Border Width="{StaticResource ColUsrAutostart}" Background="Transparent"
+                          ToolTip.Tip="{Binding AutostartHint}">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <CheckBox Classes="autostart" IsChecked="{Binding AutostartOn}"
+                                IsEnabled="{Binding AutostartChangeable}" />
+                      <TextBlock Text="{Binding FileState}" Opacity="0.75" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Text="{Binding Description}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Name="UserEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+  </TabControl>
+</UserControl>

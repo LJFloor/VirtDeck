@@ -57,6 +57,19 @@ public partial class FileExplorerModule : UserControl, IModule
     /// <summary>True when the listing on screen was read with sudo. Reset by the next navigation.</summary>
     private bool _shownElevated;
 
+    /// <summary>
+    /// Directories the user has agreed to list as root, covering everything below each of them.
+    /// Session-only and never persisted, because it records an answer somebody gave out loud
+    /// rather than a setting.
+    ///
+    /// <para>It is <b>not</b> a latch, and the difference matters. Every navigation is still tried
+    /// as the login user first, so a directory the account can read is still read as the account
+    /// and the status bar still says which of the two answers is on screen. What the set removes
+    /// is the second and third identical question: walking /var/lib/docker, into volumes, and
+    /// back out used to ask three times for one decision.</para>
+    /// </summary>
+    private readonly List<string> _rootApproved = new();
+
     /// <summary>Pixel size to fetch desktop icons at, or 0 to draw the fallback badges.</summary>
     private int _iconSize;
     private bool _started;
@@ -138,7 +151,14 @@ public partial class FileExplorerModule : UserControl, IModule
         UpButton.Click += async (_, _) => await GoUp();
         HomeButton.Click += async (_, _) => await GoHome();
         RefreshButton.Click += async (_, _) => await NavigateTo(_currentDir, record: false, elevated: _shownElevated);
-        ElevateButton.Click += async (_, _) => await NavigateTo(_pendingDir, record: false, elevated: true);
+        ElevateButton.Click += async (_, _) =>
+        {
+            // Pressing this is the user saying out loud that this tree may be listed as root, so
+            // walking around inside it must not ask again at every step. Recorded before the
+            // navigation, so the answer covers this listing and the ones below it alike.
+            ApproveRoot(_pendingDir);
+            await NavigateTo(_pendingDir, record: false, elevated: true);
+        };
 
         HiddenBox.IsCheckedChanged += (_, _) => PopulateList();
 
@@ -292,6 +312,29 @@ public partial class FileExplorerModule : UserControl, IModule
         return child.Length > 0 ? child : null;
     }
 
+    /// <summary>True when <paramref name="path"/> is <paramref name="ancestor"/> or lies below it.
+    /// Textual for the reason <see cref="ChildOnTheWayTo"/> is: both are normalised absolute POSIX
+    /// paths out of the listing itself, and a symlinked route names the link the user clicked.</summary>
+    private static bool IsUnder(string path, string ancestor)
+    {
+        if (path == ancestor) return true;
+        var root = ancestor == "/" ? "/" : ancestor.TrimEnd('/') + "/";
+        return path.StartsWith(root, StringComparison.Ordinal);
+    }
+
+    /// <summary>Remembers that <paramref name="dir"/> and everything under it may be listed as root.</summary>
+    private void ApproveRoot(string dir)
+    {
+        if (string.IsNullOrEmpty(dir) || RootApproved(dir)) return;
+        // A new ancestor swallows the subtrees it covers, so the set stays a handful of entries
+        // however long somebody spends walking around inside one.
+        _rootApproved.RemoveAll(p => IsUnder(p, dir));
+        _rootApproved.Add(dir);
+    }
+
+    /// <summary>True when the user has already agreed to list this path as root.</summary>
+    private bool RootApproved(string dir) => _rootApproved.Any(p => IsUnder(dir, p));
+
     /// <summary>The directory the retry button should try, which is whatever last failed.</summary>
     private string _pendingDir = "/";
 
@@ -315,15 +358,32 @@ public partial class FileExplorerModule : UserControl, IModule
         {
             var files = _files;
             var size = _iconSize;
+
+            Task<DirectoryListing> Read(bool asRoot) => Task.Run(() =>
+            {
+                var result = files.ListDirectory(dir, asRoot);
+                WarmIcons(result.Entries, size);
+                return result;
+            });
+
             DirectoryListing listing;
             try
             {
-                listing = await Task.Run(() =>
+                listing = await Read(elevated);
+
+                // An answer the user has already given is not asked for again. The un-elevated
+                // read still happens first, so a directory the account can read is still read as
+                // the account and _shownElevated still says which answer is on screen; what is
+                // skipped is the repeat question, not the honesty about who was asked.
+                if (!elevated && listing.Failure != ListFailure.None && RootApproved(dir))
                 {
-                    var result = files.ListDirectory(dir, elevated);
-                    WarmIcons(result.Entries, size);
-                    return result;
-                });
+                    var asRoot = await Read(true);
+                    if (asRoot.Failure == ListFailure.None)
+                    {
+                        listing = asRoot;
+                        elevated = true;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -735,7 +795,11 @@ public partial class FileExplorerModule : UserControl, IModule
         var result = await RunRenameAsync(files, dir, oldName, newName, elevated: false);
         if (result is null) return;
 
-        if (result is { Failure: RenameFailure.Refused, Denied: true } &&
+        // SourceGone as well as a denial, because [ ! -e ] cannot tell an entry that has gone from
+        // one whose directory the account may not search, and the second is exactly what somebody
+        // is looking at after a listing they had to elevate. NameTaken needs nothing: the elevated
+        // run re-does the taken check before mv, so an overwrite cannot slip through.
+        if (WorthRoot(result) &&
             await MessageDialog.Confirm(Owner, "Rename",
                 $"{result.Message}\n\nRetry as root? That covers this one rename. The next one is " +
                 "read and written as you again."))
@@ -786,6 +850,11 @@ public partial class FileExplorerModule : UserControl, IModule
         : name is "." or ".." ? $"{name} is not a name."
         : _entries.Any(e => e.Name == name) ? $"Something called {name} is already here."
         : null;
+
+    /// <summary>True when root is worth offering for a rename the host would not do.</summary>
+    private static bool WorthRoot(RenameResult result) =>
+        result.Failure == RenameFailure.SourceGone ||
+        result is { Failure: RenameFailure.Refused, Denied: true };
 
     /// <summary>One attempt. Null means it threw and was reported.</summary>
     private async Task<RenameResult?> RunRenameAsync(RemoteFileService files, string dir,
@@ -1070,20 +1139,25 @@ public partial class FileExplorerModule : UserControl, IModule
         var plan = await InspectAsync(files, sources, dest, elevated: false, title);
         if (plan is null) return false;
 
-        // A destination this account cannot write to is the same offer a directory it cannot read
-        // already makes, and it covers this one operation: nothing latches, so the next is read and
-        // written as the user again.
+        // The same offer a directory it cannot read already makes, and it covers this one
+        // operation: nothing latches, so the next is read and written as the user again. The
+        // approval a listing remembers is deliberately not read here, because agreeing to look
+        // inside a directory as root is not agreeing to write into it as root.
         var elevated = false;
-        if (plan.Block == PasteBlock.DestinationDenied)
+        if (RootMightSeeMore(plan))
         {
-            if (!await MessageDialog.Confirm(Owner, title,
-                    $"{plan.Message}\n\nRetry as root? That covers this one operation. The next is " +
-                    "read and written as you again."))
-                return false;
-
-            elevated = true;
-            plan = await InspectAsync(files, sources, dest, elevated: true, title);
-            if (plan is null) return false;
+            if (await MessageDialog.Confirm(Owner, title,
+                    $"{ElevateReason(plan)}\n\nRetry as root? That covers this one operation. " +
+                    "The next is read and written as you again."))
+            {
+                elevated = true;
+                plan = await InspectAsync(files, sources, dest, elevated: true, title);
+                if (plan is null) return false;
+            }
+            // A declined offer on a blocked plan has nothing left to try and the reason has just
+            // been read, so it is not shown again. A source the pre-flight could not see is not a
+            // block: the paste runs and the host refuses it by name, which is the existing path.
+            else if (plan.Block != PasteBlock.None) return false;
         }
 
         if (plan.Block != PasteBlock.None)
@@ -1388,16 +1462,17 @@ public partial class FileExplorerModule : UserControl, IModule
         if (plan is null) return;
 
         var elevated = false;
-        if (plan.Block == PasteBlock.DestinationDenied)
+        if (RootMightSeeMore(plan))
         {
-            if (!await MessageDialog.Confirm(Owner, "Upload",
-                    $"{plan.Message}\n\nRetry as root? That covers this one upload. The next one is " +
-                    "written as you again."))
-                return;
-
-            elevated = true;
-            plan = await InspectIncomingAsync(files, probe, dest, elevated: true);
-            if (plan is null) return;
+            if (await MessageDialog.Confirm(Owner, "Upload",
+                    $"{ElevateReason(plan)}\n\nRetry as root? That covers this one upload. The " +
+                    "next one is written as you again."))
+            {
+                elevated = true;
+                plan = await InspectIncomingAsync(files, probe, dest, elevated: true);
+                if (plan is null) return;
+            }
+            else if (plan.Block != PasteBlock.None) return;
         }
 
         if (plan.Block != PasteBlock.None)
@@ -1669,6 +1744,30 @@ public partial class FileExplorerModule : UserControl, IModule
         }
         catch { /* an unusable path is simply not remembered */ }
     }
+
+    /// <summary>
+    /// True when the same pre-flight asked as root could come back with a different answer. Every
+    /// test it makes (<c>-d</c>, <c>-w</c>, <c>-x</c>, <c>-e</c>) answers no for a path whose
+    /// parent the login user may not search, so "not there" and "inside a directory you cannot
+    /// open" arrive here as one verdict. That is the ambiguity the listing already resolves by
+    /// offering root on any failure rather than only on a denial, and it is why /var/lib/docker,
+    /// listed happily as root, then refused a paste one level down by saying it was gone.
+    ///
+    /// <para><see cref="PasteBlock.IntoItself"/> is deliberately not one of them: containment does
+    /// not depend on who is asking, so root would answer exactly the same and the offer would be
+    /// a dead end dressed up as a way forward.</para>
+    /// </summary>
+    private static bool RootMightSeeMore(PastePlan plan) =>
+        plan.Block is PasteBlock.DestinationDenied or PasteBlock.DestinationMissing ||
+        plan.Items.Any(i => i.SourceMissing);
+
+    /// <summary>What to put above the offer: the block's own wording, or the sources it could not
+    /// see when nothing blocked the paste outright.</summary>
+    private static string ElevateReason(PastePlan plan) =>
+        plan.Block != PasteBlock.None
+            ? plan.Message
+            : $"{Count(plan.Items.Count(i => i.SourceMissing), "entry", "entries")} could not be " +
+              "found, and may be inside a directory only root can open.";
 
     /// <summary>Asks the host what the move would run into. Null means it threw and was reported.</summary>
     private async Task<PastePlan?> InspectAsync(RemoteFileService files, IReadOnlyList<string> sources,

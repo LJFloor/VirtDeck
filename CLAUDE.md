@@ -97,7 +97,8 @@ bar and the process lifetime; everything a user actually manages lives in an `IM
 menu is a `TabControl` themed with `JbModuleTabControl` (the settings-window side strip with a taller
 row, so a 16px glyph fits beside the label). Modules today: **Virtual machines** (`VirtualMachinesModule`,
 which is the whole former `VmListWindow` minus the shell: the VM list, the Networks tab, `VmDetailsView`
-and every per-VM command), **Containers** (`ContainersModule`, below), **User accounts**
+and every per-VM command), **Containers** (`ContainersModule`, below), **Services**
+(`ServicesModule`, below: the host's systemd units, system and user), **User accounts**
 (`UserAccountsModule`, below: the host's own logins and groups), **File explorer**
 (`FileExplorerModule`, below: the host's filesystem as the login user) and **Terminal**
 (`TerminalModule`, below: a shell on the host itself).
@@ -1120,6 +1121,213 @@ text arrives through `TextInput`, so dead keys, compose and any layout work with
 maintain; `TextInput` carries no modifiers, so the key press that preceded it is what says whether it
 was a chord and was already sent.
 
+## Services
+
+`ServicesModule` manages the host's systemd `.service` units: a table per tab, start, stop, restart
+and reload, an autostart tick per row, and mask and unmask. `Views/ServicesModule` is the module,
+`Views/ServiceRow` its row, `VirtDeck.Core/Services/SystemdService` the whole of the systemd
+vocabulary and `VirtDeck.Core/Models/SystemdUnit` its model. Every other module wraps a thing running
+on the host; this one is what decides which of those things run at all.
+
+**Modelled on Cockpit's Services page**, because that is the reference implementation everybody
+administering a Linux box has seen. Two of its answers are carried over and one is deliberately not:
+Cockpit puts targets, sockets and timers behind sub-tabs of their own, and only services are here,
+which is what the tables are sized and worded for. A unit-type filter is the obvious next pass, not a
+rewrite: nothing above `SystemdService`'s three scripts names `.service` except the `--type=service`
+flags in them and `RequireUnit`'s suffix check.
+
+- **The two tabs are the systemd *scope*, not a filter over one list.** The system manager and the
+  user manager are separate processes with separate unit trees, so a unit name means nothing without
+  saying which of them it belongs to, and every method in the service takes a `UnitScope`. This is
+  the one module whose tabs are not two views of one host fact, the way the accounts module's users
+  and groups are.
+- **Listing is un-elevated in both scopes; mutating is elevated in exactly one.** `systemctl
+  list-units` answers anybody, so the listing goes through `RunCommand` like the file explorer's
+  rather than through sudo like everything else in the app, and nobody meets a sudo prompt in front
+  of a read. Changing the system manager needs root. Changing the **user** manager must never go
+  through sudo, and that is the sharpest edge in the module: `sudo systemctl --user` addresses
+  *root's* user manager, so it would act on the wrong tree and report success. `SystemdService.RunArgv`
+  is the one place that branch lives.
+  **The journal tail inverts that, and both halves are load-bearing.** `sudo journalctl --user` is
+  forbidden for the same reason and reads root's journal, so the user-scope tail runs through
+  `RunCommandStreaming`; but the **system**-scope tail must be elevated, because an account outside
+  `adm` and `systemd-journal` gets only its own entries from `journalctl --system` and gets them
+  *silently*, so an unprivileged system tail looks exactly like a host on which nothing ever happens.
+  Reading is un-elevated, a tail is elevated in the scope the listing is not: the two rules point
+  opposite ways and `SystemdService.StartEventListener` is where that is written down.
+- **`XDG_RUNTIME_DIR` is what makes `--user` work at all.** systemctl finds the user bus at
+  `$XDG_RUNTIME_DIR/bus`, and an SSH command channel has no session to inherit the variable from, so
+  the script exports it itself. It is exported for both scopes rather than making the two scripts
+  differ by more than the flag, since it is inert for `--system`. A user manager exists only while
+  the account has a login session or lingering, so **"there is no user manager" is an ordinary state
+  on a server**, carried as `UnitCatalog.ListFailure` in the host's own words the way
+  `RemoteFileService`'s listing failure is, never as an exception; the module adds the one sentence
+  systemd cannot, which is that `loginctl enable-linger` is the fix. The version is printed by the
+  script *before* the listing, so "there is no systemd here" and "this scope could not be read" stay
+  different answers with different empty states.
+- **One round trip per scope, and only the visible scope is ever read.** Each script is
+  `UserAccountService.LoadScript`'s shape: a tag in field 0, real tab characters, `LC_ALL=C`, every
+  best-effort half fenced with `2>/dev/null`, `|| exit $?`-equivalent handling on the one command
+  whose failure means the listing failed, and a closing `exit 0`. `CatalogScript` has five tags: `v`
+  the version, `e` a stated failure, `u` a `list-units` line, `f` a `list-unit-files` line, `r` a
+  `show` block. The two listings are **merged by name** because neither is a superset: `list-units`
+  knows what a unit is doing now and `list-unit-files` is the only source of `static`, `masked` and
+  `indirect`, and of the units on disk the manager has never had a reason to load.
+- **There are three read scripts, not one, and the split is a measurement rather than a preference.**
+  Over SSH against a host with 204 service units: `list-units` **13 ms**, `list-unit-files`
+  **1150 ms**, the batched `show` **460 ms**. `RunCommand` holds `_ioLock` for its whole call, so the
+  single 1.6 s script this replaced also stalled the VM list, the container list and the file explorer
+  every time it ran. The two slow halves answer what a unit does at *boot*, which changes only when
+  somebody enables, disables, masks or unmasks one, so they are separated out:
+  - **`StateScript` is the cheap pass**, `list-units` only, tags `v`/`e`/`u`, which is a strict subset
+    of the catalog's so `Parse` handles both with no branch. It is what the poll and the event tail
+    run. `ReadStateAsync` merges it onto the cached catalog, taking `LoadState`, `ActiveState` and
+    `SubState` fresh and carrying `FileState` and `CanReload` forward, and a unit the cache has never
+    heard of sets `StateReading.UnknownUnits`, which is the module's cue to pay for a catalog. A
+    cached unit that `list-units` did not mention has its run-time half **cleared** rather than kept,
+    because that is what an empty `ActiveState` already means: the manager has never had a reason to
+    load it. This is also what finally reads `_catalogs`, which the service had been writing and
+    nobody had been reading.
+  - **`CatalogScript` is the expensive pass**, and it runs on the first look at a scope, on the
+    Refresh button, and on `UnknownUnits`. **Never on a timer.**
+  - **`ShowScript` is the targeted pass**: every field `SystemdUnit` carries, for a named handful,
+    at about 10 ms for one unit. It is what a command reads back instead of reloading its whole
+    scope, and because it answers `UnitFileState` too, **our own** enable, disable, mask and unmask
+    need no catalog pass either. Only a change made outside VirtDeck does.
+  - `For()` substitutes `SCOPE` **before** `ShowScript`'s `NAMES` blob goes in, because the base64
+    of an argv can contain the literal string "SCOPE".
+- **The `show` pass is handed the names `list-units` just gave, not `'*.service'`, and the difference
+  is not cosmetic.** A pattern there expands over *active* units only: measured on a 255 host the
+  glob answered for 80 units out of 204 and every inactive one came back with no file state at all.
+  Word splitting turns the name list into arguments, which is safe because a unit name cannot contain
+  whitespace (systemd escapes it to `\x20`), with `set -f` around it so a name is never read as a
+  glob. The block is reassembled into **one self-contained record on the host**, so nothing on this
+  side depends on the order systemctl chose to print the properties in.
+- **`UnitFileState` from `show` overrides the listing's, and that is what makes a template instance
+  manageable.** `list-unit-files` knows `getty@.service` and has never heard of `getty@tty1.service`,
+  so without the override an instance shows no autostart state and refuses to be enabled, while
+  `systemctl enable getty@tty1.service` works perfectly well. The **template itself** is dropped
+  (`SystemdService.Wanted`): it is the pattern instances are named from, every command against one
+  fails, and its instances are listed in their own right. So is a unit file whose state is `alias`,
+  which is one service under a second name, and a `not-found` unit, which is a dangling reference
+  something else made and not a service anybody can act on.
+- **`failed` earns a fourth state colour, red (`#C75450`).** The app's three shared dot colours are
+  green usable, amber transient, grey not going anywhere, and every other list needs only those. A
+  failed unit is the single most important thing on this page and grey would bury it among the
+  hundred units that were simply never started. The state phrase is systemd's own, sub-state and all
+  (`active (running)`), on the dot as its tooltip and in the column beside it: the sub-state is what
+  separates a one-shot that finished from a daemon that is up.
+- **A journal tail, a 5 second poll and a Refresh button**, which is a combination no other module
+  has, and each of the three answers something the other two cannot. The accounts module and the file
+  explorer have none of them, because nothing changes an account or a directory behind the app's back
+  often enough to matter. Service state does: somebody starting a daemon from a terminal is the
+  ordinary case.
+  - **The tail is `journalctl --follow`, not D-Bus**, and that is not for want of trying. `busctl
+    monitor` needs `BecomeMonitor`, which the system bus grants to root alone (verified: it answers
+    "Access denied" as an ordinary user), and a bus monitor is not a `Manager.Subscribe()` subscriber,
+    so systemd need not emit the unit signals for it to see in the first place. `journalctl` ships
+    with systemd, needs no subscription, and PID 1 logs every unit job under a stable `MESSAGE_ID`.
+    Seven ids cover the whole vocabulary (start begun/finished/failed, stop begun/finished, reload
+    begun/finished), joined with journalctl's `+` disjunction. `stdbuf -oL` for the reason
+    `virsh event` needs it and `docker events` does not: journalctl is C and writes through stdio,
+    which block-buffers into a pipe.
+  - **The payload is ignored except for one substring test.** `--output=cat` prints the message only,
+    and under `LC_ALL=C` it names the unit ("Started ssh.service - OpenBSD Secure Shell server."), so
+    the tail raises its event only for a line containing `.service`. Every SSH connection VirtDeck
+    opens logs a `session-N.scope` line through these same message ids, so without that test the app
+    would refresh in response to its own connections. Debounced 400 ms in the module, because one
+    unit job prints several lines and a restart prints both sets.
+  - **The poll is the guarantee under it**, at 5 seconds where the old one was 10, and it is *cheaper*
+    at twice the rate because it runs `StateScript` alone: 13 ms against 1.6 s, so about a sixtieth of
+    the shared lock.
+  - **Refresh is the only way to ask for the expensive pass by name**, which is what makes an
+    `systemctl enable` run outside VirtDeck visible. That is the deliberate trade for never paying
+    1150 ms unasked.
+  - `Deactivate` stops the timers and **cancels the read in flight**, which is worth doing precisely
+    because it is holding the shared lock. The **tail is left running**, the same exception the
+    `virsh event --loop` and `docker events` tails take and for the same reason: it holds a connection
+    of its own, and rebuilding it on every module switch would cost more than the events are worth.
+    `Shutdown` stops it, because the shell disposes the shared connection straight after and with it
+    the auth material the tail's own client borrowed.
+- **No read flag may gate a command, and that is the fix for the grey context menu.** Every command
+  used to be ANDed with a module-wide busy flag covering the whole of any refresh, so with a 1.6 s
+  pass on a 10 s timer the menu was dead about a sixth of the time, for no reason the user could see;
+  right-clicking gave eight grey items that came back to life a second later. `UpdateMenu` is now a
+  pure function of the cached rows and the selection, the footing `ContainersModule.UpdateMenu` and
+  `VirtualMachinesModule.UpdateButtons` were always on. The one control a read flag still touches is
+  **Refresh**, and only the expensive pass sets it: a user pressed that, so a second press being dead
+  for a moment is feedback rather than a lie.
+- **A row says what it has in flight, because systemctl blocks until its job finishes.**
+  `ServiceRow.Pending` is the one thing on the row the client writes rather than reads, and it goes
+  amber with the verb on the press. It claims a command is *on its way*, never what the host will
+  answer, which keeps it inside the rule the autostart tick already lives by: the UI is not allowed to
+  lead the host. `Update` clears it, so the host's answer always wins, and a `finally` clears the lot,
+  so a thrown command cannot leave a row stuck amber. Every `Can*` predicate is false while pending,
+  which is what **replaced** the module-wide gate: a row with a command in flight is genuinely not
+  startable, a row that merely coincides with a background read is.
+- **A command reads back only what it touched, and that path is outside every read guard.**
+  `RunActionAsync` and `RunOneAsync` end in `ShowAsync` over their own units rather than reloading the
+  scope. Both halves of that mattered: the full reload was 1.6 s of latency before a start showed, and
+  it went through the same busy guard, which **silently swallowed it** whenever the poll happened to
+  be in the air, leaving the row wrong until the next tick. The poll yields to a command rather than
+  the reverse. `ShowAsync`'s answer is keyed by the unit's own `Id`, not by the name asked for, so it
+  is folded with a loop rather than `ToDictionary`: two requested names that are aliases of one unit
+  come back as one entry.
+- **Enable and Disable change boot behaviour only. No `--now`.** Whether a service is running and
+  whether it comes back after a reboot are two questions, and answering both from one tick would make
+  the more surprising half invisible.
+- **The autostart toggle is an in-row `CheckBox` driven by `Click`, not by a two-way binding.**
+  `IsCheckedChanged` also fires when a refresh pushes a new value in, which with a poll running every
+  few seconds would turn the timer into a command generator; `Click` fires only when somebody presses
+  the box.
+  The box has already flipped itself by then, so the **row** is what still knows the old answer, and
+  any path that declines to act puts the tick back rather than leave it lying about the host. The
+  `Border` around it is load-bearing, not padding: a disabled control is not hit-testable in Avalonia,
+  so the tooltip saying why a `static` unit cannot be enabled has to hang off an enabled parent, the
+  same workaround `CheckRow`'s template and `MessageDialog`'s alternative button already carry. The
+  file-state word sits beside the tick because a tick alone cannot tell `static` from `disabled`.
+- **Mask is the one command that asks first.** It is stronger than disabling and far easier to
+  forget: the unit is linked to `/dev/null` and cannot be started by anything, including as a
+  dependency of something else, and what systemd says when something tries does not point back at
+  this window. Everything else is a `MessageDialog.Info` of the host's own words after the fact, since
+  a start that fails has failed and there was nothing to warn about.
+- **Every command is `ShellScript.Argv` with a literal `--` before the unit name**, and `RequireUnit`
+  is deliberately permissive about everything else, exactly as `UserAccountService.RequireSafe` is.
+  Nothing here ever creates a unit, so there is only the addressing question, and a real unit name may
+  be `systemd-fsck@dev-disk-by\x2duuid-3083\x2dE537.service`: systemd escapes device paths into unit
+  names, so a strict rule would refuse to stop units that are on every ordinary machine. What is
+  checked is what would be a bug rather than a preference: empty, a line break, a leading hyphen, and
+  a suffix that is not `.service`.
+- **The search box is client-side and is the module's answer to its own size.** `--all` lists 250 or
+  more service units on an ordinary host, so something has to narrow them; the obvious alternative, an
+  "inactive services" filter in the shape of the accounts module's "System accounts" toggle, would
+  hide exactly the units somebody opened the page to start. Typing in it re-runs `Populate` over the
+  catalog already in hand and never costs a round trip, the same rule the accounts toggle and the file
+  explorer's sort follow. It is still the most expensive thing this module does on the UI thread,
+  since it re-runs the merge and the reorder over every unit in the scope, so a keystroke restarts a
+  150 ms one-shot timer rather than doing the work.
+- **Rows are merged, never rebuilt**, and it matters more here than anywhere else in the app: the poll
+  fires whether or not anybody asked, so a rebuild would drop the selection out from under the pointer
+  mid-gesture. `Merge` plus `Reorder`-by-`Move` is `UserAccountsModule`'s, copied. `Reorder` keeps a
+  position index here rather than calling `IndexOf`, which is a linear scan inside a linear loop and
+  on 250 units is tens of thousands of reference comparisons per pass; only the span each `Move`
+  disturbs is reindexed, and nothing below the write cursor can have moved.
+- **A tab switch draws the cached table before the round trip that replaces it.** `Page.Catalog`
+  starts empty and is only ever assigned from a completed read, so without `DrawCached` a switch shows
+  a blank table for as long as the host takes to answer.
+- **The two tabs are one `Page` record, not two copies of everything.** They differ only in which
+  manager they talk to, so every method takes a `Page` holding that tab's scope, list, search box,
+  empty text and menu items; the alternative is two copies of the merge, the filter and eight
+  commands, drifting apart on the first fix.
+- **Absent systemd is a stated answer, not an empty list**, `DockerService.DockerAvailable`'s rule
+  rather than the KVM probes': the safe default is the one that explains itself. The capability rides
+  in the listing as the `v` tag, as the accounts module's does, so there is no separate probe; the
+  status slot says so, the table carries a message, every command is disabled rather than hidden, and
+  **every re-entry re-reads**, which is also what lets a user manager that has since started appear
+  without restarting VirtDeck. That falls out of the split rather than being coded twice: a scope that
+  never drew a table is never marked loaded, so its state pass turns into a catalog pass by itself,
+  and `Draw` is what stops the poll where there is nothing to poll.
+
 ## User accounts
 
 `UserAccountsModule` manages the host's own login accounts: a Users table and a Groups table in the
@@ -1339,6 +1547,15 @@ confirmation in front of it. There is still no viewer, no tree pane and no direc
   screen the status bar says "listing as root", because the one case where somebody is not seeing
   their own view of the machine is the case worth saying out loud. Latching it would be fewer clicks
   in `/root` and a lie everywhere after.
+- **The answer is remembered even though the elevation is not**, and those are two different things.
+  Pressing the retry button records the directory in `_rootApproved`, covering it and everything
+  below it for the session, because walking `/var/lib/docker`, into `volumes`, and back out asked
+  three times for one decision. What is remembered is the **user's answer**, not the elevation:
+  every navigation is still attempted as the login user first, so a directory the account can read
+  is still read as the account, `_shownElevated` still says which of the two answers is on screen,
+  and the status bar still says "listing as root" when it is the elevated one. Only the repeat
+  question is skipped. The set is session-only and never persisted, and no write path reads it,
+  because agreeing to look inside a directory as root is not agreeing to write into it as root.
 - **`%y` and `%Y` are both fetched.** `%Y` is the dereferenced type, so a symlink to a directory is
   navigable (which is what the picker already did); `%y` is the entry's own, so a symlink is still
   identifiable, shows its target in the Name column, and is dimmed rather than hidden when `%Y` comes
@@ -1452,6 +1669,23 @@ confirmation in front of it. There is still no viewer, no tree pane and no direc
   is decided by matching the tool's own words, which is reliable because the script exports
   `LC_ALL=C`. A cut is **spent only once the move happened**, so a partly refused one stays on the
   clipboard.
+- **The pre-flight gets the listing's rule too, and not having it was a bug.** Every test
+  `InspectPaste` and `InspectIncoming` make (`-d`, `-w`, `-x`, `-e`) answers **no** for a path whose
+  parent the account may not search, so "not there" and "inside a directory you cannot open" arrive
+  as one verdict, exactly as they do for a listing. Offering root only on `DestinationDenied` was
+  therefore right for `/var/lib/docker` itself, whose `-d` succeeds and whose `-w` fails, and wrong
+  one level down: `/var/lib/docker/volumes` came back `DestinationMissing` and dead-ended with "is
+  gone" on a directory the user was looking at. `FileExplorerModule.RootMightSeeMore` is the
+  predicate now, covering both destination blocks **and** a source the pre-flight could not see
+  (`PasteItem.SourceMissing`, which was being set and read by nobody, so a root-owned *directory*
+  read as a missing file and its conflict came back as a bogus `KindMismatch`).
+  `PasteBlock.IntoItself` is deliberately excluded: containment does not depend on who is asking, so
+  the offer would be a dead end dressed up as a way forward. Declining a blocked plan returns
+  without repeating the reason just read; declining on an unseen source runs anyway, because the
+  host then refuses it by name, which is the existing path. **Rename got the same widening**, on
+  `SourceGone` as well as on a denial, since `[ ! -e ]` is the same test telling the same two states
+  apart, and the message no longer says "the listing is out of date" about an entry that is visibly
+  there. `NameTaken` needs nothing, because the elevated run re-does the taken check before `mv`.
 - **Keys are split between the list and the top level, and focus is what splits them.** `ConsoleWindow`
   and `TerminalModule` register theirs on the window because the guest and the container need every
   key; here Backspace still belongs to the path box, so Backspace-for-Up, Alt+Left/Right and Enter

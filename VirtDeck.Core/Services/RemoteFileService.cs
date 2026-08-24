@@ -76,6 +76,13 @@ namespace VirtDeck.Services
         /// </summary>
         public string FreeName { get; init; } = string.Empty;
         public bool SourceIsDir { get; init; }
+
+        /// <summary>
+        /// The pre-flight could not see the source at all, which is not the same as it being gone:
+        /// <c>[ -e ]</c> answers no for a path whose directory the account may not search. It is
+        /// the caller's cue to ask again as root rather than settle conflicts against a source it
+        /// cannot describe, since an unseen directory reads here as a file that is not there.
+        /// </summary>
         public bool SourceMissing { get; init; }
         public bool TargetExists { get; init; }
         public bool TargetIsDir { get; init; }
@@ -618,7 +625,12 @@ namespace VirtDeck.Services
                     : new RenameResult
                     {
                         Failure = RenameFailure.SourceGone,
-                        Message = $"{oldName} is no longer here. The listing is out of date; refresh it.",
+                        // Not "the listing is out of date": this test is [ ! -e ], which answers
+                        // the same way for an entry that has gone and for one whose directory the
+                        // account may not search, and the second of those is exactly what an
+                        // elevated listing puts on screen. The caller offers root on this verdict
+                        // for that reason.
+                        Message = $"{oldName} is no longer here, or is inside a directory you cannot open.",
                     };
             }
 
@@ -915,7 +927,11 @@ namespace VirtDeck.Services
             "nodest" => new PastePlan
             {
                 Block = PasteBlock.DestinationMissing,
-                Message = $"{destination} is gone, or is no longer a directory.",
+                // Same ambiguity the listing's own NotFound wording carries, and for the same
+                // reason: [ -d ] answers no for a directory whose parent the account cannot
+                // search, so this verdict is never proof that the path is not there.
+                Message = $"{destination} is gone, is no longer a directory, or is inside a " +
+                          "directory you cannot open.",
             },
             "inside" => new PastePlan
             {
