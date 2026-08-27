@@ -8,18 +8,18 @@
     state and a popup framed like a context menu, and the Menu theme wires the two together through
     its ItemContainerTheme. There is nothing here to template.
 
-    MinHeight and Padding are cut back from the theme's toolbar figures (22 and 9,3), and the
-    vertical padding goes to nothing: the cell stretches to the whole height of the status bar so
-    its hover covers the strip top to bottom, which is what a status bar widget does and what a
-    toolbar's inset pill does not. The 6 left and right is the only padding kept, so the label is
-    not against the edge of its own highlight.
+    MinHeight and Padding drop the theme's toolbar figures (22 and 9,3) entirely: the cell stretches
+    to the whole height of the status bar and its hover covers the strip with no inset on any side,
+    which is what a status bar widget does and what a toolbar's pill does not. The gap either side
+    of the label is the bar's own 10px border padding on the right and the separator's margin on
+    the left, so nothing here has to add one.
 
     The Menu itself stays enabled and carries the tooltip while the item inside it is disabled: a
     disabled control is not hit-testable in Avalonia, so a reason hung off the item would never be
     read. Same arrangement as CheckRow's border and ServiceRow's autostart tick.
   -->
   <Menu Name="MenuHost" VerticalAlignment="Stretch">
-    <MenuItem Name="AccountItem" MinHeight="0" Padding="6,0" VerticalAlignment="Stretch">
+    <MenuItem Name="AccountItem" MinHeight="0" Padding="0" VerticalAlignment="Stretch">
       <MenuItem.Header>
         <StackPanel Orientation="Horizontal" Spacing="5">
           <!-- Head and shoulders, the app's own: the whole account of how it is drawn is in
