@@ -1,0 +1,58 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.DockerLoginDialog"
+        Title="Log in to Docker Hub"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="LoginButton" Content="Log in" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="70,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Username" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Name="UserBox" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Password" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Name="PasswordBox" PasswordChar="&#x2022;" />
+      </Grid>
+
+      <!-- The URL is written out in full rather than hidden behind "Learn more", because it is a
+           docker.com short link and reads as one, and because the browser may not open (a session
+           on a remote host, a desktop with no handler registered), in which case what is on screen
+           is still the whole answer.
+
+           It is a plain TextBlock in an InlineUIContainer, so the sentence stays one flow and wraps
+           as one: Fluent's HyperlinkButton would bring a button's padding into the middle of a
+           sentence, and this app has no link vocabulary of its own to reach for.
+
+           NoWrap is what keeps the click target honest. A control in a text flow is measured
+           against the rest of the line, so a wrapping one whose text did not fit would take two
+           lines and fill the width, and the click would reach past the end of what is drawn. With
+           it, the box is the text (measured: an embedded control is arranged at its own desired
+           size, not stretched to the line). A URL is one token and should not break anyway. -->
+      <TextBlock Classes="note">
+        <Run Text="You can log in with your password or a Personal Access Token (PAT). Using a limited-scope PAT grants better security and is required for organizations using SSO. Learn more at " />
+        <InlineUIContainer>
+          <TextBlock Name="TokensLink" Text="https://docs.docker.com/go/access-tokens/"
+                     TextWrapping="NoWrap" HorizontalAlignment="Left"
+                     Foreground="{DynamicResource JbLinkForeground}"
+                     TextDecorations="Underline" Cursor="Hand" Background="Transparent"
+                     ToolTip.Tip="Open Docker's access token documentation in your browser" />
+        </InlineUIContainer>
+      </TextBlock>
+
+      <TextBlock Classes="note"
+                 Text="Whichever you give goes to the host over the SSH connection and is never stored on this PC: docker keeps the credential on the host itself, so it is still there next time you connect." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

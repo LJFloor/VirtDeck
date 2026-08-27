@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
+using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Services;
 
@@ -74,7 +75,8 @@ public static class FileDialogs
     /// <summary>Chooses a save location; null if cancelled.</summary>
     public static async Task<string?> SaveFileAsync(Window owner, string title, string filter,
                                                     string? suggestedName = null,
-                                                    string? defaultExtension = null)
+                                                    string? defaultExtension = null,
+                                                    string? startDirectory = null)
     {
         var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
@@ -82,8 +84,36 @@ public static class FileDialogs
             SuggestedFileName = suggestedName,
             DefaultExtension = defaultExtension,
             FileTypeChoices = ParseFilter(filter),
+            SuggestedStartLocation = await FolderOrNull(owner, startDirectory),
         });
         return LocalPathOf(file);
+    }
+
+    /// <summary>
+    /// Where on this PC something was last picked for a transfer. Shared by the file explorer's
+    /// upload and download and by the containers module's image import and export, because to
+    /// somebody using them they are one question ("the folder I keep moving files through") and two
+    /// settings would drift apart in use. The media pickers keep their own pair in
+    /// <see cref="MediaLocations"/> instead: an ISO library and a scratch folder are not the same
+    /// place.
+    /// </summary>
+    public static string LastTransferDir => AppSettings.Current.LastLocalTransferDir;
+
+    /// <summary>
+    /// Remembers where on this PC something was last picked. Only a confirmed pick ever gets here,
+    /// never a half-typed path, the same rule <see cref="MediaLocations"/> follows.
+    /// </summary>
+    public static void RememberTransferDir(string dir)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(dir)) return;
+            var settings = AppSettings.Current;
+            if (settings.LastLocalTransferDir == dir) return;
+            settings.LastLocalTransferDir = dir;
+            settings.Save(); // best-effort by contract; a failed write must never break a picker
+        }
+        catch { /* an unusable path is simply not remembered */ }
     }
 
     /// <summary>

@@ -42,11 +42,11 @@ public static class MediaLocations
     /// Opens the host browser, starting at <paramref name="initial"/> when the caller has something
     /// better (the drive's current medium), else the last server directory used.
     /// </summary>
-    public static async Task<string?> BrowseServerAsync(Window owner, VirshService virsh, string title,
+    public static async Task<string?> BrowseServerAsync(Window owner, RemoteFileService files, string title,
                                                         string filter, string? initial = null)
     {
         var start = string.IsNullOrWhiteSpace(initial) ? ServerStart() : initial;
-        var dlg = new RemoteFileBrowserDialog(virsh, start, filter, false, title);
+        var dlg = new RemoteFileBrowserDialog(files, start, filter, false, title);
         if (await dlg.ShowDialog<bool?>(owner) is not true || dlg.SelectedPath is not { } path) return null;
         RememberServer(path);
         return path;

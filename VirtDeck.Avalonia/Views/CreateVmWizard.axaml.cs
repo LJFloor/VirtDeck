@@ -98,7 +98,7 @@ public partial class CreateVmWizard : Window
         _ssh = ssh;
         InitializeComponent();
 
-        IsoPicker.Virsh = virsh;
+        IsoPicker.Files = virsh.Files;
         IsoPicker.Filter = MediaFilter;
         IsoPicker.DialogTitle = "Select install media";
         IsoPicker.BrowseText = "Browse…"; // matches the local media row's button, same row, same job
@@ -290,28 +290,15 @@ public partial class CreateVmWizard : Window
     }
 
     /// <summary>
-    /// Enables the button for a Windows guest and says why it is off otherwise, rather than hiding it:
-    /// a command that comes and goes reads as a bug. Anything already configured survives an OS change
-    /// and is simply not written, which the status line says out loud.
+    /// Shows the row for a Windows guest and takes it off the page entirely for any other, rather than
+    /// leaving a disabled button behind: nothing here is a command somebody goes looking for, so a page
+    /// without it reads as a page about a Linux VM. Anything already configured survives an OS change
+    /// and is simply not written, which the summary page says out loud.
     /// </summary>
     private void UpdateUnattendAvailability()
     {
-        var (family, _) = GuestProfile();
-        string? reason =
-            family != OsFamily.Windows
-                ? "Select Windows install media, or pick a Windows OS type, to customize Setup."
-                : IsBiosOnlyOsSelected()
-                    ? "Windows XP and earlier are configured with winnt.sif, not autounattend.xml."
-                    : null;
-
-        UnattendButton.IsEnabled = reason == null;
-        ToolTip.SetTip(UnattendButton, reason);
-
-        UnattendStatus.Text = _unattend == null
-            ? "not configured"
-            : reason == null
-                ? "configured"
-                : "configured, but not written for this OS";
+        UnattendRow.IsVisible = UnattendApplies();
+        UnattendStatus.Text = _unattend == null ? "not configured" : "configured";
     }
 
     // ---- Install media (General page) ----------------------------------

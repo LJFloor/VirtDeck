@@ -1730,20 +1730,12 @@ public partial class FileExplorerModule : UserControl, IModule
         return total;
     }
 
-    /// <summary>Remembers where on this PC something was last picked. Only a confirmed pick ever
-    /// gets here, never a half-typed path, the same rule <see cref="MediaLocations"/> follows.</summary>
-    private static void RememberLocalDir(string dir)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(dir)) return;
-            var settings = AppSettings.Current;
-            if (settings.LastLocalTransferDir == dir) return;
-            settings.LastLocalTransferDir = dir;
-            settings.Save(); // best-effort by contract; a failed write must never break a picker
-        }
-        catch { /* an unusable path is simply not remembered */ }
-    }
+    /// <summary>
+    /// Remembers where on this PC something was last picked. It moved to <see cref="FileDialogs"/>
+    /// when the containers module started importing and exporting images into the same folder;
+    /// this forwarder is what keeps the call sites here reading the way they did.
+    /// </summary>
+    private static void RememberLocalDir(string dir) => FileDialogs.RememberTransferDir(dir);
 
     /// <summary>
     /// True when the same pre-flight asked as root could come back with a different answer. Every

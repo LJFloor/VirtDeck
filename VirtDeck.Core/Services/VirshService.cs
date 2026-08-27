@@ -816,19 +816,13 @@ namespace VirtDeck.Services
         // ---- Remote file browsing (over the sudo channel, so root-owned dirs are listable) ----
 
         /// <summary>
-        /// Lists a directory on the host as root, so root-owned paths (e.g.
-        /// /var/lib/libvirt/images) are visible. The listing itself lives in
-        /// <see cref="RemoteFileService"/>, which the file explorer drives un-elevated; this is the
-        /// same call with sudo, so the find format string exists in one place.
-        /// Throws if the path is missing or unreadable, which is what this method's callers
-        /// (the media pickers) already handle.
+        /// The file service this one browses with, handed out so a media picker can be given the
+        /// thing that lists a directory rather than the whole libvirt service. There used to be a
+        /// <c>ListDirectory</c> forwarder here instead, which meant every remote picker in the app
+        /// depended on libvirt to read a directory; the containers module needs the same picker and
+        /// has no <see cref="VirshService"/> at all.
         /// </summary>
-        public List<RemoteEntry> ListDirectory(string path)
-        {
-            var listing = _files.ListDirectory(path, elevated: true);
-            if (listing.Failure != ListFailure.None) throw new Exception(listing.Message);
-            return listing.Entries;
-        }
+        public RemoteFileService Files => _files;
 
         // ---- Network -------------------------------------------------------
 

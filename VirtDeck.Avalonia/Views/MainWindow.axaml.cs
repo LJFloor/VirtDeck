@@ -89,6 +89,14 @@ public partial class MainWindow : Window
     {
         StatusText.Text = _current?.Status ?? "";
         HostCapsText.Text = _current?.HostCapabilities ?? "";
+
+        // The widget is the module's own instance, reparented in and out rather than rebuilt, so
+        // whatever it was showing is still what it shows on the way back. A module with nothing to
+        // hang here takes the separator with it, or the bar would end on a rule with nothing after.
+        var widget = _current?.StatusWidget;
+        ModuleWidget.Content = widget;
+        ModuleWidget.IsVisible = widget != null;
+        ModuleWidgetRule.IsVisible = widget != null;
     }
 
     // ---- Throughput ----------------------------------------------------

@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.ImageTagDialog"
+        Title="Tag image"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="TagButton" Content="Tag" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="70,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Image" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Name="SourceBox" IsReadOnly="True" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="New name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Name="TargetBox" PlaceholderText="myapp:v2" />
+      </Grid>
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="A tag is another name for the same image, not a copy: the old name stays, and removing either one leaves the image until its last name is gone." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

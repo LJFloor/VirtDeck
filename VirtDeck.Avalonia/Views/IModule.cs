@@ -1,3 +1,4 @@
+using Avalonia.Controls;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
@@ -29,6 +30,21 @@ public interface IModule
     /// "docker not installed"). Probed once, on first activation.
     /// </summary>
     string HostCapabilities { get; }
+
+    /// <summary>
+    /// A control the shell hangs at the right-hand end of the status bar while this module is on
+    /// screen, or null for a module with nothing to put there, which is most of them.
+    ///
+    /// The two slots either side of it are strings because a row count and a capability line are
+    /// text and nothing else. This one exists for the thing text cannot be: something the user can
+    /// click. It is read once per module switch, so a module returns one instance it owns for its
+    /// lifetime rather than building one per activation, and the shell reparents that instance
+    /// rather than copying anything out of it.
+    ///
+    /// Defaulted, so a module with nothing to hang there says nothing at all: adding a module is
+    /// still a TabItem plus a UserControl and no line anywhere else.
+    /// </summary>
+    Control? StatusWidget => null;
 
     /// <summary>Raised when either status string changed. The shell repaints only if this module is active.</summary>
     event Action? StatusChanged;

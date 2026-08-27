@@ -559,7 +559,7 @@ public partial class ConsoleWindow : Window
     private async Task InsertMediaFromServerAsync(bool cdrom)
     {
         if (Target(cdrom) is not { } t) return;
-        var picked = await MediaLocations.BrowseServerAsync(this, _virsh,
+        var picked = await MediaLocations.BrowseServerAsync(this, _virsh.Files,
             cdrom ? "Select ISO on the server" : "Select floppy on the server",
             cdrom ? MediaLocations.IsoFilter : MediaLocations.FloppyFilter);
         if (picked is not { } path) return;

@@ -365,7 +365,7 @@ public partial class VmEditWindow : Window
         // The drive's current medium is a better starting point than the last directory used; the
         // helper falls back to that only when the drive is empty.
         var initial = _mediaChanges.TryGetValue(d.Target, out var cur) ? (cur ?? "") : d.Source;
-        var picked = await MediaLocations.BrowseServerAsync(this, _virsh,
+        var picked = await MediaLocations.BrowseServerAsync(this, _virsh.Files,
             d.IsFloppy ? "Select floppy image" : "Select ISO image", MediaFilter(d), initial);
         if (picked is not { } iso) return;
 

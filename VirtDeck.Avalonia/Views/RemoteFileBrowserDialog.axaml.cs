@@ -21,7 +21,7 @@ public partial class RemoteFileBrowserDialog : Window
         public override string ToString() => Desc;
     }
 
-    private readonly VirshService _virsh;
+    private readonly RemoteFileService _files;
     private readonly bool _selectMultiple;
     private readonly ObservableCollection<RemoteFileRow> _rows = new();
 
@@ -38,10 +38,10 @@ public partial class RemoteFileBrowserDialog : Window
     /// <summary>Design-time only.</summary>
     public RemoteFileBrowserDialog() : this(null!, null, "", false, "Select File") { }
 
-    public RemoteFileBrowserDialog(VirshService virsh, string? initialPath, string filter,
+    public RemoteFileBrowserDialog(RemoteFileService files, string? initialPath, string filter,
                                    bool selectMultiple, string title)
     {
-        _virsh = virsh;
+        _files = files;
         _selectMultiple = selectMultiple;
         InitializeComponent();
         Title = title;
@@ -96,9 +96,13 @@ public partial class RemoteFileBrowserDialog : Window
         {
             _entries = await Task.Run(() =>
             {
-                var entries = _virsh.ListDirectory(dir);
-                WarmIcons(entries);
-                return entries;
+                var listing = _files.ListDirectory(dir, elevated: true);
+                // A refusal is a value to RemoteFileService, because the file explorer draws it and
+                // offers to retry as root. This dialog has no such offer: it browses as root
+                // already, so the only thing left to do with a failure is say so.
+                if (listing.Failure != ListFailure.None) throw new Exception(listing.Message);
+                WarmIcons(listing.Entries);
+                return listing.Entries;
             });
             _currentDir = dir;
             DirBox.Text = dir;

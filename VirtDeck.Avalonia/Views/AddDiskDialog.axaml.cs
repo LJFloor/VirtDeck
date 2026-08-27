@@ -31,7 +31,7 @@ public partial class AddDiskDialog : Window
         _virsh = virsh;
         InitializeComponent();
 
-        PathPicker.Virsh = virsh;
+        PathPicker.Files = virsh.Files;
         PathPicker.Path = $"/var/lib/libvirt/images/{vmName}-disk.qcow2";
         SetBuses(DiskBuses, "virtio");
 

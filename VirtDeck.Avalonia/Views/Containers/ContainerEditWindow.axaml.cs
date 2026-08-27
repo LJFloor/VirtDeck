@@ -38,7 +38,10 @@ public partial class ContainerEditWindow : Window
         _docker = docker;
         _replacingId = replacingId;
 
-        Title = existing is null ? "New container" : $"Edit container {existing.Name}";
+        // Keyed on replacingId, not on `existing`: the Images tab opens this with a spec that is
+        // nothing but a prefilled image, and a window titled "Edit container " with no name after it
+        // would be describing something that does not exist yet.
+        Title = replacingId is null ? "New container" : $"Edit container {existing?.Name}";
         // A new container is started; an existing one is put back the way it was found, which is a
         // restart because saving replaced it.
         SaveStartButton.Content = replacingId is null ? "Save and start" : "Save and restart";

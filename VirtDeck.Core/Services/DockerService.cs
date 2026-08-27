@@ -27,6 +27,13 @@ namespace VirtDeck.Services
         /// </summary>
         public event Action? ContainerEventReceived;
 
+        /// <summary>
+        /// The twin of <see cref="ContainerEventReceived"/> for images: a pull, load, import, tag,
+        /// untag or delete happened, so the image list may have changed. Same tail, same thread,
+        /// same "no payload" contract.
+        /// </summary>
+        public event Action? ImageEventReceived;
+
         private CancellationTokenSource? _eventCts;
         private Task? _eventTask;
 
@@ -136,17 +143,23 @@ namespace VirtDeck.Services
 
         // ---- Live lifecycle events -----------------------------------------
 
-        // Only the events that change what the list shows. Repeated --filter values of one key are
-        // OR'd, so this is "any of these actions, on a container". The filter is not cosmetic:
-        // unfiltered, `type=container` also carries exec_* for every `docker exec` and a
-        // health_status per health-check interval per container, which on a host running
-        // health-checked containers would be a refresh treadmill.
+        // Only the events that change what a table shows. Repeated --filter values of one key are
+        // OR'd and different keys are AND'd, so this reads as "any of these actions, on a container
+        // or an image". The filter is not cosmetic: unfiltered, `type=container` also carries exec_*
+        // for every `docker exec` and a health_status per health-check interval per container, which
+        // on a host running health-checked containers would be a refresh treadmill.
+        //
+        // One tail, two subjects: the format is the event's TYPE rather than its action, because the
+        // two tables refresh independently and a pull must not re-list the containers. `create` and
+        // `delete` are spoken by both, which is exactly why the type is what is read.
         private const string EventsCommand =
-            "docker events --filter type=container " +
+            "docker events --filter type=container --filter type=image " +
             "--filter event=create --filter event=destroy --filter event=start --filter event=die " +
             "--filter event=stop --filter event=kill --filter event=pause --filter event=unpause " +
             "--filter event=restart --filter event=rename --filter event=update " +
-            "--format '{{.Action}}'";
+            "--filter event=pull --filter event=tag --filter event=untag " +
+            "--filter event=delete --filter event=import --filter event=load " +
+            "--format '{{.Type}}'";
 
         /// <summary>
         /// Tails docker's container lifecycle events on a dedicated SSH connection and raises
@@ -173,8 +186,18 @@ namespace VirtDeck.Services
                 {
                     try
                     {
-                        // We don't parse the line; any lifecycle event just triggers a refresh.
-                        _ssh.RunSudoCommandStreaming(EventsCommand, _ => ContainerEventReceived?.Invoke(), ct);
+                        // The payload is the event's type and nothing more; which table it
+                        // belongs to is all a subscriber needs. Anything else is ignored rather
+                        // than falling through to the container refresh, so stray daemon output
+                        // cannot drive a round trip.
+                        _ssh.RunSudoCommandStreaming(EventsCommand, line =>
+                        {
+                            switch (line.Trim())
+                            {
+                                case "container": ContainerEventReceived?.Invoke(); break;
+                                case "image": ImageEventReceived?.Invoke(); break;
+                            }
+                        }, ct);
                     }
                     catch (Exception ex)
                     {
@@ -241,6 +264,161 @@ namespace VirtDeck.Services
             DockerAvailable = version.Length > 0;
             Diagnostics.SpiceLog.Log($"[docker] version='{version}' daemon='{DaemonState}' available={DockerAvailable}");
             return (DockerVersion, DaemonState);
+        }
+
+        // ---- The Docker Hub account ----------------------------------------
+
+        // Nothing here is kept on this PC. `docker login` writes the credential on the host, where
+        // it outlives the command, the SSH session and the app, so the toolbar widget only ever
+        // reads back what the host already knows. That is also why HubUser is assigned from a probe
+        // and never from what a login was told: the client never leads the host.
+
+        /// <summary>
+        /// The Docker Hub account the host is logged in as, or "" when it is logged out and equally
+        /// when nobody could ask. <see cref="HubLoginKnown"/> is what tells those two apart.
+        /// </summary>
+        public string HubUser { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// Whether the last probe got an answer at all. False leaves the state genuinely unknown,
+        /// which is a different thing from logged out and has to be said differently.
+        /// </summary>
+        public bool HubLoginKnown { get; private set; }
+
+        // One round trip, tagged records, in ImagesScript's three-state shape.
+        //
+        // `docker info` prints the account in its server section, from the CLI's own reading of the
+        // config file. There is no template field to ask for it instead: docker 29 answers "can't
+        // evaluate field Username in type system.dockerInfo", because the value never was part of
+        // the info payload. So this is a text probe, and it leans on the C locale for the label,
+        // which RunSudoCommand exports and which NeedsForce already relies on.
+        //
+        // The `k` tag is load-bearing for the same reason it is in ImagesScript. A daemon that
+        // cannot be reached prints no server section at all, so an absent Username line cannot mean
+        // logged out on its own: `k` says the question was answerable, and without it every host
+        // with a stopped dockerd would confidently read as "not logged in".
+        //
+        // Known gap: a host using a credential helper (credsStore) can keep the name in the helper
+        // rather than in the file, and docker info then prints no Username line. Answering that
+        // means decoding the auths map and shelling out to docker-credential-*, which is a lot for
+        // a setup that needs a package installed before it can exist.
+        private const string HubScript =
+            "info=$(docker info 2>/dev/null) || exit 0\n" +
+            "printf 'k\\n'\n" +
+            "name=$(printf '%s\\n' \"$info\" | sed -n 's/^[[:space:]]*Username:[[:space:]]*//p' | head -n 1)\n" +
+            "[ -n \"$name\" ] && printf 'u\\t%s\\n' \"$name\"\n" +
+            "exit 0";
+
+        /// <summary>
+        /// Asks the host which Docker Hub account it is logged in as. A query, so it answers rather
+        /// than throwing: a failure leaves the state unknown, which is an answer the widget draws.
+        /// </summary>
+        public Task ReadHubLoginAsync() => Task.Run(ReadHubLogin);
+
+        private void ReadHubLogin()
+        {
+            var known = false;
+            var user = string.Empty;
+
+            try
+            {
+                var output = _ssh.RunSudoCommand(ShellScript.Wrap(HubScript));
+                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var f = line.TrimEnd('\r').Split('\t');
+                    if (f[0] == "k") known = true;
+                    else if (f[0] == "u" && f.Length >= 2) user = f[1].Trim();
+                }
+            }
+            catch { /* unknown is the answer; the widget says so rather than guessing */ }
+
+            HubLoginKnown = known;
+            HubUser = known ? user : string.Empty;
+            Diagnostics.SpiceLog.Log($"[docker] hub known={known} user='{HubUser}'");
+        }
+
+        /// <summary>
+        /// Logs the host in to Docker Hub, with the password over <b>stdin</b>.
+        ///
+        /// This is the one call in this file that does not go through <c>RunSudoCommand</c>, and the
+        /// reason is the whole point of it: that runner puts what it is given on the host's command
+        /// line, which every local user can read out of <c>ps</c>, and base64 would hide it from a
+        /// glance and from nobody at all. <c>UserAccountService.SetPasswordAsync</c> takes this
+        /// route for exactly the same reason.
+        ///
+        /// <c>RunPipeInAsync</c> is the primitive built for that hazard: it writes the sudo password
+        /// and a per-call sentinel to stdin and the remote script reads past them, so everything
+        /// after the sentinel is ours. <c>docker login --password-stdin</c> reads to EOF, and
+        /// disposing the stream is that EOF. <see cref="ShellScript.ArrayFrom"/> is safe inside that
+        /// body because its loop redirects only its own stdin from a process substitution, leaving
+        /// the channel's stdin for docker.
+        ///
+        /// No server argument, so this is the default index server: the same entry
+        /// <see cref="HubScript"/> reads back. The runner's cost is that it reports an exit status
+        /// and stderr and never stdout, so docker's "Login Succeeded" is not available here and the
+        /// exit status is the answer. <c>LoadImageAsync</c> already pays the same price.
+        /// </summary>
+        public async Task LoginToHubAsync(string username, string password, CancellationToken ct = default)
+        {
+            username = username.Trim();
+            if (username.Length == 0)
+                throw new ArgumentException("Name the Docker Hub account.", nameof(username));
+
+            RequireOneLine(username, "user name");
+            RequireOneLine(password, "password");
+
+            var script = ShellScript.ArrayFrom("a", new[] { username }) +
+                         "docker login --username \"${a[0]}\" --password-stdin\n";
+
+            try
+            {
+                await _ssh.RunPipeInAsync(script, elevated: true, async (stdin, token) =>
+                {
+                    var bytes = Encoding.UTF8.GetBytes(password);
+                    await stdin.WriteAsync(bytes, token);
+                    await stdin.FlushAsync(token);
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                // RunPipeInAsync's own wording is about writing a file, which is what it was built
+                // for. Docker's stderr is the useful half and is already in the message.
+                throw new Exception($"The login was refused: {Reason(ex.Message)}", ex);
+            }
+
+            // Deliberately not "HubUser = username": the host is asked what happened.
+            Diagnostics.SpiceLog.Log($"[docker] hub login as {username}");
+            await ReadHubLoginAsync();
+        }
+
+        /// <summary>
+        /// Logs the host out of Docker Hub. No secret and no user text at all, so this is the
+        /// ordinary argv path. No server argument means the default index server, which is the one
+        /// <see cref="LoginToHubAsync"/> signed in to.
+        /// </summary>
+        public Task LogoutFromHubAsync() => Task.Run(() =>
+        {
+            RunArgv("docker", "logout");
+            Diagnostics.SpiceLog.Log("[docker] hub logout");
+            ReadHubLogin();
+        });
+
+        /// <summary>
+        /// Refuses a value that could forge a line on the one stdin the sudo password, the sentinel
+        /// and the payload all share.
+        /// </summary>
+        private static void RequireOneLine(string value, string what)
+        {
+            if (value.IndexOfAny(new[] { '\n', '\r', '\0' }) >= 0)
+                throw new ArgumentException($"A Docker Hub {what} cannot contain a line break.");
+        }
+
+        /// <summary>Strips the transfer primitive's framing off a message so docker's words lead.</summary>
+        private static string Reason(string message)
+        {
+            var at = message.IndexOf("): ", StringComparison.Ordinal);
+            var text = at >= 0 ? message[(at + 3)..] : message;
+            return text.Trim() is { Length: > 0 } trimmed ? trimmed : message;
         }
 
         // ---- Creating, editing and removing --------------------------------
@@ -717,6 +895,279 @@ namespace VirtDeck.Services
                 var text = line.Trim();
                 if (text.Length > 0) progress?.Invoke(text);
             }, ct);
+        }
+
+
+        // ---- Images ---------------------------------------------------------
+
+        // Everything below addresses an image by a *reference*, which is text the user typed or
+        // picked and may hold anything, so nothing here is interpolated: every reference goes
+        // through ShellScript.Argv or ShellScript.ArrayFrom behind a literal `--`, the same rule
+        // BuildCreateArgv follows. There is no RequireId twin, because no image command needs one.
+
+        private List<ImageInfo> _images = new();
+
+        public IReadOnlyList<ImageInfo> Images => _images;
+
+        /// <summary>Raised after <see cref="RefreshImagesAsync"/>, the twin of <see cref="ContainersChanged"/>.</summary>
+        public event Action? ImagesChanged;
+
+        // One round trip, three tags, real tab characters, and the `|| exit $?` on the one command
+        // whose failure means the listing failed. {{.CreatedSince}} and {{.Size}} already answer
+        // what the container listing has to go and fetch with a batched inspect, because `docker ps`
+        // can report neither.
+        //
+        // Splitting is exact and needs no cap: no field of a docker reference can contain a tab (the
+        // reference grammar is alphanumerics plus . _ - / : @), and neither can docker's own size and
+        // age phrases. --all is what makes dangling layers appear, which is what Prune is about.
+        //
+        // The second half answers which images a container was created from, which is what the
+        // Status column and `docker image prune -a` both mean by "used". It has to be a batched
+        // `docker inspect`, never one per row: `docker ps` has no .ImageID placeholder, its .Image
+        // is the *reference the container was created with* ("alpine", where the image lists as
+        // "alpine:latest", or a tag since moved to another image), and matching that string against
+        // a repository and tag would be wrong exactly where it matters. A container's .Image is the
+        // resolved id, which is what the listing prints under --no-trunc, so the match is exact.
+        //
+        // It is best-effort and fenced off from the exit status, so a host it cannot ask still gets
+        // its table with the column blank. `k` is what separates the two silences: `docker ps`
+        // succeeding with nothing to say (every image genuinely unused) from `docker ps` failing
+        // (nobody knows). Without it a broken half would mark the whole table Unused.
+        private const string ImagesScript =
+            "docker image ls --all --no-trunc " +
+            "--format 'i\t{{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.CreatedSince}}\t{{.Size}}' || exit $?\n" +
+            "ids=$(docker ps --all --quiet --no-trunc 2>/dev/null) && echo k\n" +
+            "if [ -n \"$ids\" ]; then\n" +
+            "  printf '%s\\n' \"$ids\" | xargs docker inspect --format 'u\t{{.Image}}' 2>/dev/null\n" +
+            "fi\n" +
+            "exit 0";
+
+        private List<ImageInfo> FetchImages()
+        {
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(ImagesScript));
+
+            var list = new List<ImageInfo>();
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            var usageKnown = false;
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = line.TrimEnd('\r').Split('\t');
+
+                if (f[0] == "k") { usageKnown = true; continue; }
+
+                if (f[0] == "u")
+                {
+                    if (f.Length >= 2 && f[1].Trim().Length > 0) used.Add(f[1].Trim());
+                    continue;
+                }
+
+                if (f.Length < 6 || f[0] != "i" || string.IsNullOrWhiteSpace(f[1])) continue;
+
+                list.Add(new ImageInfo
+                {
+                    Id = f[1].Trim(),
+                    Repository = f[2],
+                    Tag = f[3],
+                    Created = f[4],
+                    Size = f[5].Trim(),
+                });
+            }
+
+            // Only once the whole listing is read: the `u` records arrive after the images.
+            if (usageKnown)
+                foreach (var image in list)
+                    image.InUse = used.Contains(image.Id);
+
+            return list;
+        }
+
+        public async Task RefreshImagesAsync()
+        {
+            _images = await Task.Run(FetchImages);
+            ImagesChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Pulls an image, reporting docker's own output line by line. The Images tab's pre-pull and
+        /// the implicit pull inside <see cref="Save"/> are the same command; only the caller differs.
+        /// </summary>
+        public Task PullAsync(string image, Action<string>? progress, CancellationToken ct) =>
+            Task.Run(() => Pull(image, progress, ct), ct);
+
+        /// <summary>
+        /// How many bytes <c>docker save</c> is about to produce for <paramref name="references"/>,
+        /// or -1 when nobody can say, which leaves the caller's bar indeterminate. A query, so it
+        /// swallows.
+        ///
+        /// <para><b>It answers -1 for more than one distinct image on purpose.</b> Images share
+        /// layers and <c>docker save</c> writes each layer once, so summing their reported sizes is
+        /// an upper bound rather than a total, and a bar that stops short of the end on a successful
+        /// export reads as a failure. One image is the case the number is right for, and it is the
+        /// case somebody exports. Several references pointing at the same id (an image under two
+        /// tags) still count as one.</para>
+        /// </summary>
+        public Task<long> MeasureImagesAsync(IReadOnlyList<string> references) => Task.Run(() =>
+        {
+            try
+            {
+                var argv = new List<string> { "docker", "image", "inspect", "--format", "{{.Id}}\t{{.Size}}", "--" };
+                argv.AddRange(references);
+
+                var sizes = new Dictionary<string, long>(StringComparer.Ordinal);
+                foreach (var line in RunArgv(argv).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var f = line.Trim().Split('\t');
+                    if (f.Length == 2 && long.TryParse(f[1], out var n)) sizes[f[0]] = n;
+                }
+                return sizes.Count == 1 ? sizes.Values.First() : -1L;
+            }
+            catch
+            {
+                return -1L;
+            }
+        });
+
+        /// <summary>
+        /// The <c>docker save</c> half of the script both export destinations share.
+        ///
+        /// <para><c>set -o pipefail</c> is load-bearing: without it a <c>docker save</c> that fails
+        /// while piped into <c>gzip</c> reports gzip's exit status, and what lands is a valid, tiny,
+        /// empty archive reported as a success.</para>
+        /// </summary>
+        private static string SaveCommand(IReadOnlyList<string> references, bool gzip) =>
+            "set -o pipefail\n" +
+            ShellScript.ArrayFrom("a", references) +
+            "docker save -- \"${a[@]}\"" + (gzip ? " | gzip -c" : "");
+
+        /// <summary>
+        /// Streams <c>docker save</c> of <paramref name="references"/> into
+        /// <paramref name="destination"/>, which is a file on this PC. Its own SSH connection, so a
+        /// multi-gigabyte image never holds the shared command lock.
+        /// </summary>
+        public Task SaveImagesAsync(IReadOnlyList<string> references, bool gzip, Stream destination,
+                                    Action<int>? onChunk, CancellationToken ct)
+        {
+            RequireReferences(references);
+            var script = SaveCommand(references, gzip) + "\n";
+            return _ssh.RunPipeOutAsync(ShellScript.SudoWrap(script), elevated: true, destination, onChunk, ct);
+        }
+
+        /// <summary>
+        /// Uploads a local archive into <c>docker load</c> on the host.
+        ///
+        /// <para><c>docker load</c> sniffs its input, so a gzip, bzip2, xz or zstd archive needs no
+        /// flag at all and <c>.tar</c> and <c>.tar.gz</c> are one code path.</para>
+        ///
+        /// <para><see cref="SshConnectionManager.RunPipeInAsync"/> takes a script <b>body</b> and
+        /// does its own wrapping, including the sentinel that separates the sudo password from the
+        /// payload on the one stream. Handing it <see cref="ShellScript.Wrap"/> would make the
+        /// script pipe bash's stdin and <c>docker load</c> would read an exhausted pipe.</para>
+        ///
+        /// <para>The cost of that runner is that it reports an exit status and nothing else, so
+        /// docker's "Loaded image:" lines are lost here. The refreshed table is what shows what
+        /// arrived; the host-path sibling below does surface them.</para>
+        /// </summary>
+        public async Task LoadImageAsync(string localPath, IProgress<TransferProgress>? progress,
+                                         CancellationToken ct)
+        {
+            var file = new FileInfo(localPath);
+            if (!file.Exists) throw new FileNotFoundException($"{localPath} is not there.", localPath);
+
+            var total = file.Length;
+            var name = file.Name;
+            Diagnostics.SpiceLog.Log($"[docker] load {name} ({total} bytes)");
+
+            await _ssh.RunPipeInAsync("docker load", elevated: true, (stdin, token) =>
+            {
+                using var source = File.OpenRead(localPath);
+                var buffer = new byte[64 * 1024];
+                long sent = 0;
+                var since = System.Diagnostics.Stopwatch.StartNew();
+
+                progress?.Report(new TransferProgress(0, total, name));
+                int n;
+                while ((n = source.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    token.ThrowIfCancellationRequested();
+                    stdin.Write(buffer, 0, n);
+                    sent += n;
+
+                    // Throttled to the cadence RemoteTransferService reports at, and for the same
+                    // reason: every report is a hop to the UI thread and a 64 KiB step is far too
+                    // small to repaint on.
+                    if (since.ElapsedMilliseconds < 120) continue;
+                    since.Restart();
+                    progress?.Report(new TransferProgress(sent, total, name));
+                }
+                progress?.Report(new TransferProgress(sent, total, name));
+                return Task.CompletedTask;
+            }, ct);
+        }
+
+        /// <summary>
+        /// Loads an archive that is already on the host. Streamed rather than run through
+        /// <c>RunSudoCommand</c>, which holds <c>_ioLock</c> for its whole call and would freeze
+        /// every other module for the length of a multi-gigabyte load; and here there really is
+        /// something to stream, because <c>docker load -i</c> names each image it restored on
+        /// stdout.
+        /// </summary>
+        public Task LoadImageFromHostAsync(string hostPath, Action<string>? onLine, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(hostPath))
+                throw new ArgumentException("No path was given.", nameof(hostPath));
+
+            var script = ShellScript.ArrayFrom("i", new[] { hostPath }) + "docker load -i \"${i[0]}\"\n";
+            return Task.Run(() => _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(script), line =>
+            {
+                var text = line.Trim();
+                if (text.Length > 0) onLine?.Invoke(text);
+            }, ct), ct);
+        }
+
+        /// <summary>
+        /// Removes one image reference. Removing a repository:tag that is one of several an image
+        /// carries only removes <b>that tag</b>; the image goes when its last one does. That is
+        /// docker's own behaviour and the caller says so before asking.
+        /// </summary>
+        public Task RemoveImageAsync(string reference, bool force) => Task.Run(() =>
+        {
+            var argv = new List<string> { "docker", "rmi" };
+            if (force) argv.Add("--force");
+            argv.Add("--");
+            argv.Add(reference);
+            RunArgv(argv);
+        });
+
+        /// <summary>
+        /// Whether docker refused a removal for the one reason <c>--force</c> would answer. Matching
+        /// its own phrase, which is reliable because <c>RunSudoCommand</c> exports the C locale: an
+        /// image a container still references reads "(must be forced)". Anything else (no such
+        /// image, a daemon that is not there) must not be retried with force.
+        /// </summary>
+        public static bool NeedsForce(string message) =>
+            message.Contains("must be forced", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Removes unused images and answers docker's own report, whose last line is the reclaimed
+        /// space. <paramref name="all"/> is the difference between dangling layers and every image
+        /// no container references, which is why the caller asks rather than picking.
+        ///
+        /// <c>--force</c> here only means "do not ask me on the host", which is not a decision: the
+        /// question was already asked at this end.
+        /// </summary>
+        public Task<string> PruneImagesAsync(bool all) => Task.Run(() =>
+            all ? RunArgv("docker", "image", "prune", "--force", "--all")
+                : RunArgv("docker", "image", "prune", "--force"));
+
+        /// <summary>Puts another reference on an existing image. Neither side is interpolated.</summary>
+        public Task TagImageAsync(string source, string target) =>
+            Task.Run(() => RunArgv("docker", "tag", "--", source, target));
+
+        private static void RequireReferences(IReadOnlyList<string> references)
+        {
+            if (references.Count == 0)
+                throw new ArgumentException("No image was given.", nameof(references));
         }
 
         // ---- Logs -----------------------------------------------------------

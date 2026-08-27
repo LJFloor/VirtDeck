@@ -47,7 +47,7 @@ public sealed class RemotePathBox : UserControl
     }
 
     /// <summary>Required for the browse button to function; set after construction.</summary>
-    public VirshService? Virsh { get; set; }
+    public RemoteFileService? Files { get; set; }
 
     /// <summary>
     /// Label on the browse button. Defaults to the square "…" that fits tight against the field;
@@ -114,10 +114,10 @@ public sealed class RemotePathBox : UserControl
 
     private async Task BrowseAsync()
     {
-        if (Virsh == null || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (Files == null || TopLevel.GetTopLevel(this) is not Window owner) return;
         var start = Path.Trim();
         if (start.Length == 0) start = StartDirectory;
-        var dlg = new RemoteFileBrowserDialog(Virsh, start, Filter, SelectMultiple, DialogTitle);
+        var dlg = new RemoteFileBrowserDialog(Files, start, Filter, SelectMultiple, DialogTitle);
         if (await dlg.ShowDialog<bool?>(owner) is true && dlg.SelectedPath is { } p)
         {
             Path = SelectMultiple ? string.Join("; ", dlg.SelectedPaths) : p;

@@ -151,6 +151,12 @@
            ordinary hints; those are the 0.7-opacity note style. -->
       <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC75450" />
 
+      <!-- A link out of the app, which is the only thing in VirtDeck that opens a browser. Darcula's
+           own link blue rather than the accent the default button wears: a button's accent is a
+           background with white on it, and reused as a foreground on a form face it is too dark on
+           this one and too weak on the other. -->
+      <SolidColorBrush x:Key="JbLinkForeground" Color="#FF589DF6" />
+
       <!-- The container console's own surface and the sixteen colours an escape sequence can name.
            Darcula's terminal palette. The other 240 of the 256 are computed (a 6x6x6 cube and 24
            greys) and are the same on either face, because they are absolute colours; only these
@@ -304,6 +310,10 @@
       <!-- Inline validation text; see the Dark dictionary. Darker here so it keeps its contrast
            against a white form. -->
       <SolidColorBrush x:Key="JbErrorForeground" Color="#FFC0392B" />
+
+      <!-- A link out of the app; see the Dark dictionary. IntelliJ Light's, darkened to hold its
+           contrast on white. -->
+      <SolidColorBrush x:Key="JbLinkForeground" Color="#FF2470B3" />
 
       <!-- The console on the light face; see the Dark dictionary. The sixteen are darkened rather
            than swapped, because a terminal colour has to keep its identity (red is red) while

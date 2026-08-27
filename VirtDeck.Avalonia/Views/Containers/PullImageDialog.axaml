@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.PullImageDialog"
+        Title="Pull image"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="PullButton" Content="Pull" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="70,*" RowDefinitions="Auto" RowSpacing="6">
+        <TextBlock Grid.Column="0" Text="Image" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" Name="ReferenceBox" PlaceholderText="nginx:latest" />
+      </Grid>
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="A reference with no registry comes from Docker Hub, and one with no tag means :latest. Pulling here is the same command a container creation would run for you; doing it first means the wait happens once, when you choose it." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

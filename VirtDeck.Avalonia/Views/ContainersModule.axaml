@@ -5,84 +5,218 @@
              x:DataType="vm:ContainerRow">
 
   <UserControl.Resources>
-    <!-- One column layout shared by the header and every row, so they stay aligned. -->
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. Prefixed
+         per tab, because the two tables have nothing to do with each other. -->
     <x:Double x:Key="ColName">220</x:Double>
     <x:Double x:Key="ColImage">240</x:Double>
     <x:Double x:Key="ColState">90</x:Double>
     <x:Double x:Key="ColUptime">100</x:Double>
+
+    <x:Double x:Key="ColRepository">260</x:Double>
+    <x:Double x:Key="ColTag">150</x:Double>
+    <x:Double x:Key="ColImageId">110</x:Double>
+    <x:Double x:Key="ColCreated">120</x:Double>
+    <x:Double x:Key="ColSize">90</x:Double>
   </UserControl.Resources>
 
+  <UserControl.Styles>
+    <!-- The amber an image row wears when no container was created from it, which is exactly
+         what Prune would take. Literal rather than themed, for the reason the state dots are:
+         it is the app's transient amber and it has to mean the same thing on either face.
+
+         A class rather than a brush bound off the row, because the other two states want the
+         inherited theme foreground and a binding that answered null for them would leave the
+         text unpainted instead of leaving it alone. The cell sets no local Foreground, so this
+         setter is free to win; its Opacity is bound instead (a local value would beat a
+         setter). Same shape as the file explorer's cut and drop-target rows. -->
+    <Style Selector="TextBlock.unused">
+      <Setter Property="Foreground" Value="#D68F00" />
+    </Style>
+  </UserControl.Styles>
+
+  <!-- The transfer strip is outside the tabs and the tabs are inside this panel, because a pull
+       started on the Images page has to stay visible and cancellable if somebody steps over to the
+       Containers page while it runs. -->
   <DockPanel>
 
-    <!-- Only the command that needs no selection lives here, exactly as in the VM list; everything
-         per-container is on the list's right-click menu. There is still no Refresh button, because
-         `docker events` refreshes the list on its own. -->
-    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
-      <StackPanel Orientation="Horizontal" Spacing="6">
-        <Button Name="NewContainerButton" Content="New container…" Classes="accent" />
-      </StackPanel>
+    <!-- The transfer strip: the same shape ConsoleWindow and the file explorer draw, so the app has
+         one look for "something is moving and you can stop it" rather than three. It lives in the
+         module because a module owns the shell's two status slots but has no footer. Hidden whenever
+         nothing is running. -->
+    <Border Name="XferPanel" DockPanel.Dock="Bottom" IsVisible="False"
+            Padding="8" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel>
+        <Button Name="CancelXferButton" DockPanel.Dock="Right" Content="Cancel"
+                Theme="{StaticResource JbStatusBarButton}" Margin="8,0,0,0"
+                ToolTip.Tip="Stop what is running" />
+        <ProgressBar Name="XferProgress" DockPanel.Dock="Right" Width="160" Height="6"
+                     Minimum="0" Maximum="1000" IsIndeterminate="True"
+                     VerticalAlignment="Center" Margin="8,0,0,0" />
+        <TextBlock Name="XferText" Opacity="0.75" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
     </Border>
 
-    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
-            BorderThickness="0,0,0,1" BorderBrush="#22808080">
-      <StackPanel Orientation="Horizontal">
-        <!-- Padding (not Margin) indents the heading over the rows' state dot without widening the column. -->
-        <TextBlock Text="Name"   Width="{StaticResource ColName}"   FontWeight="SemiBold" Padding="14,0,0,0" />
-        <TextBlock Text="Image"  Width="{StaticResource ColImage}"  FontWeight="SemiBold" />
-        <TextBlock Text="State"  Width="{StaticResource ColState}"  FontWeight="SemiBold" />
-        <TextBlock Text="Uptime" Width="{StaticResource ColUptime}" FontWeight="SemiBold" />
-        <TextBlock Text="Ports" FontWeight="SemiBold" />
-      </StackPanel>
-    </Border>
+    <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, exactly as the user
+         accounts and services modules do. JbSideTabControl and JbModuleTabControl are the vertical
+         pair and belong to the shell's side menu and the answer-file window.
 
-    <Panel>
-      <ListBox Name="ContainerList" SelectionMode="Multiple" Background="Transparent"
-               Padding="0"
-               ItemContainerTheme="{StaticResource JbTableRow}">
-        <ListBox.ContextMenu>
-          <ContextMenu Name="ContainerMenu">
-            <MenuItem Name="MenuEdit" Header="Edit…" />
-            <MenuItem Name="MenuLogs" Header="Logs…" />
-            <MenuItem Name="MenuConsole" Header="Console…" />
-            <Separator />
-            <MenuItem Name="MenuStart" Header="Start" />
-            <MenuItem Name="MenuStop" Header="Stop" />
-            <MenuItem Name="MenuRestart" Header="Restart" />
-            <Separator />
-            <MenuItem Name="MenuRemove" Header="Remove…" />
-          </ContextMenu>
-        </ListBox.ContextMenu>
-        <ListBox.ItemTemplate>
-          <DataTemplate DataType="vm:ContainerRow">
-            <StackPanel Orientation="Horizontal">
-              <!-- Same 9px state dot as the VM list, sharing the same three colours. -->
-              <DockPanel Width="{StaticResource ColName}">
-                <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
-                         VerticalAlignment="Center" Fill="{Binding StateBrush}" />
-                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" />
-              </DockPanel>
-              <TextBlock Text="{Binding Image}"  Width="{StaticResource ColImage}"
-                         TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Image}" />
-              <!-- Docker's own rendered phrase ("Exited (0) 2 days ago") is the tooltip: the
-                   Uptime column replaces it for a running container, but the exit code of a
-                   stopped one is worth keeping one hover away. -->
-              <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}"
-                         ToolTip.Tip="{Binding Status}" />
-              <TextBlock Text="{Binding Uptime}" Width="{StaticResource ColUptime}" Opacity="0.75" />
-              <TextBlock Text="{Binding Ports}" Opacity="0.75"
-                         TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Ports}" />
+         The tab strip is the top of the module and each page carries its own commands, so a toolbar
+         only ever shows what applies to the table under it. -->
+    <TabControl Name="Tabs">
+
+      <TabItem Header="Containers">
+        <DockPanel>
+
+          <!-- Only the command that needs no selection lives here, exactly as in the VM list;
+               everything per-container is on the list's right-click menu. There is still no Refresh
+               button, because `docker events` refreshes the list on its own. -->
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Name="NewContainerButton" Content="New container…" Classes="accent" />
             </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
+          </Border>
 
-      <!-- Why the list is empty, so an unusable module never just looks broken. Hidden as soon as
-           there is a row to show. -->
-      <TextBlock Name="EmptyText" Opacity="0.6" IsVisible="False"
-                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
-                 HorizontalAlignment="Center" VerticalAlignment="Center" />
-    </Panel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
+                   the column. -->
+              <TextBlock Text="Name"   Width="{StaticResource ColName}"   FontWeight="SemiBold" Padding="14,0,0,0" />
+              <TextBlock Text="Image"  Width="{StaticResource ColImage}"  FontWeight="SemiBold" />
+              <TextBlock Text="State"  Width="{StaticResource ColState}"  FontWeight="SemiBold" />
+              <TextBlock Text="Uptime" Width="{StaticResource ColUptime}" FontWeight="SemiBold" />
+              <TextBlock Text="Ports" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
 
+          <Panel>
+            <ListBox Name="ContainerList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="ContainerMenu">
+                  <MenuItem Name="MenuEdit" Header="Edit…" />
+                  <MenuItem Name="MenuLogs" Header="Logs…" />
+                  <MenuItem Name="MenuConsole" Header="Console…" />
+                  <Separator />
+                  <MenuItem Name="MenuStart" Header="Start" />
+                  <MenuItem Name="MenuStop" Header="Stop" />
+                  <MenuItem Name="MenuRestart" Header="Restart" />
+                  <Separator />
+                  <MenuItem Name="MenuRemove" Header="Remove…" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:ContainerRow">
+                  <StackPanel Orientation="Horizontal">
+                    <!-- Same 9px state dot as the VM list, sharing the same three colours. -->
+                    <DockPanel Width="{StaticResource ColName}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Image}"  Width="{StaticResource ColImage}"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Image}" />
+                    <!-- Docker's own rendered phrase ("Exited (0) 2 days ago") is the tooltip: the
+                         Uptime column replaces it for a running container, but the exit code of a
+                         stopped one is worth keeping one hover away. -->
+                    <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}"
+                               ToolTip.Tip="{Binding Status}" />
+                    <TextBlock Text="{Binding Uptime}" Width="{StaticResource ColUptime}" Opacity="0.75" />
+                    <TextBlock Text="{Binding Ports}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Ports}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Why the list is empty, so an unusable module never just looks broken. Hidden as soon
+                 as there is a row to show. -->
+            <TextBlock Name="EmptyText" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Images">
+        <DockPanel>
+
+          <!-- The three commands that need no selection. Pull is accented because on this page it is
+               the one command that brings something new in, which is what that class is for; Import
+               brings something in too, but from a file somebody already has. Prune sits with them
+               rather than on the menu because it applies to the whole host, not to a row. No Refresh
+               button: the same `docker events` tail now carries image events. -->
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Name="PullImageButton" Content="Pull image…" Classes="accent"
+                      ToolTip.Tip="Fetch an image from a registry before anything needs it" />
+              <Button Name="ImportImageButton" Content="Import…"
+                      ToolTip.Tip="Load a .tar or .tar.gz written by docker save" />
+              <Button Name="PruneImagesButton" Content="Prune unused…"
+                      ToolTip.Tip="Remove images no container is using" />
+            </StackPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Repository" Width="{StaticResource ColRepository}" FontWeight="SemiBold" />
+              <TextBlock Text="Tag"        Width="{StaticResource ColTag}"        FontWeight="SemiBold" />
+              <TextBlock Text="Image ID"   Width="{StaticResource ColImageId}"    FontWeight="SemiBold" />
+              <TextBlock Text="Created"    Width="{StaticResource ColCreated}"    FontWeight="SemiBold" />
+              <TextBlock Text="Size"       Width="{StaticResource ColSize}"       FontWeight="SemiBold" />
+              <TextBlock Text="Status" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="ImageList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="ImageMenu">
+                  <MenuItem Name="MenuNewFromImage" Header="New container…" />
+                  <Separator />
+                  <MenuItem Name="MenuExportImage" Header="Export…" />
+                  <MenuItem Name="MenuTagImage" Header="Tag…" />
+                  <Separator />
+                  <MenuItem Name="MenuRemoveImage" Header="Remove…" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:ImageRow">
+                  <!-- No state dot: a container is doing something, an image is a fact. A dangling
+                       layer is dimmed whole instead, the way a broken symlink is in the explorer. -->
+                  <StackPanel Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                    <TextBlock Text="{Binding Repository}" Width="{StaticResource ColRepository}"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Repository}" />
+                    <TextBlock Text="{Binding Tag}"        Width="{StaticResource ColTag}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding ShortId}"    Width="{StaticResource ColImageId}" Opacity="0.75"
+                               FontFamily="monospace" ToolTip.Tip="{Binding Id}" />
+                    <TextBlock Text="{Binding Created}"    Width="{StaticResource ColCreated}" Opacity="0.75" />
+                    <TextBlock Text="{Binding Size}"       Width="{StaticResource ColSize}" Opacity="0.75" />
+                    <!-- Blank where the listing could not ask, which is a different answer from
+                         "Unused" and is why the row keeps three states rather than a bool. -->
+                    <TextBlock Text="{Binding Status}" Opacity="{Binding StatusOpacity}"
+                               Classes.unused="{Binding IsUnused}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="ImagesEmptyText" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
   </DockPanel>
 </UserControl>

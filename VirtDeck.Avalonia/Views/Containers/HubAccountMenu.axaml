@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.HubAccountMenu">
+
+  <!--
+    A Menu holding one item, not a Button with a flyout, for the reason the console's toolbar is a
+    Menu: JbTopLevelMenuItem already draws the flat cell, the chevron, the open-and-stay-pressed
+    state and a popup framed like a context menu, and the Menu theme wires the two together through
+    its ItemContainerTheme. There is nothing here to template.
+
+    MinHeight and Padding are cut back from the theme's toolbar figures (22 and 9,3), and the
+    vertical padding goes to nothing: the cell stretches to the whole height of the status bar so
+    its hover covers the strip top to bottom, which is what a status bar widget does and what a
+    toolbar's inset pill does not. The 6 left and right is the only padding kept, so the label is
+    not against the edge of its own highlight.
+
+    The Menu itself stays enabled and carries the tooltip while the item inside it is disabled: a
+    disabled control is not hit-testable in Avalonia, so a reason hung off the item would never be
+    read. Same arrangement as CheckRow's border and ServiceRow's autostart tick.
+  -->
+  <Menu Name="MenuHost" VerticalAlignment="Stretch">
+    <MenuItem Name="AccountItem" MinHeight="0" Padding="6,0" VerticalAlignment="Stretch">
+      <MenuItem.Header>
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <!-- Head and shoulders, the app's own: the whole account of how it is drawn is in
+               MainWindow.axaml, where it names the user accounts module. A size down from the 16
+               it wears there, to sit beside 12pt status text rather than a menu label. -->
+          <Path Data="M8,2 A2.75,2.75 0 1 1 8,7.5 A2.75,2.75 0 1 1 8,2 Z M2.5,14 A5.5,5.5 0 0 1 8,9.5 A5.5,5.5 0 0 1 13.5,14"
+                Width="14" Height="14" Stretch="Uniform" StrokeThickness="1.2"
+                Stroke="{Binding $parent[MenuItem].Foreground}"
+                VerticalAlignment="Center" />
+          <TextBlock Name="AccountLabel" VerticalAlignment="Center" />
+        </StackPanel>
+      </MenuItem.Header>
+
+      <MenuItem Name="LoginItem" Header="Log in…" />
+      <MenuItem Name="LogoutItem" Header="Log out" />
+    </MenuItem>
+  </Menu>
+</UserControl>
