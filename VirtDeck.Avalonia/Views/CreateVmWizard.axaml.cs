@@ -102,8 +102,8 @@ public partial class CreateVmWizard : Window
         IsoPicker.Filter = MediaFilter;
         IsoPicker.DialogTitle = "Select install media";
         IsoPicker.BrowseText = "Browse…"; // matches the local media row's button, same row, same job
-        IsoPicker.StartDirectory = MediaLocations.ServerStart();
-        IsoPicker.Browsed += (_, path) => MediaLocations.RememberServer(path);
+        IsoPicker.StartDirectory = MediaLocations.ServerStart(virsh.Files);
+        IsoPicker.Browsed += (_, path) => MediaLocations.RememberServer(virsh.Files, path);
 
         NicList.ItemsSource = _nicRows;
         DiskList.ItemsSource = _diskRows;

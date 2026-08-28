@@ -45,16 +45,23 @@ public static class MediaLocations
     public static async Task<string?> BrowseServerAsync(Window owner, RemoteFileService files, string title,
                                                         string filter, string? initial = null)
     {
-        var start = string.IsNullOrWhiteSpace(initial) ? ServerStart() : initial;
+        var start = string.IsNullOrWhiteSpace(initial) ? ServerStart(files) : initial;
         var dlg = new RemoteFileBrowserDialog(files, start, filter, false, title);
         if (await dlg.ShowDialog<bool?>(owner) is not true || dlg.SelectedPath is not { } path) return null;
-        RememberServer(path);
+        RememberServer(files, path);
         return path;
     }
 
-    /// <summary>Directory the host browser should open in.</summary>
-    public static string ServerStart() =>
-        AppSettings.Current.LastServerMediaDir is { Length: > 0 } d ? d : ServerFallback;
+    /// <summary>
+    /// Directory the host browser should open in, which is a fact about **that host**: the
+    /// directory is read off its own <see cref="HostProfile"/> rather than a single shared value,
+    /// because a path on one machine means nothing on another and would open the browser somewhere
+    /// that does not exist. The service names the host, so no caller has to pass it.
+    /// </summary>
+    public static string ServerStart(RemoteFileService files) =>
+        AppSettings.Current.FindHost(files.ProfileKey)?.LastServerMediaDir is { Length: > 0 } d
+            ? d
+            : ServerFallback;
 
     /// <summary>Stores the directory of a file picked on this PC.</summary>
     public static void RememberLocal(string filePath)
@@ -67,10 +74,18 @@ public static class MediaLocations
         catch { /* an unusable path is simply not remembered */ }
     }
 
-    /// <summary>Stores the directory of a file picked on the host (POSIX paths, so not Path.GetDirectoryName).</summary>
-    public static void RememberServer(string filePath)
+    /// <summary>
+    /// Stores the directory of a file picked on the host (POSIX paths, so not
+    /// Path.GetDirectoryName), against that host's own profile.
+    ///
+    /// A host with no saved profile simply is not remembered. That can only be a connection the
+    /// user has not completed the login for, which has nowhere to keep the value anyway.
+    /// </summary>
+    public static void RememberServer(RemoteFileService files, string filePath)
     {
-        if (RemoteFileService.ParentPath(filePath) is { Length: > 0 } dir) Store(s => s.LastServerMediaDir = dir);
+        if (RemoteFileService.ParentPath(filePath) is not { Length: > 0 } dir) return;
+        if (AppSettings.Current.FindHost(files.ProfileKey) is not { } profile) return;
+        Store(_ => profile.LastServerMediaDir = dir);
     }
 
     private static void Store(Action<AppSettings> set)

@@ -1,0 +1,224 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.SoftwareUpdatesModule"
+             x:DataType="vm:UpdateRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. Prefixed
+         per tab, because the two tables have nothing to do with each other. -->
+    <x:Double x:Key="ColPackage">240</x:Double>
+    <x:Double x:Key="ColCurrent">170</x:Double>
+    <x:Double x:Key="ColNew">170</x:Double>
+    <x:Double x:Key="ColSeverity">80</x:Double>
+
+    <x:Double x:Key="ColWhen">150</x:Double>
+    <x:Double x:Key="ColAction">150</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- The amber a security row wears, literal rather than themed for the reason the state dots
+         are: it is the app's transient amber and it has to mean the same thing on either face. A
+         class rather than a brush bound off the row, because an ordinary row wants the inherited
+         theme foreground and a binding answering null for it would leave the cell unpainted instead
+         of leaving it alone. Same shape as the Images table's Unused column. -->
+    <Style Selector="TextBlock.security">
+      <Setter Property="Foreground" Value="#D68F00" />
+    </Style>
+  </UserControl.Styles>
+
+  <!-- The transfer strip is outside the tabs and the tabs are inside this panel, because an upgrade
+       started on the updates page has to stay visible and stay cancellable if somebody steps over to
+       the history page while it runs. Same reason the containers module puts its strip here. -->
+  <DockPanel>
+
+    <!-- The progress-and-cancel strip: the same shape ConsoleWindow, the file explorer and the
+         containers module draw, so the app has one look for "something is running" rather than four.
+         Hidden whenever nothing is. -->
+    <Border Name="XferPanel" DockPanel.Dock="Bottom" IsVisible="False"
+            Padding="8" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel>
+        <!-- The Border is load-bearing and not padding: a disabled control is not hit-testable in
+             Avalonia, so the tooltip explaining why Cancel has gone away has to hang off an enabled
+             parent. Same workaround as CheckRow's template and ServiceRow's autostart tick. -->
+        <Border DockPanel.Dock="Right" Background="Transparent" Margin="8,0,0,0"
+                ToolTip.Tip="{Binding #CancelXferButton.Tag}">
+          <Button Name="CancelXferButton" Content="Cancel"
+                  Theme="{StaticResource JbStatusBarButton}" />
+        </Border>
+        <ProgressBar Name="XferProgress" DockPanel.Dock="Right" Width="160" Height="6"
+                     Minimum="0" Maximum="1000" IsIndeterminate="True"
+                     VerticalAlignment="Center" Margin="8,0,0,0" />
+        <TextBlock Name="XferText" Opacity="0.75" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, exactly as the user
+         accounts, services and containers modules do. JbSideTabControl and JbModuleTabControl are the
+         vertical pair and belong to the shell's side menu and the answer-file window.
+
+         The tab strip is the top of the module and each page carries its own toolbar, so a toolbar
+         only ever shows what applies to the table under it. -->
+    <TabControl Name="Tabs">
+
+      <TabItem Header="Available updates">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <!-- Accented, following the Images page's Pull rather than the strict reading of the
+                     rule: this is the one command on the page that brings something new onto the
+                     host. -->
+                <Button Name="InstallAllButton" Content="Install all updates" Classes="accent" />
+
+                <!-- Disabled with its reason on hover on a pacman host, never hidden: a command
+                     somebody goes looking for must not come and go. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #InstallSecurityButton.Tag}">
+                  <Button Name="InstallSecurityButton" Content="Install security updates" />
+                </Border>
+
+                <!-- A real Refresh button, as in the file explorer and the accounts module: nothing
+                     on the host announces that a mirror published a package, so there is no event
+                     tail here and no poll either. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #RefreshButton.Tag}">
+                  <Button Name="RefreshButton" Theme="{StaticResource JbIconButton}">
+                    <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                </Border>
+              </StackPanel>
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <!-- The reboot notice. Page content rather than an IModule.StatusWidget: that slot is for a
+               fact about the host neither table owns (the containers module's Hub account), and this
+               one belongs to the page it appears on and disappears again with. -->
+          <Border Name="RebootPanel" DockPanel.Dock="Top" IsVisible="False"
+                  Padding="12,8" Background="#18D68F00"
+                  BorderThickness="0,0,0,1" BorderBrush="#55D68F00">
+            <DockPanel>
+              <Button Name="RebootButton" DockPanel.Dock="Right" Content="Restart host…"
+                      Margin="10,0,0,0" VerticalAlignment="Center" />
+              <TextBlock Name="RebootText" VerticalAlignment="Center" TextWrapping="Wrap" />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Package"    Width="{StaticResource ColPackage}"  FontWeight="SemiBold" />
+              <TextBlock Text="Installed"  Width="{StaticResource ColCurrent}"  FontWeight="SemiBold" />
+              <TextBlock Text="Available"  Width="{StaticResource ColNew}"      FontWeight="SemiBold" />
+              <TextBlock Text="Severity"   Width="{StaticResource ColSeverity}" FontWeight="SemiBold" />
+              <TextBlock Text="Repository" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <!-- Single selection and no context menu: there is nothing to do to one row. The table is
+                 what is about to be installed, not a set of things to pick from, which is Cockpit's
+                 answer too. -->
+            <ListBox Name="UpdateList" Background="Transparent" Padding="0"
+                     SelectionMode="Single"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:UpdateRow">
+                  <StackPanel Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+                    <TextBlock Text="{Binding Key}" Width="{StaticResource ColPackage}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding CurrentText}" Width="{StaticResource ColCurrent}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding NewVersion}" Width="{StaticResource ColNew}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SeverityText}" Width="{StaticResource ColSeverity}"
+                               Classes.security="{Binding IsSecurity}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Repository}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Why the list is empty, so a host with nothing to do and a host that could not be read
+                 never look the same. -->
+            <TextBlock Name="UpdatesEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="History">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Button Name="RefreshHistoryButton" Theme="{StaticResource JbIconButton}"
+                        ToolTip.Tip="Read the history again">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </StackPanel>
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="When"     Width="{StaticResource ColWhen}"   FontWeight="SemiBold" />
+              <TextBlock Text="Action"   Width="{StaticResource ColAction}" FontWeight="SemiBold" />
+              <TextBlock Text="Packages" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="HistoryList" Background="Transparent" Padding="0"
+                     SelectionMode="Single"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:HistoryRow">
+                  <StackPanel Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+                    <TextBlock Text="{Binding When}" Width="{StaticResource ColWhen}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Action}" Width="{StaticResource ColAction}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <!-- A transaction the tool reported an error for is drawn in the app's one
+                         validation brush, because it is the row somebody scrolling this table is
+                         looking for. -->
+                    <TextBlock Text="{Binding Packages}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Classes.failed="{Binding HasError}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+              <ListBox.Styles>
+                <Style Selector="TextBlock.failed">
+                  <Setter Property="Foreground" Value="{DynamicResource JbErrorForeground}" />
+                </Style>
+              </ListBox.Styles>
+            </ListBox>
+
+            <TextBlock Name="HistoryEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
+  </DockPanel>
+</UserControl>

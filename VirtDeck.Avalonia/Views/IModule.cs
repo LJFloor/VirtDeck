@@ -46,6 +46,24 @@ public interface IModule
     /// </summary>
     Control? StatusWidget => null;
 
+    /// <summary>
+    /// Why this module must not be torn down right now, or null when it may be. The shell asks
+    /// every module before switching host, and refuses the switch naming the first reason it gets.
+    ///
+    /// This is not a general busy flag, and it is emphatically not the poll guard: a module in the
+    /// middle of a refresh is fine to close, because the shell's teardown cancels reads and closes
+    /// windows for a living. It is for the one thing a switch would destroy with no way back.
+    /// Cancelling a download costs a download; cancelling dpkg between unpacking a package and
+    /// configuring it leaves a package database neither the app nor the user can put right, which
+    /// is why the software updates module already disables its own Cancel button there. Doing from
+    /// the host switcher what a module refuses to do from its own button would be a hole in the
+    /// same rule.
+    ///
+    /// Defaulted to null, so a module with nothing uninterruptible says nothing at all and adding
+    /// a module stays a TabItem plus a UserControl.
+    /// </summary>
+    string? BusyReason => null;
+
     /// <summary>Raised when either status string changed. The shell repaints only if this module is active.</summary>
     event Action? StatusChanged;
 

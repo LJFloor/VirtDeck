@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.HostSwitcherMenu">
+
+  <!--
+    Which host this window is about, as the flat cell with a chevron that JetBrains puts a project
+    or branch name in. A Menu holding one item, not a Button with a flyout, for the reason
+    HubAccountMenu is one: JbTopLevelMenuItem already draws the cell, the chevron, the
+    open-and-stay-pressed state and a popup framed like a context menu, and the Menu theme wires
+    the two together through its ItemContainerTheme. There is nothing here to template.
+
+    MinHeight and Padding are not written here, unlike HubAccountMenu's: this control appears in
+    two places with two different sets of metrics (the shell's status bar, where the cell fills the
+    strip and carries the bar's own side inset inside its hover, and the login form, where it keeps
+    the theme's toolbar figures). StatusBarMode is what chooses, and it does it in code because the
+    same properties have to be settable both ways.
+
+    The Menu itself stays enabled and carries the tooltip while the item inside it is disabled: a
+    disabled control is not hit-testable in Avalonia, so a reason hung off the item would never be
+    read. Same arrangement as CheckRow's border and ServiceRow's autostart tick.
+  -->
+  <Menu Name="MenuHost">
+    <MenuItem Name="HostItem">
+      <MenuItem.Header>
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <!-- A machine: a box on a stand, stroked in the app's 16x16 house style with one line
+               for a front panel and a dot for its light. Drawn at 14 to sit beside 12pt status
+               text rather than a menu label, which is the size HubAccountMenu's glyph wears for
+               the same reason. -->
+          <Path Data="M2,2 H14 V10 H2 Z M4.5,12.5 H11.5 M8,10 V12.5 M4,7.5 H8 M11.5,4.5 A0.6,0.6 0 1 1 11.5,5.7 A0.6,0.6 0 1 1 11.5,4.5 Z"
+                Width="14" Height="14" Stretch="Uniform" StrokeThickness="1.2"
+                Stroke="{Binding $parent[MenuItem].Foreground}"
+                VerticalAlignment="Center" />
+          <TextBlock Name="HostLabel" VerticalAlignment="Center" />
+        </StackPanel>
+      </MenuItem.Header>
+    </MenuItem>
+  </Menu>
+</UserControl>

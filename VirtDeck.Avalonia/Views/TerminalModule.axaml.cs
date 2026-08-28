@@ -95,16 +95,16 @@ public partial class TerminalModule : UserControl, IModule
     }
 
     /// <summary>
-    /// Nothing is probed here, unlike the other two modules: the right-hand slot is who this shell
-    /// runs as, and the connection already knows. The port is shown only when it is not the default,
-    /// because a terminal's identity is the account and the host.
+    /// Nothing is probed here, unlike the other two modules, and nothing is written to the
+    /// right-hand status slot either.
+    ///
+    /// That slot used to say <c>user@host</c>, since a terminal's identity is the account and the
+    /// host and the connection already knew both. The shell now names the host permanently at the
+    /// left-hand end of the same bar, so saying it again here would print it twice in one strip.
     /// </summary>
     public void Attach(SshConnectionManager ssh)
     {
         _ssh = ssh;
-        HostCapabilities = ssh.Port == 22
-            ? $"{ssh.Username}@{ssh.Host}"
-            : $"{ssh.Username}@{ssh.Host}:{ssh.Port}";
     }
 
     /// <summary>

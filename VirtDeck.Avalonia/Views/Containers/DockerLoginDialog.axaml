@@ -36,10 +36,19 @@
            against the rest of the line, so a wrapping one whose text did not fit would take two
            lines and fill the width, and the click would reach past the end of what is drawn. With
            it, the box is the text (measured: an embedded control is arranged at its own desired
-           size, not stretched to the line). A URL is one token and should not break anyway. -->
+           size, not stretched to the line). A URL is one token and should not break anyway.
+
+           BaselineAlignment="Bottom" is what puts the link on the same baseline as the words
+           either side of it, and the default rides a few pixels high. Read from Avalonia 12.1.1:
+           EmbeddedControlRun.Baseline is the control's whole **height**, so under the default
+           (Baseline) TextLineImpl.GetBaselineOffset drops the box's bottom edge onto the line's
+           baseline, and the link's own text then sits a descent plus half a line gap above the
+           text beside it. Bottom draws it at line height minus box height instead, and since an
+           embedded TextBlock of the same font and size is exactly one line tall, that lands the
+           two baselines on each other whatever the font's metrics are. -->
       <TextBlock Classes="note">
         <Run Text="You can log in with your password or a Personal Access Token (PAT). Using a limited-scope PAT grants better security and is required for organizations using SSO. Learn more at " />
-        <InlineUIContainer>
+        <InlineUIContainer BaselineAlignment="Bottom">
           <TextBlock Name="TokensLink" Text="https://docs.docker.com/go/access-tokens/"
                      TextWrapping="NoWrap" HorizontalAlignment="Left"
                      Foreground="{DynamicResource JbLinkForeground}"
@@ -47,9 +56,6 @@
                      ToolTip.Tip="Open Docker's access token documentation in your browser" />
         </InlineUIContainer>
       </TextBlock>
-
-      <TextBlock Classes="note"
-                 Text="Whichever you give goes to the host over the SSH connection and is never stored on this PC: docker keeps the credential on the host itself, so it is still there next time you connect." />
 
       <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
 

@@ -7,9 +7,13 @@ namespace VirtDeck.Services
     public readonly record struct SshSecrets(string LoginPassword, string KeyPassphrase, string SudoPassword);
 
     /// <summary>
-    /// The login screen's secrets in the OS store: the desktop keyring on Linux, Credential Manager
+    /// The saved hosts' secrets in the OS store: the desktop keyring on Linux, Credential Manager
     /// on Windows. This is the only place that knows what VirtDeck stores and under what names;
     /// <see cref="ISecretStore"/> below it knows nothing about SSH.
+    ///
+    /// One entry set per account, keyed by <see cref="IdentityOf"/>, which is also
+    /// <see cref="HostProfile.Key"/>: several hosts coexist here and writing one never disturbs
+    /// another.
     ///
     /// **What this protects against.** Both stores encrypt at rest, so another *user* of the machine
     /// cannot read them. Neither protects against another process **running as you**: the
@@ -68,7 +72,7 @@ namespace VirtDeck.Services
             if (!IsAvailable(out _)) return ("", "");
             lock (Gate)
             {
-                string identity = HostIdentity(host, port, user);
+                string identity = IdentityOf(host, port, user);
                 return (Store.Load(new SecretSlot(Login, identity)),
                         Store.Load(new SecretSlot(Sudo, identity)));
             }
@@ -82,14 +86,18 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
-        /// Makes the store equal to what the login screen holds: everything VirtDeck saved is
-        /// deleted, then these secrets are written, skipping the empty ones.
+        /// Writes one account's secrets, replacing whatever was stored for that same account.
         ///
-        /// Clean slate rather than upsert, because <see cref="AppSettings"/> remembers exactly one
-        /// host, one username and one key path, so everything stored is by construction the state of
-        /// that one form. It is what makes staleness impossible without any compare-with-the-previous
-        /// code: a changed host, port, username or key, or a switch between password and key auth,
-        /// all leave nothing behind.
+        /// Scoped to one identity rather than to the whole store. It used to be a clean slate
+        /// (forget everything, then write what the form holds), which was correct only while
+        /// <see cref="AppSettings"/> remembered exactly one host: everything stored was by
+        /// construction the state of that one form. With a list of saved hosts that premise is
+        /// gone, and a global wipe here would mean connecting to one host deleted every other
+        /// host's passwords.
+        ///
+        /// The delete-then-write survives **within** the identity, for the reason the global wipe
+        /// existed: switching this account between password and key auth must not leave the
+        /// secret belonging to the other mode behind.
         ///
         /// An empty secret is never written. "No entry" and "an entry that is the empty string"
         /// leave the same empty box on screen, which is exactly right for a host whose sudo needs no
@@ -100,10 +108,11 @@ namespace VirtDeck.Services
             if (!IsAvailable(out _)) return;
             lock (Gate)
             {
-                ForgetLocked();
-
-                string identity = HostIdentity(host, port, user);
+                string identity = IdentityOf(host, port, user);
                 string who = $"{user}@{host}";
+
+                Store.Delete(new SecretSlot(Login, identity));
+                Store.Delete(new SecretSlot(Sudo, identity));
 
                 if (secrets.LoginPassword.Length != 0)
                     Store.Store(new SecretSlot(Login, identity), secrets.LoginPassword, $"SSH password for {who}");
@@ -111,16 +120,51 @@ namespace VirtDeck.Services
                 if (secrets.SudoPassword.Length != 0)
                     Store.Store(new SecretSlot(Sudo, identity), secrets.SudoPassword, $"sudo password for {who}");
 
-                if (secrets.KeyPassphrase.Length != 0 && !string.IsNullOrEmpty(keyPath))
-                    Store.Store(new SecretSlot(Passphrase, KeyIdentity(keyPath)), secrets.KeyPassphrase,
-                                $"passphrase for {Path.GetFileName(keyPath)}");
+                // The passphrase belongs to the key file and is shared by every host using it, so
+                // it is only ever written, never cleared from here: a host that has switched to
+                // password auth must not take another host's passphrase with it.
+                if (!string.IsNullOrEmpty(keyPath))
+                {
+                    var slot = new SecretSlot(Passphrase, KeyIdentity(keyPath));
+                    if (secrets.KeyPassphrase.Length != 0)
+                        Store.Store(slot, secrets.KeyPassphrase, $"passphrase for {Path.GetFileName(keyPath)}");
+                }
             }
         }
 
         /// <summary>
-        /// Deletes every password VirtDeck has saved on this PC, not only the current host's. With
-        /// one remembered host, an entry for any other host is by definition a leftover, and someone
-        /// asking to forget wants the machine clean rather than partly clean.
+        /// Deletes one saved host's secrets, for when its profile is removed.
+        ///
+        /// The passphrase goes only when no other saved host names the same key file. A passphrase
+        /// belongs to the key, not to a host, so one key used against three machines has to
+        /// survive two of them being forgotten.
+        /// </summary>
+        public static void ForgetHost(HostProfile profile, IEnumerable<HostProfile> remaining)
+        {
+            if (!IsAvailable(out _)) return;
+            lock (Gate)
+            {
+                string identity = IdentityOf(profile.Host, profile.Port, profile.Username);
+                Store.Delete(new SecretSlot(Login, identity));
+                Store.Delete(new SecretSlot(Sudo, identity));
+
+                if (profile.PrivateKeyPath.Length == 0) return;
+                string keyId = KeyIdentity(profile.PrivateKeyPath);
+                foreach (var other in remaining)
+                {
+                    if (other.PrivateKeyPath.Length != 0 && KeyIdentity(other.PrivateKeyPath) == keyId)
+                        return;
+                }
+                Store.Delete(new SecretSlot(Passphrase, keyId));
+            }
+        }
+
+        /// <summary>
+        /// Deletes every password VirtDeck has saved on this PC, every saved host's included. This
+        /// is the nuclear option behind the login screen's Forget button: somebody asking to forget
+        /// wants the machine clean rather than partly clean, so it stayed global when
+        /// <see cref="Save"/> narrowed to one account. <see cref="ForgetHost"/> is the scoped one,
+        /// for a single profile being removed.
         /// </summary>
         public static void Forget()
         {
@@ -132,16 +176,17 @@ namespace VirtDeck.Services
         {
             // The exact deletes go first because the sweep below relies on the Secret Service
             // matching attribute subsets: gnome-keyring does, and KWallet's implementation is less
-            // exercised, so the slot we can name is deleted by name whatever happens.
-            var settings = AppSettings.Current;
-            if (settings.Host.Length != 0 && settings.Username.Length != 0)
+            // exercised, so every slot we can name is deleted by name whatever happens. That is
+            // now one pass per saved host rather than one for the single remembered one.
+            foreach (var profile in AppSettings.Current.Hosts)
             {
-                string identity = HostIdentity(settings.Host, settings.Port, settings.Username);
+                if (profile.Host.Length == 0 || profile.Username.Length == 0) continue;
+                string identity = IdentityOf(profile.Host, profile.Port, profile.Username);
                 Store.Delete(new SecretSlot(Login, identity));
                 Store.Delete(new SecretSlot(Sudo, identity));
+                if (profile.PrivateKeyPath.Length != 0)
+                    Store.Delete(new SecretSlot(Passphrase, KeyIdentity(profile.PrivateKeyPath)));
             }
-            if (settings.PrivateKeyPath.Length != 0)
-                Store.Delete(new SecretSlot(Passphrase, KeyIdentity(settings.PrivateKeyPath)));
 
             Store.DeletePurpose(Login);
             Store.DeletePurpose(Sudo);
@@ -159,8 +204,11 @@ namespace VirtDeck.Services
         /// The host is lowercased because DNS is case-insensitive, the username is not because POSIX
         /// usernames are. Skipping either produces a second entry that reads as "it forgot my
         /// password".
+        ///
+        /// Public because <see cref="HostProfile.Key"/> is this same string: one rule for what
+        /// counts as one host, shared by the settings file and the keyring.
         /// </summary>
-        private static string HostIdentity(string host, int port, string user) =>
+        public static string IdentityOf(string host, int port, string user) =>
             $"{user.Trim()}@{host.Trim().ToLowerInvariant()}:{port}";
 
         /// <summary>

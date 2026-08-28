@@ -8,18 +8,21 @@
     state and a popup framed like a context menu, and the Menu theme wires the two together through
     its ItemContainerTheme. There is nothing here to template.
 
-    MinHeight and Padding drop the theme's toolbar figures (22 and 9,3) entirely: the cell stretches
-    to the whole height of the status bar and its hover covers the strip with no inset on any side,
-    which is what a status bar widget does and what a toolbar's pill does not. The gap either side
-    of the label is the bar's own 10px border padding on the right and the separator's margin on
-    the left, so nothing here has to add one.
+    MinHeight and Padding drop the theme's toolbar figures (22 and 9,3): the cell stretches to the
+    whole height of the status bar and its hover covers the strip top to bottom, which is what a
+    status bar widget does and what a toolbar's pill does not. The 10px either side of the label is
+    this cell's own, and that is the point of writing it here rather than leaving it to the bar: the
+    same gap as the bar's border padding, but **inside** the hover, so the highlight reaches the
+    window edge instead of stopping short of it with a dead strip beside it. MainWindow's status bar
+    cancels its own padding under this slot and drops the separator's margin on this side to pay for
+    it, so the label sits exactly where it did.
 
     The Menu itself stays enabled and carries the tooltip while the item inside it is disabled: a
     disabled control is not hit-testable in Avalonia, so a reason hung off the item would never be
     read. Same arrangement as CheckRow's border and ServiceRow's autostart tick.
   -->
   <Menu Name="MenuHost" VerticalAlignment="Stretch">
-    <MenuItem Name="AccountItem" MinHeight="0" Padding="0" VerticalAlignment="Stretch">
+    <MenuItem Name="AccountItem" MinHeight="0" Padding="10,0" VerticalAlignment="Stretch">
       <MenuItem.Header>
         <StackPanel Orientation="Horizontal" Spacing="5">
           <!-- Head and shoulders, the app's own: the whole account of how it is drawn is in

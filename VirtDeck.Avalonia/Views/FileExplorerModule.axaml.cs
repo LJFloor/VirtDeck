@@ -234,15 +234,18 @@ public partial class FileExplorerModule : UserControl, IModule
         StatusChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Nothing is probed, and nothing is put in the right-hand status slot either.
+    ///
+    /// This module used to write <c>user@host</c> there, because who you are reading a filesystem
+    /// as is exactly what is worth saying. The shell now names the host permanently at the other
+    /// end of the same bar, in the host switcher, so writing it here would print it twice in one
+    /// strip. An empty slot is what the shell already draws for a module with nothing to report.
+    /// </summary>
     public void Attach(SshConnectionManager ssh)
     {
         _files = new RemoteFileService(ssh);
         _transfers = new RemoteTransferService(ssh);
-        // Nothing to probe: the connection already knows who and where it is, and that is exactly
-        // the thing worth saying while somebody reads a filesystem as themselves.
-        HostCapabilities = ssh.Port == 22
-            ? $"{ssh.Username}@{ssh.Host}"
-            : $"{ssh.Username}@{ssh.Host}:{ssh.Port}";
     }
 
     public async Task ActivateAsync()

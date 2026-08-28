@@ -211,6 +211,12 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// Which saved host these files are on. Forwarded from the connection so a caller holding
+        /// only this service (every media picker does) can still reach that host's own settings.
+        /// </summary>
+        public string ProfileKey => _ssh.ProfileKey;
+
+        /// <summary>
         /// The login account's home directory, cached for the session. Falls back to "/" when the
         /// host answers nothing, so a caller always has somewhere to start.
         /// </summary>

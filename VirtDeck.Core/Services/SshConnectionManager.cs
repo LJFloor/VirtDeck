@@ -38,6 +38,13 @@ namespace VirtDeck.Services
         private long _bytesSent;
         public long BytesSent => Interlocked.Read(ref _bytesSent);
 
+        /// <summary>
+        /// Which saved host this connection is, as <see cref="HostProfile.Key"/> spells it. The
+        /// connection naming its own profile is what lets anything holding one (a remote file
+        /// picker, say) reach that host's settings without being handed the profile separately.
+        /// </summary>
+        public string ProfileKey => SshCredentialStore.IdentityOf(Host, Port, Username);
+
         public SshClient Client => _client ?? throw new InvalidOperationException("Not connected.");
 
         /// <summary>Connects with a password, which is also used for sudo.</summary>

@@ -1,12 +1,20 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:svc="clr-namespace:VirtDeck.Services;assembly=VirtDeck.Core"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
         x:Class="VirtDeck.Avalonia.Views.LoginWindow"
         Title="VirtDeck - Connect"
         Width="400" SizeToContent="Height"
         WindowStartupLocation="CenterScreen" CanResize="False">
   <StackPanel Margin="24" Spacing="6">
     <TextBlock Text="Connect to a libvirt host over SSH" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+    <!-- The same cell the shell hangs in its status bar, in its plain toolbar form. Hidden until
+         there is more than one host to choose between, because with one saved host the form is
+         already filled in with it and a picker offering that single answer is a control that only
+         ever restates what is on screen. -->
+    <vm:HostSwitcherMenu Name="HostPicker" StatusBarMode="False"
+                         HorizontalAlignment="Left" IsVisible="False" Margin="0,0,0,8" />
 
     <Grid ColumnDefinitions="*,8,70">
       <TextBlock Grid.Column="0" Text="Host" />

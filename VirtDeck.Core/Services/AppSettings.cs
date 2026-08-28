@@ -16,26 +16,49 @@ namespace VirtDeck.Services
     /// </summary>
     public sealed class AppSettings
     {
-        /// <summary>Last SSH host, pre-filled on the login screen.</summary>
+        /// <summary>
+        /// Every host VirtDeck has connected to, in the order they were first seen. A host is added
+        /// on each successful connect, so this is a record of where the user has actually been
+        /// rather than a form they have to maintain.
+        ///
+        /// Keyed by <see cref="HostProfile.Key"/>, which is the same string the secret store files
+        /// that host's passwords under, so the two can never disagree about what one host is.
+        /// </summary>
+        public List<HostProfile> Hosts { get; set; } = new();
+
+        /// <summary>
+        /// <see cref="HostProfile.Key"/> of the host last connected to, which the login screen
+        /// pre-fills from. Empty, or naming a host no longer in <see cref="Hosts"/>, simply means
+        /// there is nothing to pre-fill.
+        /// </summary>
+        public string LastHostKey { get; set; } = "";
+
+        // ---- Superseded by Hosts ------------------------------------------
+        //
+        // These five held the one host VirtDeck used to remember. Migrate() folds them into a
+        // single HostProfile the first time a pre-list settings file is read; nothing reads them
+        // after that. They stay on the class, and keep being written, so an older build can still
+        // read the file, for the reason VmSettings.ClipboardImagesOff stays.
+
+        /// <summary>Superseded by <see cref="Hosts"/>. Read once, by <see cref="Migrate"/>.</summary>
         public string Host { get; set; } = "";
 
-        /// <summary>Last SSH port, pre-filled on the login screen.</summary>
+        /// <summary>Superseded by <see cref="Hosts"/>. Read once, by <see cref="Migrate"/>.</summary>
         public int Port { get; set; } = 22;
 
-        /// <summary>Last SSH username, pre-filled on the login screen.</summary>
+        /// <summary>Superseded by <see cref="Hosts"/>. Read once, by <see cref="Migrate"/>.</summary>
         public string Username { get; set; } = "";
 
         /// <summary>
-        /// Last authentication method: <c>"Key"</c>, or anything else (including the empty default that
-        /// existing settings files and the registry import produce) for password. A string rather than an
-        /// enum on purpose: <c>JsonStringEnumConverter</c> throws on an unknown value, which would make
+        /// Superseded by <see cref="Hosts"/>. Read once, by <see cref="Migrate"/>.
+        ///
+        /// A string rather than an enum on purpose, a decision <see cref="HostProfile.AuthMode"/>
+        /// inherited: <c>JsonStringEnumConverter</c> throws on an unknown value, which would make
         /// <see cref="Load"/> discard the whole file, per-VM settings included, over one field.
         /// </summary>
         public string AuthMode { get; set; } = "";
 
-        /// <summary>Last private key used, pre-selected on the login screen. Never a secret: this file holds
-        /// nothing but the path. The passwords themselves live in the OS secret store when
-        /// <see cref="RememberPasswords"/> is on; see <see cref="SshCredentialStore"/>.</summary>
+        /// <summary>Superseded by <see cref="Hosts"/>. Read once, by <see cref="Migrate"/>.</summary>
         public string PrivateKeyPath { get; set; } = "";
 
         /// <summary>
@@ -51,13 +74,16 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Directory of the last install medium picked **on this PC**, reopened by the local pickers.
-        /// Kept apart from <see cref="LastServerMediaDir"/> because the two are different filesystems:
+        /// Kept apart from <see cref="HostProfile.LastServerMediaDir"/> because the two are different filesystems:
         /// one path is meaningless in the other's browser. ISO and floppy share it; they are picked from
         /// the same places.
         /// </summary>
         public string LastLocalMediaDir { get; set; } = "";
 
-        /// <summary>Directory of the last install medium picked **on the SSH host**.</summary>
+        /// <summary>
+        /// Superseded by <see cref="HostProfile.LastServerMediaDir"/>, because a path on one host
+        /// means nothing on another. Read once, by <see cref="Migrate"/>.
+        /// </summary>
         public string LastServerMediaDir { get; set; } = "";
 
         /// <summary>
@@ -113,6 +139,60 @@ namespace VirtDeck.Services
             return s;
         }
 
+        // ---- Saved hosts ---------------------------------------------------
+
+        /// <summary>The saved host with this key, or null. An empty key is never a match.</summary>
+        public HostProfile? FindHost(string key) =>
+            key.Length == 0 ? null : Hosts.FirstOrDefault(h => h.Key == key);
+
+        /// <summary>
+        /// The host the login screen should open on: the one last connected to, else the only one
+        /// there is, else nothing. Null is an ordinary answer, not a failure.
+        /// </summary>
+        public HostProfile? LastHost() => FindHost(LastHostKey) ?? (Hosts.Count == 1 ? Hosts[0] : null);
+
+        /// <summary>
+        /// Records a successful connect: updates the matching profile in place or appends a new
+        /// one, marks it as the last host, and saves.
+        ///
+        /// In place rather than replace, so anything the profile carries that this connect did not
+        /// mention (its server media directory) survives. The match is on
+        /// <see cref="HostProfile.Key"/>, so a different account or port on the same machine is a
+        /// separate host, which is exactly what the secret store already believes.
+        /// </summary>
+        public HostProfile RememberHost(string host, int port, string user, string authMode, string keyPath)
+        {
+            var profile = Hosts.FirstOrDefault(h => h.Key == SshCredentialStore.IdentityOf(host, port, user));
+            if (profile == null)
+            {
+                profile = new HostProfile();
+                Hosts.Add(profile);
+            }
+
+            profile.Host = host;
+            profile.Port = port;
+            profile.Username = user;
+            profile.AuthMode = authMode;
+            // Only written for key auth, so a host that connected with a password once keeps the
+            // key it used before as the pre-selection for next time.
+            if (authMode == HostProfile.KeyAuthMode) profile.PrivateKeyPath = keyPath;
+
+            LastHostKey = profile.Key;
+            Save();
+            return profile;
+        }
+
+        /// <summary>
+        /// Drops a saved host. The caller deletes its secrets (<see cref="SshCredentialStore.ForgetHost"/>);
+        /// this only owns the list.
+        /// </summary>
+        public void ForgetHost(string key)
+        {
+            Hosts.RemoveAll(h => h.Key == key);
+            if (LastHostKey == key) LastHostKey = "";
+            Save();
+        }
+
         // ---- Storage ------------------------------------------------------
 
         private static readonly JsonSerializerOptions Json = new()
@@ -152,7 +232,11 @@ namespace VirtDeck.Services
                 if (File.Exists(FilePath))
                 {
                     var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json);
-                    if (loaded != null) return loaded;
+                    if (loaded != null)
+                    {
+                        loaded.Migrate();
+                        return loaded;
+                    }
                 }
             }
             catch { /* corrupt or unreadable → start fresh rather than fail to launch */ }
@@ -161,8 +245,30 @@ namespace VirtDeck.Services
             // then persist so the import happens exactly once.
             var settings = new AppSettings();
             try { LegacyImporter?.Invoke(settings); } catch { /* legacy read is best-effort */ }
+            settings.Migrate();   // the registry import writes the pre-list fields too
             settings.Save();
             return settings;
+        }
+
+        /// <summary>
+        /// Folds a pre-list settings file's single host into <see cref="Hosts"/>. Runs on every
+        /// load and does nothing once the list has anything in it, so it cannot resurrect a host
+        /// the user has since forgotten.
+        /// </summary>
+        private void Migrate()
+        {
+            if (Hosts.Count != 0 || Host.Length == 0 || Username.Length == 0) return;
+
+            Hosts.Add(new HostProfile
+            {
+                Host = Host,
+                Port = Port,
+                Username = Username,
+                AuthMode = AuthMode,
+                PrivateKeyPath = PrivateKeyPath,
+                LastServerMediaDir = LastServerMediaDir,
+            });
+            LastHostKey = Hosts[0].Key;
         }
 
         /// <summary>Writes the settings file. Never throws.</summary>
