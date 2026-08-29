@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using AvaloniaEdit.Document;
 using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views.Unattend;
@@ -17,9 +18,8 @@ public sealed class ComponentXmlRow : INotifyPropertyChanged
     private UnattendOption? _component;
     private IReadOnlyList<string> _passes = [];
     private string? _pass;
-    private string _xml = "";
 
-    public ComponentXmlRow() { }
+    public ComponentXmlRow() : this(new ComponentXml()) { }
 
     public ComponentXmlRow(ComponentXml entry)
     {
@@ -28,7 +28,10 @@ public sealed class ComponentXmlRow : INotifyPropertyChanged
         _passes = PassesOf(_component);
         _pass = _passes.FirstOrDefault(
             p => string.Equals(p, entry.Pass, StringComparison.OrdinalIgnoreCase)) ?? _passes.FirstOrDefault();
-        _xml = entry.Xml;
+
+        // The markup is the editor's own document rather than a string, for the reason
+        // <see cref="ScriptRow"/> keeps one: AvaloniaEdit's TextEditor exposes no bindable Text.
+        Document = new TextDocument(entry.Xml);
     }
 
     /// <summary>The component dropdown's items. An instance property so the row's DataTemplate can bind it.</summary>
@@ -66,16 +69,10 @@ public sealed class ComponentXmlRow : INotifyPropertyChanged
         }
     }
 
-    public string Xml
-    {
-        get => _xml;
-        set
-        {
-            if (_xml == value) return;
-            _xml = value;
-            Raise(nameof(Xml));
-        }
-    }
+    /// <summary>The markup itself, as the editor's own document.</summary>
+    public TextDocument Document { get; }
+
+    public string Xml => Document.Text;
 
     /// <summary>A row with no markup contributes nothing, so it is dropped rather than generated.</summary>
     public bool IsEmpty => Xml.Trim().Length == 0;

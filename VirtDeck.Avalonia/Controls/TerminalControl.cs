@@ -32,6 +32,20 @@ public sealed class TerminalControl : Control
     private const int ScrollWheelLines = 3;
 
     /// <summary>
+    /// How often the far end may be told about a new size while a drag is still going, and how long
+    /// after the last change the final size is sent anyway. Dragging a window edge produces one size
+    /// change per row or column crossed, and every one the far end hears is a SIGWINCH and a full
+    /// redraw coming back over the wire, so they are throttled rather than forwarded one for one.
+    /// Deferring them all was what made a resize feel late: with nothing sent until the drag stopped,
+    /// the shell's prompt stayed drawn to the old width inside a window that had already changed
+    /// shape. So the first change goes out at once and the drag keeps reporting while it runs, and
+    /// the settle tick is what lands its last step, which a throttle on its own would drop whenever
+    /// it fell inside the window.
+    /// </summary>
+    private const int ResizeThrottleMs = 60;
+    private const int ResizeSettleMs = 150;
+
+    /// <summary>
     /// What Ctrl+wheel may zoom between. Below the lower bound the cell measurement stops being
     /// reliable; above the upper one an 80-column shell no longer fits anything usable on screen.
     /// </summary>
@@ -55,7 +69,21 @@ public sealed class TerminalControl : Control
     private TerminalParser _parser;
 
     private readonly DispatcherTimer _pump;
+    private readonly DispatcherTimer _resizeSettle;
+
+    /// <summary>
+    /// When the far end was last told a size, on the tick clock. Deliberately not long.MinValue:
+    /// the subtraction against it overflows, which would defer the one resize nobody should have to
+    /// wait for, the first layout of a session.
+    /// </summary>
+    private long _lastResizeSent = -ResizeThrottleMs;
     private long _drawnRevision = -1;
+
+    /// <summary>
+    /// How much history the scroll bar was last told about. Starts at -1 so the first tick states it
+    /// rather than assuming a bar that has never been told anything already agrees.
+    /// </summary>
+    private int _drawnScrollback = -1;
 
     private Typeface _plain, _bold, _italic, _boldItalic;
     private double _cellWidth = 8;
@@ -110,7 +138,10 @@ public sealed class TerminalControl : Control
     /// <summary>Bytes for the far end: keystrokes, pasted text, and the parser's own replies.</summary>
     public event Action<byte[]>? Input;
 
-    /// <summary>The grid changed size, in columns and rows. The window debounces and forwards it.</summary>
+    /// <summary>
+    /// The grid changed size, in columns and rows. Already throttled and settled, so a window just
+    /// forwards it to its session; see <see cref="AnnounceResize"/>.
+    /// </summary>
     public event Action<int, int>? TerminalResized;
 
     /// <summary>An OSC title from the far end.</summary>
@@ -148,10 +179,12 @@ public sealed class TerminalControl : Control
         {
             long revision;
             MouseTracking mouse;
+            int scrollback;
             lock (_screen.SyncRoot)
             {
                 revision = _screen.Revision;
                 mouse = _screen.MouseMode;
+                scrollback = _screen.ScrollbackCount;
             }
 
             // The mouse mode is read here rather than pushed from the parser because setting it does
@@ -159,10 +192,25 @@ public sealed class TerminalControl : Control
             // One extra field read under a lock already held is cheaper than either alternative.
             ApplyPointerCursor(mouse);
 
+            // How much history there is changes under the far end's output, and nothing else was
+            // telling anyone: the view was announced only when the user moved it or the control
+            // relayouted, so a bar drawn over a full screen kept its old size and extent, and the
+            // one `clear` throws away (ED 3) went on offering history that had gone. Read here
+            // rather than raised from the screen because a scroll is not a mutation the revision
+            // counter can carry, and this lock is already held.
+            if (scrollback != _drawnScrollback)
+            {
+                _drawnScrollback = scrollback;
+                ViewChanged?.Invoke();
+            }
+
             if (revision == _drawnRevision) return;
             _drawnRevision = revision;
             InvalidateVisual();
         };
+
+        _resizeSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ResizeSettleMs) };
+        _resizeSettle.Tick += (_, _) => { _resizeSettle.Stop(); RaiseResized(); };
     }
 
     private void HookParser()
@@ -185,6 +233,9 @@ public sealed class TerminalControl : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _pump.Stop();
+        // A tick after this would tell the far end about a size nobody is looking at: a module the
+        // shell switched away from is detached, and so is a console window on its way out.
+        _resizeSettle.Stop();
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -266,6 +317,7 @@ public sealed class TerminalControl : Control
             var v = (byte)(8 + i * 10);
             _palette[232 + i] = Color.FromRgb(v, v, v);
         }
+
     }
 
     private IBrush Resolve(TerminalColor colour, bool isForeground)
@@ -295,7 +347,28 @@ public sealed class TerminalControl : Control
         _scroll = 0;
         InvalidateVisual();
         ViewChanged?.Invoke();
-        TerminalResized?.Invoke(cols, rows);
+        AnnounceResize();
+    }
+
+    /// <summary>
+    /// Reports the new geometry at once unless the far end has just been told, and starts the settle
+    /// timer so the size the drag ends on is always the last one sent. Held here rather than in each
+    /// window because both surfaces want the same rule and the control is the one thing that knows a
+    /// resize happened at all.
+    /// </summary>
+    private void AnnounceResize()
+    {
+        _resizeSettle.Stop();
+        _resizeSettle.Start();
+
+        if (Environment.TickCount64 - _lastResizeSent < ResizeThrottleMs) return;
+        RaiseResized();
+    }
+
+    private void RaiseResized()
+    {
+        _lastResizeSent = Environment.TickCount64;
+        TerminalResized?.Invoke(_screen.Cols, _screen.Rows);
     }
 
     // ---- Data in ----------------------------------------------------------
@@ -343,6 +416,7 @@ public sealed class TerminalControl : Control
         }
         HookParser();
         _drawnRevision = -1;
+        _drawnScrollback = -1;
         _scroll = 0;
         _selectStart = _selectEnd = null;
         Live = true;
@@ -842,44 +916,52 @@ public sealed class TerminalControl : Control
 
         if (style.Attrs.HasFlag(CellAttrs.Hidden)) return;
 
-        var text = new StringBuilder(end - start);
+        var underline = style.Attrs.HasFlag(CellAttrs.Underline);
+        var strike = style.Attrs.HasFlag(CellAttrs.Strike);
+
         var blank = true;
-        for (var i = start; i < end; i++)
+        for (var i = start; i < end && blank; i++)
         {
             var rune = cells[i].Rune;
             if (rune != ' ' && rune != 0) blank = false;
-            text.Append(rune == 0 ? ' ' : char.ConvertFromUtf32(rune));
         }
 
-        // Nothing to draw for a run of spaces, and a full screen is mostly those.
-        if (blank && !style.Attrs.HasFlag(CellAttrs.Underline) &&
-            !style.Attrs.HasFlag(CellAttrs.Strike)) return;
+        // Nothing to draw for a run of spaces, and a full screen is mostly those. Tested before the
+        // text is built rather than after, so a blank run costs the scan and nothing else.
+        if (blank && !underline && !strike) return;
+
+        var runText = new StringBuilder(end - start);
+        for (var i = start; i < end; i++)
+        {
+            var rune = cells[i].Rune;
+            runText.Append(rune == 0 ? " " : char.ConvertFromUtf32(rune));
+        }
 
         var bold = style.Attrs.HasFlag(CellAttrs.Bold);
         var italic = style.Attrs.HasFlag(CellAttrs.Italic);
         var face = bold ? (italic ? _boldItalic : _bold) : (italic ? _italic : _plain);
 
-        var formatted = Format(text.ToString(), face, fg);
+        var formatted = Format(runText.ToString(), face, fg);
         if (style.Attrs.HasFlag(CellAttrs.Faint)) formatted.SetForegroundBrush(Fade(fg));
         context.DrawText(formatted, new Point(x, y));
 
-        if (style.Attrs.HasFlag(CellAttrs.Underline))
+        if (underline)
         {
             var uy = y + _baseline + 1;
             context.DrawLine(new Pen(fg), new Point(x, uy), new Point(x + runWidth, uy));
         }
 
-        if (style.Attrs.HasFlag(CellAttrs.Strike))
+        if (strike)
         {
             var sy = y + _cellHeight / 2;
             context.DrawLine(new Pen(fg), new Point(x, sy), new Point(x + runWidth, sy));
         }
     }
 
-    private static IBrush Fade(IBrush brush) =>
-        brush is ISolidColorBrush s
-            ? new SolidColorBrush(s.Color, 0.6)
-            : brush;
+    private static IBrush Fade(IBrush brush)
+    {
+        return brush is ISolidColorBrush solid ? new SolidColorBrush(solid.Color, 0.6) : brush;
+    }
 
     private void DrawCursor(DrawingContext context)
     {

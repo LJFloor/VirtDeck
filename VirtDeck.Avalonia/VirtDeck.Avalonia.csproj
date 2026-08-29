@@ -29,6 +29,15 @@
          this bumps no version and adds no native library. Unused on Windows, where the shell hands
          over pixels directly; carried anyway rather than compile the app differently per RID. -->
     <PackageReference Include="Svg.Skia" Version="5.1.1" />
+    <!-- The compose YAML editor on the Containers module's Stacks tab. Avalonia's TextBox is a
+         text box: no line numbers, no highlighting, and no tab key, and YAML is the one format in
+         this app where a literal tab is a syntax error. 12.0.0 targets net10.0 and asks for
+         Avalonia >= 12.0.0, which the 12.1.1 above satisfies; the managed assembly is 648 KB.
+         AvaloniaEdit.TextMate is deliberately NOT taken: it would pull the whole TextMateSharp
+         grammar bundle in to highlight one language, and Styles/Yaml.xshd does it in 60 lines.
+         The answer-file window's script and markup boxes are the same editor, five of them on the
+         definitions AvaloniaEdit already ships. -->
+    <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,6 +47,10 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+    <!-- The three syntax definitions this app writes itself, read at run time by
+         Controls/CodeHighlighting. Resources rather than embedded strings so they stay editable as
+         XML. The other five languages come from AvaloniaEdit's own resources. -->
+    <AvaloniaResource Include="Styles\*.xshd" />
     <!-- The .ico is a build input for <ApplicationIcon>, not a runtime asset; embedding it as
          well would carry a second copy of every frame in the assembly for nothing. -->
     <AvaloniaResource Remove="Assets\virtdeck.ico" />

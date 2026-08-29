@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  YAML highlighting for the compose editor. Hand written because AvaloniaEdit ships definitions for
+  twenty-odd languages and YAML is not one of them, and because the alternative (AvaloniaEdit.TextMate
+  plus the TextMateSharp grammar bundle) is several megabytes in both release artifacts to highlight
+  one language in one window.
+
+  The colours here are placeholders. Every one is replaced at load time from the themed brushes in
+  JetBrainsClassic.axaml, because a colour fixed in this file would read as syntax on one face and
+  as noise on the other; see Views/Containers/YamlHighlighting.
+-->
+<SyntaxDefinition name="YAML" extensions=".yml;.yaml"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment" foreground="#808080" />
+  <Color name="Key" foreground="#0033B3" />
+  <Color name="String" foreground="#067D17" />
+  <Color name="Number" foreground="#1750EB" />
+  <Color name="Constant" foreground="#0033B3" fontWeight="bold" />
+  <Color name="Anchor" foreground="#9E880D" />
+  <Color name="Directive" foreground="#9E880D" />
+
+  <RuleSet ignoreCase="false">
+
+    <!-- A document marker or a directive, which only ever occupy a whole line. -->
+    <Rule color="Directive">^(---|\.\.\.|%\w+.*)$</Rule>
+
+    <Span color="Comment">
+      <Begin>\#</Begin>
+    </Span>
+
+    <Span color="String" multiline="false">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Span color="String" multiline="false">
+      <Begin>'</Begin>
+      <End>'</End>
+    </Span>
+
+    <!-- The key of a mapping entry, which is what gives a compose file its shape at a glance. The
+         lookahead keeps the colon itself out of the match, so "image: nginx" does not paint the
+         separator, and requiring a space or an end of line after it is what stops a bare "8080:80"
+         inside a ports list reading as a key. -->
+    <Rule color="Key">(?&lt;=^\s*|^\s*-\s+)[\w.\-/]+(?=\s*:(\s|$))</Rule>
+
+    <!-- An anchor, an alias or an explicit tag. -->
+    <Rule color="Anchor">[&amp;*!][\w.\-]+</Rule>
+
+    <Rule color="Constant">\b(true|false|yes|no|on|off|null|True|False|Yes|No|On|Off|Null|NULL|~)\b</Rule>
+
+    <Rule color="Number">\b\d+(\.\d+)?\b</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

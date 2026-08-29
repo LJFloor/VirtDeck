@@ -34,6 +34,13 @@ namespace VirtDeck.Services
         /// </summary>
         public event Action? ImageEventReceived;
 
+        /// <summary>
+        /// The third of the same family, for networks: one was created, destroyed, or had a
+        /// container connected to or disconnected from it. Same tail, same thread, same "no
+        /// payload" contract.
+        /// </summary>
+        public event Action? NetworkEventReceived;
+
         private CancellationTokenSource? _eventCts;
         private Task? _eventTask;
 
@@ -149,16 +156,25 @@ namespace VirtDeck.Services
         // for every `docker exec` and a health_status per health-check interval per container, which
         // on a host running health-checked containers would be a refresh treadmill.
         //
-        // One tail, two subjects: the format is the event's TYPE rather than its action, because the
-        // two tables refresh independently and a pull must not re-list the containers. `create` and
-        // `delete` are spoken by both, which is exactly why the type is what is read.
+        // One tail, three subjects: the format is the event's TYPE rather than its action, because
+        // the three tables refresh independently and a pull must not re-list the containers.
+        // `create` and `delete` and `destroy` are spoken by more than one of them, which is exactly
+        // why the type is what is read.
+        //
+        // The network half adds only `connect` and `disconnect`, because `create` and `destroy` are
+        // already in the list and cover the rest of its vocabulary. Measured by tailing
+        // `docker events --filter type=network` through a create / connect / disconnect / rm / prune
+        // cycle on docker 29.1.3, a network speaks exactly `create`, `connect`, `disconnect`,
+        // `destroy` and `prune`: there is no `remove` action, `docker network rm` emits `destroy`,
+        // and `docker network prune` emits a `destroy` per network as well as its own `prune`.
         private const string EventsCommand =
-            "docker events --filter type=container --filter type=image " +
+            "docker events --filter type=container --filter type=image --filter type=network " +
             "--filter event=create --filter event=destroy --filter event=start --filter event=die " +
             "--filter event=stop --filter event=kill --filter event=pause --filter event=unpause " +
             "--filter event=restart --filter event=rename --filter event=update " +
             "--filter event=pull --filter event=tag --filter event=untag " +
             "--filter event=delete --filter event=import --filter event=load " +
+            "--filter event=connect --filter event=disconnect " +
             "--format '{{.Type}}'";
 
         /// <summary>
@@ -196,6 +212,7 @@ namespace VirtDeck.Services
                             {
                                 case "container": ContainerEventReceived?.Invoke(); break;
                                 case "image": ImageEventReceived?.Invoke(); break;
+                                case "network": NetworkEventReceived?.Invoke(); break;
                             }
                         }, ct);
                     }
@@ -262,7 +279,11 @@ namespace VirtDeck.Services
             DockerVersion = version;
             DaemonState = daemon.Length == 0 ? "unknown" : daemon;
             DockerAvailable = version.Length > 0;
-            Diagnostics.SpiceLog.Log($"[docker] version='{version}' daemon='{DaemonState}' available={DockerAvailable}");
+
+            ProbeCompose();
+
+            Diagnostics.SpiceLog.Log($"[docker] version='{version}' daemon='{DaemonState}' " +
+                                     $"available={DockerAvailable} compose='{ComposeVersion}'");
             return (DockerVersion, DaemonState);
         }
 
@@ -1170,6 +1191,275 @@ namespace VirtDeck.Services
                 throw new ArgumentException("No image was given.", nameof(references));
         }
 
+        // ---- Networks ---------------------------------------------------------
+
+        // A network is addressed by its id, which the row always carries, but every command still
+        // rides ShellScript.Argv behind a literal `--` rather than being interpolated, so the one
+        // command that does take user text (create, whose name the user typed) needs no special
+        // case. Neither IdRegex nor RequireId is reused here: nothing is interpolated, and that
+        // exception says "Not a container id".
+
+        private List<DockerNetworkInfo> _networks = new();
+
+        public IReadOnlyList<DockerNetworkInfo> Networks => _networks;
+
+        /// <summary>Raised after <see cref="RefreshNetworksAsync"/>, the twin of <see cref="ImagesChanged"/>.</summary>
+        public event Action? NetworksChanged;
+
+        // The whole listing in one round trip, tagged in the first field with real tab separators,
+        // exactly as ImagesScript is. Four record kinds:
+        //
+        //   n  a network, from the one command whose failure means the listing failed
+        //   p  its live endpoint count, subnet and gateway, which `network ls` cannot report
+        //   u  one container and the networks it is *configured* on
+        //   k  `docker ps` could be asked at all
+        //
+        // The two counts are deliberately both here, because they answer different questions.
+        // {{len .Containers}} is live endpoints, which is what `docker network prune` and
+        // `docker network rm` key on; {{.Networks}} on `docker ps --all` includes stopped
+        // containers, which hold no endpoint. Status draws the first so the column can never
+        // disagree with the Prune button beside it; the second is who Disconnect can act on and
+        // what the tooltip warns about, and it costs nothing extra to fetch.
+        //
+        // `[ -n "$ids" ]` is load-bearing rather than tidy: neither GNU nor busybox xargs implies
+        // -r, so on a host with no networks the batch would run `docker network inspect` with no
+        // arguments at all. ImagesScript guards the same way for the same reason.
+        //
+        // `docker network ls` runs twice, so a network created between the two calls arrives with
+        // an `n` record and no `p` record and reads blank for one cycle. The 400 ms debounce and
+        // the poll behind it settle that on the next pass.
+        private const string NetworksScript =
+            "docker network ls --no-trunc " +
+            "--format 'n\t{{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}' || exit $?\n" +
+            "ids=$(docker network ls --quiet --no-trunc 2>/dev/null)\n" +
+            "if [ -n \"$ids\" ]; then\n" +
+            "  printf '%s\\n' \"$ids\" | xargs docker network inspect --format " +
+            "'p\t{{.Id}}\t{{len .Containers}}" +
+            "\t{{range $i, $c := .IPAM.Config}}{{if $i}} {{end}}{{$c.Subnet}}{{end}}" +
+            "\t{{range $i, $c := .IPAM.Config}}{{if $i}} {{end}}{{$c.Gateway}}{{end}}' 2>/dev/null\n" +
+            "fi\n" +
+            "rows=$(docker ps --all --no-trunc --format 'u\t{{.ID}}\t{{.Names}}\t{{.Networks}}' " +
+            "2>/dev/null) && echo k\n" +
+            "[ -n \"$rows\" ] && printf '%s\\n' \"$rows\"\n" +
+            "exit 0";
+
+        private List<DockerNetworkInfo> FetchNetworks()
+        {
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(NetworksScript));
+
+            var list = new List<DockerNetworkInfo>();
+            var stats = new Dictionary<string, (int Live, string Subnet, string Gateway)>(StringComparer.Ordinal);
+            var members = new List<(string Id, string Name, string[] Networks)>();
+            var membersKnown = false;
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                // No cap on the split: a network name, a container name and a driver are all
+                // [a-zA-Z0-9][a-zA-Z0-9_.-]*, so no field can contain a tab. A `p` record for host
+                // or none ends in two empty fields, which Split keeps.
+                var f = line.TrimEnd('\r').Split('\t');
+
+                if (f[0] == "k") { membersKnown = true; continue; }
+
+                if (f[0] == "p")
+                {
+                    if (f.Length >= 5 && f[1].Trim().Length > 0 && int.TryParse(f[2].Trim(), out var live))
+                        stats[f[1].Trim()] = (live, f[3].Trim(), f[4].Trim());
+                    continue;
+                }
+
+                if (f[0] == "u")
+                {
+                    if (f.Length < 4 || f[1].Trim().Length == 0) continue;
+                    var on = f[3].Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(n => n.Trim())
+                                 .Where(n => n.Length > 0)
+                                 .ToArray();
+                    if (on.Length > 0) members.Add((f[1].Trim(), f[2].Trim(), on));
+                    continue;
+                }
+
+                if (f.Length < 5 || f[0] != "n" || string.IsNullOrWhiteSpace(f[1])) continue;
+
+                list.Add(new DockerNetworkInfo
+                {
+                    Id = f[1].Trim(),
+                    Name = f[2].Trim(),
+                    Driver = f[3].Trim(),
+                    Scope = f[4].Trim(),
+                });
+            }
+
+            // Only once the whole listing is read: the p, u and k records arrive after the
+            // networks, exactly as FetchImages' usage half does.
+            foreach (var network in list)
+            {
+                if (stats.TryGetValue(network.Id, out var stat))
+                {
+                    network.LiveEndpoints = stat.Live;
+                    network.Subnet = stat.Subnet;
+                    network.Gateway = stat.Gateway;
+                }
+
+                network.MembersKnown = membersKnown;
+
+                // Matched by name, and the match is many-valued on purpose: `docker ps` reports the
+                // network's name and docker does not guarantee one name per id across scopes, so a
+                // name-keyed dictionary would silently drop a row.
+                network.Members = members
+                    .Where(m => m.Networks.Contains(network.Name, StringComparer.Ordinal))
+                    .Select(m => new DockerNetworkMember(m.Id, m.Name))
+                    .ToList();
+            }
+
+            return list;
+        }
+
+        public async Task RefreshNetworksAsync()
+        {
+            _networks = await Task.Run(FetchNetworks);
+            NetworksChanged?.Invoke();
+        }
+
+        /// <summary>What <see cref="CreateNetworkAsync"/> is asked for. Empty means "do not pass the flag".</summary>
+        public sealed record NetworkCreateRequest(
+            string Name,
+            string Driver = "",
+            string Subnet = "",
+            string Gateway = "",
+            string IpRange = "",
+            bool Internal = false,
+            bool Attachable = false,
+            bool EnableIpv6 = false);
+
+        /// <summary>
+        /// Creates a network. The name is user text and is the reason this whole family goes
+        /// through <see cref="ShellScript.Argv"/> behind a literal <c>--</c>.
+        /// </summary>
+        public Task CreateNetworkAsync(NetworkCreateRequest request) => Task.Run(() =>
+        {
+            var argv = new List<string> { "docker", "network", "create" };
+            if (request.Driver.Trim().Length > 0) { argv.Add("-d"); argv.Add(request.Driver.Trim()); }
+            if (request.Subnet.Trim().Length > 0) { argv.Add("--subnet"); argv.Add(request.Subnet.Trim()); }
+            if (request.Gateway.Trim().Length > 0) { argv.Add("--gateway"); argv.Add(request.Gateway.Trim()); }
+            if (request.IpRange.Trim().Length > 0) { argv.Add("--ip-range"); argv.Add(request.IpRange.Trim()); }
+            if (request.Internal) argv.Add("--internal");
+            if (request.Attachable) argv.Add("--attachable");
+            if (request.EnableIpv6) argv.Add("--ipv6");
+            argv.Add("--");
+            argv.Add(request.Name.Trim());
+
+            Diagnostics.SpiceLog.Log($"[docker] network create {request.Name.Trim()}");
+            RunArgv(argv);
+        });
+
+        /// <summary>
+        /// Removes one network.
+        ///
+        /// <para>There is no force path, and that is not an omission: <c>-f</c> on
+        /// <c>docker network rm</c> means only "do not error if it does not exist". A network with
+        /// live endpoints is a refusal docker owns, and it is reported in docker's own words the
+        /// way <c>groupdel</c>'s is in the accounts module.</para>
+        /// </summary>
+        public Task RemoveNetworkAsync(string id) => Task.Run(() =>
+        {
+            try { RunArgv("docker", "network", "rm", "--", id); }
+            catch (Exception ex) { throw new Exception(StripExitStatus(ex.Message), ex); }
+        });
+
+        /// <summary>
+        /// Drops a trailing bare "exit status N" line off a message.
+        ///
+        /// <para><c>docker network rm</c> writes the daemon's refusal <i>and</i> a bare
+        /// "exit status 1" line, both to stderr (measured on docker 29.1.3; no other network
+        /// command does it), and <see cref="SshConnectionManager.RunSudoCommand"/> merges stderr
+        /// into stdout. Without this a refusal reads "...has active endpoints / exit status 1",
+        /// where the second line says nothing the dialog has not already said.</para>
+        /// </summary>
+        private static string StripExitStatus(string message)
+        {
+            var lines = message.Replace("\r\n", "\n").TrimEnd('\n', ' ').Split('\n');
+            if (lines.Length > 1 && ExitStatusRegex.IsMatch(lines[^1].Trim()))
+                return string.Join('\n', lines[..^1]).TrimEnd();
+            return message;
+        }
+
+        private static readonly Regex ExitStatusRegex = new(@"^exit status \d+$");
+
+        /// <summary>Removes every network nothing is running on, answering docker's own report.</summary>
+        public Task<string> PruneNetworksAsync() =>
+            Task.Run(() => RunArgv("docker", "network", "prune", "--force"));
+
+        /// <summary>
+        /// Attaches a container to a network, optionally at a fixed address. <paramref name="ip"/>
+        /// only works on a user-defined network; docker refuses it elsewhere in its own words.
+        /// </summary>
+        public Task ConnectAsync(string networkId, string containerId, string ip = "") => Task.Run(() =>
+        {
+            var argv = new List<string> { "docker", "network", "connect" };
+            if (ip.Trim().Length > 0) { argv.Add("--ip"); argv.Add(ip.Trim()); }
+            argv.Add("--");
+            argv.Add(networkId);
+            argv.Add(containerId);
+            RunArgv(argv);
+        });
+
+        /// <summary>
+        /// Detaches a container from a network. Works on a stopped container, which is why the
+        /// picker behind it lists what is <i>configured</i> rather than what is running.
+        ///
+        /// <para><c>--force</c> is deliberately not offered: it is for a container the daemon
+        /// cannot reach, which is not a state this table can tell anybody they are in.</para>
+        /// </summary>
+        public Task DisconnectAsync(string networkId, string containerId) =>
+            Task.Run(() => RunArgv("docker", "network", "disconnect", "--", networkId, containerId));
+
+        private IReadOnlyList<string>? _networkDrivers;
+
+        /// <summary>
+        /// What the create dialog's driver box suggests. Probed once per session, because a driver
+        /// list changes only when somebody installs a plugin, and answered from the built-ins when
+        /// the probe fails, the same "union the built-ins in rather than trust the listing to
+        /// arrive" move <see cref="FetchCatalog"/> makes for the network picker.
+        ///
+        /// <para><c>host</c> and <c>null</c> are dropped: docker predefines one of each and refuses
+        /// to create a second. The box is an AutoCompleteBox rather than a picker, so a driver that
+        /// is not on this list can still be typed and docker can still refuse it.</para>
+        /// </summary>
+        public Task<IReadOnlyList<string>> NetworkDriversAsync() => Task.Run<IReadOnlyList<string>>(() =>
+        {
+            if (_networkDrivers is { } cached) return cached;
+
+            var found = new List<string>();
+            try
+            {
+                // Prints a Go slice: "[bridge host ipvlan macvlan null overlay]".
+                var raw = _ssh.RunSudoCommand(
+                    ShellScript.Argv(new[] { "docker", "info", "--format", "{{.Plugins.Network}}" }));
+                found = raw.Trim().Trim('[', ']')
+                           .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                           .Select(d => d.Trim())
+                           .Where(d => d.Length > 0 && d != "host" && d != "null")
+                           .Distinct(StringComparer.Ordinal)
+                           .ToList();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.SpiceLog.Log($"[docker] network drivers unreadable: {ex.Message}");
+            }
+
+            if (found.Count == 0) found = new List<string> { "bridge", "macvlan", "ipvlan", "overlay" };
+            _networkDrivers = found;
+            return found;
+        });
+
+        /// <summary>
+        /// Docker's three predefined networks, which it refuses to remove and which
+        /// <c>docker network prune</c> skips. Keyed by name because docker's own check is.
+        /// </summary>
+        public static bool IsPredefinedNetwork(string name) =>
+            name is "bridge" or "host" or "none";
+
         // ---- Logs -----------------------------------------------------------
 
         /// <summary>
@@ -1342,5 +1632,536 @@ namespace VirtDeck.Services
             }
             return string.Empty;
         }
+
+        // ---- Stacks -----------------------------------------------------------
+
+        // A stack is a docker compose project. Compose is a CLI plugin rather than part of the
+        // daemon, so it is genuinely absent on plenty of hosts, and the split below is what lets
+        // this work anyway: **listing needs no plugin at all**. Compose stamps every container it
+        // creates with com.docker.compose.project, so one `docker ps` over that label answers which
+        // projects exist, which containers belong to each, and where each project's files are.
+        // `docker compose ls` is deliberately not used: it discovers projects by exactly that label
+        // scan, so it would put a hard dependency on the plugin in front of information `docker ps`
+        // already carries.
+        //
+        // What the plugin is genuinely needed for is up, down and pull, which read the file.
+        // Start, stop and restart do not: they act on containers, and the listing already carries
+        // their ids. So a host with no plugin still lists its stacks and still starts and stops
+        // them, which is the "absent tooling is a stated answer" rule taken as far as it goes.
+        //
+        // The one thing labels cannot answer is a project that is fully down: with no containers
+        // there are no labels, and it is invisible to docker itself. That is why StacksRoot exists.
+        // It is the state, it is on the host rather than in settings.json, and it is a directory
+        // rather than a file because that makes it legible to somebody at a terminal.
+
+        /// <summary>
+        /// Where VirtDeck keeps the compose files it wrote: one subdirectory per stack, each holding
+        /// a single <c>docker-compose.yml</c>.
+        ///
+        /// <para>This directory is the app's record of a stack, and the only description of one that
+        /// is fully down. It lives on the host and not in <c>settings.json</c> for the reason the
+        /// Docker Hub login is not stored either: the fact belongs to the machine being managed, it
+        /// has to outlive the session, and two clients pointed at one host must agree about it.</para>
+        /// </summary>
+        public const string StacksRoot = "/var/lib/virtdeck/stacks";
+
+        private List<DockerStackInfo> _stacks = new();
+
+        public IReadOnlyList<DockerStackInfo> Stacks => _stacks;
+
+        /// <summary>Raised after <see cref="RefreshStacksAsync"/>, the twin of <see cref="NetworksChanged"/>.</summary>
+        public event Action? StacksChanged;
+
+        /// <summary>
+        /// Whether <c>docker compose</c> answered. False until the listing says otherwise, the same
+        /// safe default <see cref="DockerAvailable"/> takes, and re-read on every listing rather
+        /// than latched, so installing the plugin mid-session is not a dead end.
+        /// </summary>
+        public bool ComposeAvailable { get; private set; }
+
+        /// <summary>e.g. "2.29.7", or "" when the plugin is not installed.</summary>
+        public string ComposeVersion { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// Asks whether the compose plugin is there, from the capability probe rather than only from
+        /// the stacks listing.
+        ///
+        /// <para>It has to be here because the Stacks tab is <b>disabled</b> without it, and a tab
+        /// that had to be entered before it could be enabled would never enable. The listing keeps
+        /// its own <c>v</c> tag so the version stays current while the page is open; this is what
+        /// decides whether the page can be opened at all.</para>
+        ///
+        /// <para>Through <c>sudo</c>, unlike the two probes above it, and that is not incidental: a
+        /// CLI plugin is per user, every docker command this service runs is elevated, and so it is
+        /// <i>root's</i> plugin directory that decides whether <c>sudo docker compose</c> works. It
+        /// raises no prompt, because the sudo password was already accepted at the login window.</para>
+        /// </summary>
+        private void ProbeCompose()
+        {
+            ComposeAvailable = false;
+            ComposeVersion = string.Empty;
+            if (!DockerAvailable) return;
+
+            try
+            {
+                var raw = _ssh.RunSudoCommand("docker compose version --short 2>/dev/null || true");
+                var line = LastLine(raw).Trim().TrimStart('v', 'V');
+
+                // A version and not merely some output: without the plugin docker prints its own
+                // "unknown command" advice, and any of it reaching ComposeVersion would put a
+                // sentence where the status bar expects a number.
+                if (line.Length > 0 && char.IsDigit(line[0]))
+                {
+                    ComposeVersion = line;
+                    ComposeAvailable = true;
+                }
+            }
+            catch
+            {
+                // Same rule as the two probes above: a missing tool answers absent, never throws.
+            }
+        }
+
+        // Compose's own project-name rule. Strict, because this is what VirtDeck will *create*, and
+        // because it is what makes StackDirectory safe to build: the same split IsValidNewUserName
+        // draws between creating a name and addressing one that is already on the host.
+        private static readonly Regex StackNameRegex = new("^[a-z0-9][a-z0-9_-]{0,62}$");
+
+        /// <summary>Whether compose would accept this as a project name, and so whether VirtDeck may create it.</summary>
+        public static bool IsValidStackName(string name) => StackNameRegex.IsMatch(name);
+
+        /// <summary>
+        /// Folds arbitrary text toward <see cref="IsValidStackName"/>, for suggesting a project name
+        /// from the directory a dropped compose file sits in.
+        ///
+        /// <para>It sits beside the rule rather than apart from it, for the reason
+        /// <c>UserAccountService.SuggestUserName</c> sits beside <c>IsValidNewUserName</c>: a
+        /// suggestion the app would then refuse is worse than no suggestion. Answers empty where
+        /// nothing usable survives, which the caller treats as having nothing to suggest.</para>
+        /// </summary>
+        public static string SanitizeStackName(string text)
+        {
+            var folded = new StringBuilder();
+            foreach (var c in text.ToLowerInvariant())
+            {
+                if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')
+                    folded.Append(c);
+                else if (folded.Length > 0 && folded[^1] != '-')
+                    folded.Append('-');
+            }
+
+            // A project name must start with a letter or a digit and may not end on the separator
+            // this fold introduces.
+            var result = folded.ToString().Trim('-').TrimStart('_');
+            return result.Length > 63 ? result[..63] : result;
+        }
+
+        /// <summary>The twin of <see cref="RequireId"/>: what stops a name reaching a path by interpolation.</summary>
+        private static void RequireStackName(string name)
+        {
+            if (!IsValidStackName(name))
+                throw new ArgumentException($"Not a stack name: '{name}'.", nameof(name));
+        }
+
+        /// <summary>The directory a VirtDeck-created stack lives in.</summary>
+        public static string StackDirectory(string name) => $"{StacksRoot}/{name}";
+
+        /// <summary>The compose file a VirtDeck-created stack is written to.</summary>
+        public static string StackComposeFile(string name) => $"{StackDirectory(name)}/docker-compose.yml";
+
+        /// <summary>
+        /// Whether a compose file path is one of ours, which is the single rule deciding whether a
+        /// stack can be edited and deleted. Read off the path rather than off which half of the
+        /// listing produced the record, so a stack sitting in the root that somebody brought up by
+        /// hand from a terminal is still correctly ours.
+        /// </summary>
+        public static bool IsManagedPath(string path) =>
+            path.StartsWith(StacksRoot + "/", StringComparison.Ordinal);
+
+        // Six record kinds. Only the `m` command carries `|| exit $?`, because it is the one whose
+        // failure means the listing failed; everything else is a best-effort half fenced off from
+        // the exit status, so a host that answers half the questions still gets a table.
+        //
+        // The path labels are two further `docker ps` runs rather than extra columns on `m`, so that
+        // every record keeps at most one unbounded field and keeps it last. `m` needs no cap on its
+        // split at all: a project, service and container name are each [a-zA-Z0-9][a-zA-Z0-9_.-]*,
+        // a state is one word and an id is hex, so no field of it can contain a tab. All three runs
+        // are inside the one SSH round trip, the way NetworksScript runs three commands in one.
+        //
+        // The `c` half folds the [ -f ] test in on the host rather than asking a second time later:
+        // the labels record where a project's files *were* when it came up, and a checkout can be
+        // deleted out from under a running stack, so whether the file is still there is a live
+        // question and it is what up and down are gated on.
+        private const string StacksScript =
+            "root=" + StacksRoot + "\n" +
+            "L=com.docker.compose.project\n" +
+            "docker ps --all --no-trunc --filter \"label=$L\" --format " +
+            "'m\t{{.Label \"com.docker.compose.project\"}}\t{{.Label \"com.docker.compose.service\"}}\t" +
+            "{{.Label \"com.docker.compose.oneoff\"}}\t{{.State}}\t{{.ID}}\t{{.Names}}' || exit $?\n" +
+            "echo k\n" +
+            "docker ps --all --no-trunc --filter \"label=$L\" --format " +
+            "'w\t{{.Label \"com.docker.compose.project\"}}\t" +
+            "{{.Label \"com.docker.compose.project.working_dir\"}}' 2>/dev/null | sort -u\n" +
+            "docker ps --all --no-trunc --filter \"label=$L\" --format " +
+            "'{{.Label \"com.docker.compose.project\"}}\t" +
+            "{{.Label \"com.docker.compose.project.config_files\"}}' 2>/dev/null | sort -u | " +
+            "while IFS=$'\\t' read -r p c; do\n" +
+            "  [ -n \"$p\" ] || continue\n" +
+            "  first=${c%%,*}\n" +
+            "  e=0\n" +
+            "  if [ -n \"$first\" ] && [ -f \"$first\" ]; then e=1; fi\n" +
+            "  printf 'c\\t%s\\t%s\\t%s\\n' \"$p\" \"$e\" \"$c\"\n" +
+            "done\n" +
+            "if [ -d \"$root\" ]; then\n" +
+            "  for f in \"$root\"/*/docker-compose.yml; do\n" +
+            "    [ -f \"$f\" ] || continue\n" +
+            "    d=${f%/docker-compose.yml}\n" +
+            "    printf 'd\\t%s\\n' \"${d##*/}\"\n" +
+            "  done\n" +
+            "fi\n" +
+            "cv=$(docker compose version --short 2>/dev/null) || cv=\n" +
+            "[ -n \"$cv\" ] && printf 'v\\t%s\\n' \"$cv\"\n" +
+            "exit 0";
+
+        private List<DockerStackInfo> FetchStacks()
+        {
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(StacksScript));
+
+            // Reset before the parse, not after a failed one: the plugin can be uninstalled as well
+            // as installed, and the answer on screen has to be this listing's rather than an older
+            // one's. A thrown listing leaves the previous answer alone, which is right, because
+            // then nothing was learned.
+            ComposeAvailable = false;
+            ComposeVersion = string.Empty;
+
+            var members = new Dictionary<string, List<DockerStackMember>>(StringComparer.Ordinal);
+            var workdirs = new Dictionary<string, string>(StringComparer.Ordinal);
+            var configs = new Dictionary<string, (bool Present, string Files)>(StringComparer.Ordinal);
+            var dirs = new HashSet<string>(StringComparer.Ordinal);
+            var membersKnown = false;
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = line.TrimEnd('\r').Split('\t');
+
+                switch (f[0])
+                {
+                    case "k":
+                        membersKnown = true;
+                        break;
+
+                    case "v":
+                        if (f.Length >= 2 && f[1].Trim().Length > 0)
+                        {
+                            ComposeVersion = f[1].Trim();
+                            ComposeAvailable = true;
+                        }
+                        break;
+
+                    case "d":
+                        if (f.Length >= 2 && f[1].Trim().Length > 0) dirs.Add(f[1].Trim());
+                        break;
+
+                    case "w":
+                        if (f.Length >= 3 && f[1].Trim().Length > 0 && f[2].Trim().Length > 0)
+                            workdirs[f[1].Trim()] = f[2].Trim();
+                        break;
+
+                    case "c":
+                        if (f.Length >= 4 && f[1].Trim().Length > 0)
+                            configs[f[1].Trim()] = (f[2].Trim() == "1", f[3].Trim());
+                        break;
+
+                    case "m":
+                        // project, service, oneoff, state, id, name
+                        if (f.Length < 7 || f[1].Trim().Length == 0) break;
+                        // A `compose run` container carries the project label but is not part of the
+                        // stack, and counting it would put a phantom service in the table.
+                        if (string.Equals(f[3].Trim(), "True", StringComparison.OrdinalIgnoreCase)) break;
+                        var project = f[1].Trim();
+                        if (!members.TryGetValue(project, out var list))
+                            members[project] = list = new List<DockerStackMember>();
+                        list.Add(new DockerStackMember(f[5].Trim(), f[6].Trim(), f[2].Trim(), f[4].Trim()));
+                        break;
+                }
+            }
+
+            // The union of the two halves: a project with containers, a directory in the stacks
+            // root, or both. Neither is a superset, which is the whole point of reading both.
+            var names = new HashSet<string>(members.Keys, StringComparer.Ordinal);
+            names.UnionWith(dirs);
+
+            var stacks = new List<DockerStackInfo>();
+            foreach (var name in names)
+            {
+                var files = new List<string>();
+                var present = false;
+
+                if (configs.TryGetValue(name, out var cfg))
+                {
+                    files = cfg.Files.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                     .Select(p => p.Trim())
+                                     .Where(p => p.Length > 0)
+                                     .ToList();
+                    present = cfg.Present;
+                }
+
+                var workdir = workdirs.TryGetValue(name, out var w) ? w : string.Empty;
+
+                // Nothing said where this project's files are, but there is a directory of our own
+                // named after it. That is the down-and-still-known case, and the `d` record only
+                // fires for a directory whose compose file exists, so the file is there by
+                // construction.
+                if (files.Count == 0 && dirs.Contains(name))
+                {
+                    files.Add(StackComposeFile(name));
+                    present = true;
+                    if (workdir.Length == 0) workdir = StackDirectory(name);
+                }
+
+                stacks.Add(new DockerStackInfo
+                {
+                    Name = name,
+                    WorkingDir = workdir,
+                    ConfigFiles = files,
+                    ConfigPresent = present,
+                    Managed = files.Count > 0 && IsManagedPath(files[0]),
+                    Members = members.TryGetValue(name, out var m)
+                        ? m
+                        : new List<DockerStackMember>(),
+                    MembersKnown = membersKnown,
+                });
+            }
+
+            return stacks;
+        }
+
+        public async Task RefreshStacksAsync()
+        {
+            _stacks = await Task.Run(FetchStacks);
+            StacksChanged?.Invoke();
+        }
+
+        // ---- Stack commands ---------------------------------------------------
+
+        // Compose is always invoked with the project spelled out in full: the name, the project
+        // directory and every config file. Resolving a project from its name alone is undocumented
+        // behaviour, and both the managed and the discovered case know their paths, so nothing here
+        // needs to rely on it. The project directory matters as much as the files do, because it is
+        // what a relative bind mount and a .env are resolved against.
+        private static List<string> ComposeArgv(DockerStackInfo stack, params string[] verb)
+        {
+            var argv = new List<string> { "docker", "compose", "-p", stack.Name };
+            if (stack.WorkingDir.Length > 0)
+            {
+                argv.Add("--project-directory");
+                argv.Add(stack.WorkingDir);
+            }
+            foreach (var file in stack.ConfigFiles)
+            {
+                argv.Add("-f");
+                argv.Add(file);
+            }
+            argv.AddRange(verb);
+            return argv;
+        }
+
+        private void RequireCompose()
+        {
+            if (!ComposeAvailable)
+                throw new InvalidOperationException(
+                    "The docker compose plugin is not installed on this host.");
+        }
+
+        private static void RequireConfig(DockerStackInfo stack)
+        {
+            if (!stack.ConfigPresent)
+                throw new InvalidOperationException(
+                    stack.ConfigFiles.Count == 0
+                        ? $"Nothing on the host says where {stack.Name}'s compose file is."
+                        : $"The compose file this stack was built from is no longer on the host: " +
+                          $"{stack.ConfigFiles[0]}");
+        }
+
+        /// <summary>
+        /// One streaming compose command, in <see cref="LoadImageFromHostAsync"/>'s shape.
+        ///
+        /// <para>The <c>2&gt;&amp;1</c> is load-bearing and its placement doubly so.
+        /// <c>RunSudoCommandStreaming</c> reads stdout only, and compose writes every line of its
+        /// progress to stderr, so without it a deploy shows an empty strip and looks hung. It goes
+        /// inside the inner bash rather than on the <c>sudo</c> so sudo's own stderr is not merged
+        /// into the transcript, which is the rule <see cref="TailLogsAsync"/> already follows.</para>
+        /// </summary>
+        private Task RunComposeAsync(IReadOnlyList<string> argv, Action<string>? onLine, CancellationToken ct) =>
+            Task.Run(() =>
+            {
+                var script = ShellScript.ArrayFrom("a", argv) + "\"${a[@]}\" 2>&1\n";
+                _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(script), line =>
+                {
+                    var text = line.Trim();
+                    if (text.Length > 0) onLine?.Invoke(text);
+                }, ct);
+            }, ct);
+
+        /// <summary>Creates and starts everything the compose file describes, and removes what it no longer does.</summary>
+        public Task ComposeUpAsync(DockerStackInfo stack, Action<string>? onLine, CancellationToken ct)
+        {
+            RequireCompose();
+            RequireConfig(stack);
+            Diagnostics.SpiceLog.Log($"[docker] compose up {stack.Name}");
+            return RunComposeAsync(ComposeArgv(stack, "up", "-d", "--remove-orphans"), onLine, ct);
+        }
+
+        /// <summary>
+        /// Removes the stack's containers and the networks compose created for it. Named volumes
+        /// survive unless <paramref name="removeVolumes"/> says otherwise, which is docker's own
+        /// default and the one the confirmation describes.
+        /// </summary>
+        public Task ComposeDownAsync(DockerStackInfo stack, bool removeVolumes,
+                                     Action<string>? onLine, CancellationToken ct)
+        {
+            RequireCompose();
+            RequireConfig(stack);
+            Diagnostics.SpiceLog.Log($"[docker] compose down {stack.Name} volumes={removeVolumes}");
+            var argv = removeVolumes
+                ? ComposeArgv(stack, "down", "--volumes")
+                : ComposeArgv(stack, "down");
+            return RunComposeAsync(argv, onLine, ct);
+        }
+
+        /// <summary>Fetches a newer image for every service, without touching what is running.</summary>
+        public Task ComposePullAsync(DockerStackInfo stack, Action<string>? onLine, CancellationToken ct)
+        {
+            RequireCompose();
+            RequireConfig(stack);
+            Diagnostics.SpiceLog.Log($"[docker] compose pull {stack.Name}");
+            return RunComposeAsync(ComposeArgv(stack, "pull"), onLine, ct);
+        }
+
+        public Task StartStackAsync(DockerStackInfo stack) => LifecycleAsync(stack, "start");
+        public Task StopStackAsync(DockerStackInfo stack) => LifecycleAsync(stack, "stop");
+        public Task RestartStackAsync(DockerStackInfo stack) => LifecycleAsync(stack, "restart");
+
+        /// <summary>
+        /// Start, stop or restart the whole stack.
+        ///
+        /// <para>Compose is preferred where it is usable, because it honours <c>depends_on</c> and
+        /// so brings a stack up and down in the order its author wrote. The fallback is the same
+        /// verb against the member container ids, which is what compose itself would end up issuing,
+        /// and it is what makes these three work on a host with no plugin at all. Neither path needs
+        /// the stack to be deployable: this acts on containers that already exist.</para>
+        /// </summary>
+        private Task LifecycleAsync(DockerStackInfo stack, string verb) => Task.Run(() =>
+        {
+            if (ComposeAvailable && stack.ConfigPresent)
+            {
+                Diagnostics.SpiceLog.Log($"[docker] compose {verb} {stack.Name}");
+                RunArgv(ComposeArgv(stack, verb));
+                return;
+            }
+
+            var ids = stack.Members.Select(m => m.Id).ToList();
+            if (ids.Count == 0)
+                throw new InvalidOperationException(
+                    $"{stack.Name} has no containers to {verb}, and the docker compose plugin is " +
+                    "not installed on this host to create them.");
+
+            foreach (var id in ids) RequireId(id);
+
+            Diagnostics.SpiceLog.Log($"[docker] {verb} {ids.Count} container(s) of {stack.Name}");
+            var argv = new List<string> { "docker", verb, "--" };
+            argv.AddRange(ids);
+            RunArgv(argv);
+        });
+
+        // ---- The compose file itself ------------------------------------------
+
+        /// <summary>What <see cref="ReadStackFileAsync"/> found. A refusal is a value, not an exception, because the window has to draw it.</summary>
+        public sealed record StackFileRead(string Text, string Problem);
+
+        /// <summary>
+        /// One MiB. A compose file is a few KB, and <c>config_files</c> is a path off the host that
+        /// VirtDeck did not choose, so the cap is what stops a wrong one pulling a disk image
+        /// through the command channel.
+        /// </summary>
+        private const long MaxStackFileBytes = 1024 * 1024;
+
+        /// <summary>
+        /// Reads a compose file off the host. Elevated, like every other file this module touches,
+        /// because a stack's directory is routinely root-owned.
+        /// </summary>
+        public Task<StackFileRead> ReadStackFileAsync(string path) => Task.Run(() =>
+        {
+            var script =
+                ShellScript.ArrayFrom("p", new[] { path }) +
+                "f=\"${p[0]}\"\n" +
+                "if [ ! -f \"$f\" ]; then echo missing; exit 0; fi\n" +
+                "s=$(stat -c %s -- \"$f\" 2>/dev/null || echo 0)\n" +
+                $"if [ \"$s\" -gt {MaxStackFileBytes} ]; then echo toobig; exit 0; fi\n" +
+                "echo ok\n" +
+                "base64 -- \"$f\"\n";
+
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(script));
+            var newline = output.IndexOf('\n');
+            var verdict = (newline < 0 ? output : output[..newline]).Trim();
+
+            return verdict switch
+            {
+                "missing" => new StackFileRead(string.Empty, $"There is no file at {path}."),
+                "toobig" => new StackFileRead(string.Empty,
+                    $"{path} is larger than a compose file has any reason to be, so it was not read."),
+                "ok" => new StackFileRead(
+                    ShellScript.Decode(new string(output[(newline + 1)..]
+                        .Where(c => !char.IsWhiteSpace(c)).ToArray())),
+                    string.Empty),
+                _ => new StackFileRead(string.Empty, $"Could not read {path}: {output.Trim()}"),
+            };
+        });
+
+        /// <summary>
+        /// Writes a stack's compose file, creating its directory.
+        ///
+        /// <para>Through <c>RunPipeInAsync</c> rather than the chunked command-line base64 of
+        /// <see cref="VirshService.WriteFile"/>: that one rides the payload on a command line and
+        /// does not create a parent directory, and this is the app's existing road for a payload on
+        /// stdin. Disposing the stream is the EOF <c>cat</c> waits for.</para>
+        /// </summary>
+        public Task WriteStackAsync(string name, string yaml)
+        {
+            RequireStackName(name);
+
+            var body =
+                ShellScript.ArrayFrom("d", new[] { StackDirectory(name) }) +
+                "mkdir -p -- \"${d[0]}\"\n" +
+                "cat > \"${d[0]}/docker-compose.yml\"\n" +
+                "chmod 0644 \"${d[0]}/docker-compose.yml\"\n";
+
+            // Compose is unbothered by either line ending, but a file somebody may go on to edit in
+            // vi on the host should not arrive full of ^M.
+            var bytes = Encoding.UTF8.GetBytes(yaml.Replace("\r\n", "\n"));
+
+            Diagnostics.SpiceLog.Log($"[docker] write stack {name} ({bytes.Length} bytes)");
+            return _ssh.RunPipeInAsync(body, elevated: true,
+                async (stream, ct) => await stream.WriteAsync(bytes, ct),
+                CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Removes a stack's directory from the stacks root, which is what makes VirtDeck forget it.
+        ///
+        /// <para><see cref="RequireStackName"/> first, so the path this builds can only ever be one
+        /// subdirectory of the root: the empty string, a slash, a trailing slash and <c>..</c> are
+        /// all refused by the same test. None of them can occur, because every caller passes a name
+        /// out of the listing; <c>rm -rf</c> is the command where "cannot occur" is not a good
+        /// enough reason not to check, which is the rule the file explorer's delete follows.</para>
+        /// </summary>
+        public Task DeleteStackDirAsync(string name) => Task.Run(() =>
+        {
+            RequireStackName(name);
+            Diagnostics.SpiceLog.Log($"[docker] remove stack directory {name}");
+            var script = ShellScript.ArrayFrom("d", new[] { StackDirectory(name) }) +
+                         "rm -rf -- \"${d[0]}\"\n";
+            _ssh.RunSudoCommand(ShellScript.Wrap(script));
+        });
     }
 }

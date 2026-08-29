@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:fluent="clr-namespace:Avalonia.Themes.Fluent;assembly=Avalonia.Themes.Fluent"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
              xmlns:unattend="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
              x:Class="VirtDeck.Avalonia.App"
              RequestedThemeVariant="Default">
@@ -88,5 +89,21 @@
 
     <!-- The class vocabulary the answer-file window's section pages are written in. -->
     <StyleInclude Source="avares://virtdeck/Styles/UnattendPage.axaml" />
+
+    <!-- AvaloniaEdit brings its own control theme and there is nowhere else to merge it. Used by
+         the compose editor on the Containers module's Stacks tab and by every script and markup box
+         in the answer-file window. -->
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+
+    <!-- Every code box in the app is monospaced at the one font baseline, which AvaloniaEdit's own
+         theme knows nothing about. Here rather than in UnattendPage.axaml because the compose
+         editor is not an answer-file page and this is the one rule the two share; the metrics of an
+         embedded box are that file's .script class. Options and colours cannot be set from a style
+         and are in Controls/CodeEditor. -->
+    <Style Selector="edit|TextEditor">
+      <Setter Property="FontFamily" Value="monospace" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="LineNumbersForeground" Value="{DynamicResource JbCodeLineNumber}" />
+    </Style>
   </Application.Styles>
 </Application>

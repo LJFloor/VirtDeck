@@ -1,0 +1,38 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.NetworkAttachDialog"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="AcceptButton" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Container" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="0" Grid.Column="1" Name="ContainerBox" HorizontalAlignment="Stretch" />
+
+        <!-- The address row is hidden outright when disconnecting, because it does not apply to
+             that operation at all, which is the Network page's own rule for the port mappings on
+             host and none. Connecting to a predefined network keeps the row and disables the box
+             with its reason, because there the field exists and cannot be used. -->
+        <TextBlock Grid.Row="1" Grid.Column="0" Name="IpLabel" Text="IP address"
+                   VerticalAlignment="Center" />
+        <Border Grid.Row="1" Grid.Column="1" Name="IpHost">
+          <TextBox Name="IpBox" PlaceholderText="optional, e.g. 10.10.0.5" />
+        </Border>
+      </Grid>
+
+      <TextBlock Name="NoteText" Classes="note" TextWrapping="Wrap" />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

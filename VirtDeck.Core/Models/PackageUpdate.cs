@@ -99,6 +99,43 @@ namespace VirtDeck.Models
         public string ListFailure { get; set; } = string.Empty;
 
         public int SecurityCount => Updates.Count(u => u.IsSecurity);
+
+        /// <summary>
+        /// How long ago the package index this listing read was last synced, or null where the
+        /// manager does not say.
+        ///
+        /// Only pacman fills it in, and it is on the catalog rather than in that manager because it
+        /// is a property of the answer and not of the tool: an empty table means "up to date as of
+        /// this long ago", and on a host whose index nobody has synced for a week that is a different
+        /// statement from the one the same empty table makes a minute after a refresh. apt and dnf
+        /// could answer it as easily and have not needed to, since neither can be looked at without
+        /// its Refresh button having always worked.
+        /// </summary>
+        public TimeSpan? IndexAge { get; set; }
+
+        /// <summary>
+        /// <see cref="IndexAge"/> in words, or empty where there is none. Here rather than in a view
+        /// because both status slots and the empty state say it, and one wording is the point.
+        ///
+        /// Coarse on purpose: the exact minute is never the question. What a reader is deciding is
+        /// whether the list in front of them is worth trusting, and "6 days ago" answers that where
+        /// "8 641 minutes ago" makes them do the arithmetic.
+        /// </summary>
+        public string IndexAgeText
+        {
+            get
+            {
+                if (IndexAge is not { } age) return string.Empty;
+
+                if (age < TimeSpan.FromMinutes(2)) return "just now";
+                if (age < TimeSpan.FromHours(2)) return Plural((int)age.TotalMinutes, "minute");
+                if (age < TimeSpan.FromDays(2)) return Plural((int)age.TotalHours, "hour");
+                return Plural((int)age.TotalDays, "day");
+            }
+        }
+
+        private static string Plural(int count, string unit) =>
+            $"{count} {unit}{(count == 1 ? "" : "s")} ago";
     }
 
     /// <summary>
@@ -110,7 +147,12 @@ namespace VirtDeck.Models
     /// </summary>
     /// <param name="Phase">Which half of the upgrade this belongs to.</param>
     /// <param name="Percent">0 to 100 within that phase, or null for "no number here".</param>
-    /// <param name="Current">The package or file the tool named, or empty.</param>
+    /// <param name="Current">
+    /// The package or file the tool named, on its own, or empty. The progress strip draws
+    /// <paramref name="Line"/> rather than this, because the tool's own phrasing reads better beside
+    /// a bar than a bare name does; this is the parsed half, and it is what the dnf5 branch's comment
+    /// about reading the second token as the subject is about.
+    /// </param>
     /// <param name="Line">The tool's own words, for the status text when there is nothing better.</param>
     public sealed record UpgradeProgress(UpgradePhase Phase, double? Percent, string Current, string Line);
 
@@ -121,12 +163,16 @@ namespace VirtDeck.Models
     }
 
     /// <summary>
-    /// One past transaction, as the manager's own history records it. Deliberately three strings and
-    /// no parsed date: the three logs word themselves differently, and reformatting a host's own
-    /// timestamp buys nothing a reader wants. Sorting is the log's order, newest first.
+    /// One past transaction, as the manager's own history records it. Four strings and no parsed
+    /// date, because nothing above this sorts or filters on the timestamp: sorting is the log's own
+    /// order, newest first. The three logs do word themselves differently, so the one column a reader
+    /// compares across hosts is normalised on the way in by <c>PackageScripts.When</c>, which states
+    /// there what it keeps and what it drops.
     /// </summary>
     public class UpdateTransaction
     {
+        /// <summary>Already in the table's spelling, <c>yyyy-MM-dd HH:mm</c>, or the log's own words
+        /// where it was not an ISO date.</summary>
         public string When { get; set; } = string.Empty;
 
         /// <summary>"Upgrade", "Install", "Remove", or whatever the log called it.</summary>

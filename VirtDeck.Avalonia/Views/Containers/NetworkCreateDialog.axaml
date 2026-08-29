@@ -1,0 +1,66 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Containers.NetworkCreateDialog"
+        Title="New network"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="CreateButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Driver" VerticalAlignment="Center" />
+        <!-- An AutoCompleteBox rather than a ComboBox, for the reason the container editor's image
+             field is one: it has to suggest what the host has and still accept a plugin driver
+             that is on no list. -->
+        <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="DriverBox"
+                         FilterMode="StartsWith" MinimumPrefixLength="0" />
+      </Grid>
+
+      <HeaderedContentControl Header="Addressing" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+
+          <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Subnet" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="SubnetBox" PlaceholderText="10.10.0.0/24" />
+
+            <!-- Both boxes hang off a Border because a disabled control is not hit-testable in
+                 Avalonia, so the tooltip saying why has to sit on an enabled parent. -->
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Gateway" VerticalAlignment="Center" />
+            <Border Grid.Row="1" Grid.Column="1" Name="GatewayHost">
+              <TextBox Name="GatewayBox" PlaceholderText="10.10.0.1" />
+            </Border>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="IP range" VerticalAlignment="Center" />
+            <Border Grid.Row="2" Grid.Column="1" Name="RangeHost">
+              <TextBox Name="RangeBox" PlaceholderText="10.10.0.128/25" />
+            </Border>
+          </Grid>
+
+          <TextBlock Classes="note" TextWrapping="Wrap"
+                     Text="Leave the subnet empty and docker allocates one from its own pool, which is what a network for two containers to find each other by name wants." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <StackPanel Classes="options">
+        <CheckBox Name="InternalBox" Content="Internal (no route out of the network)" />
+        <CheckBox Name="AttachableBox" Content="Attachable (containers may be connected by hand)" />
+        <CheckBox Name="Ipv6Box" Content="Enable IPv6" />
+      </StackPanel>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

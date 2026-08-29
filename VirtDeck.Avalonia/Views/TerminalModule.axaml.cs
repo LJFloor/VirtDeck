@@ -23,19 +23,10 @@ namespace VirtDeck.Avalonia.Views;
 /// </summary>
 public partial class TerminalModule : UserControl, IModule
 {
-    /// <summary>
-    /// How long a resize has to settle before the far end is told, copied from the container
-    /// console: dragging the window edge produces one of these per frame, and each is a
-    /// window-change request on the wire plus a SIGWINCH and a full redraw in the shell.
-    /// </summary>
-    private const int ResizeSettleMs = 150;
-
     private const double MinFontSize = 8;
     private const double MaxFontSize = 32;
 
     private SshConnectionManager? _ssh;
-
-    private readonly DispatcherTimer _resizeDebounce;
 
     private SshPtySession? _session;
     private CancellationTokenSource? _cts;
@@ -57,15 +48,10 @@ public partial class TerminalModule : UserControl, IModule
         // what decides how many columns fit, not something being lined up with a label.
         Terminal.FontSize = ClampFontSize(AppSettings.Current.TerminalFontSize);
 
-        _resizeDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ResizeSettleMs) };
-        _resizeDebounce.Tick += (_, _) =>
-        {
-            _resizeDebounce.Stop();
-            _session?.Resize(Terminal.Columns, Terminal.Rows);
-        };
-
         Terminal.Input += OnTerminalInput;
-        Terminal.TerminalResized += (_, _) => { _resizeDebounce.Stop(); _resizeDebounce.Start(); };
+
+        // Throttled and settled by the control itself, so this is the whole forwarding rule.
+        Terminal.TerminalResized += (cols, rows) => _session?.Resize(cols, rows);
         Terminal.ViewChanged += SyncScrollBar;
 
         Scroll.Scroll += (_, _) =>
@@ -127,12 +113,11 @@ public partial class TerminalModule : UserControl, IModule
     /// `tail -f` left running is still running, and has caught up in one repaint, on the way back.
     /// It is the same exception the `virsh event --loop` and `docker events` tails already take.
     ///
-    /// Only the resize debounce stops, because a timer that fires while hidden would tell the far
-    /// end about a size nobody can see.
+    /// Nothing here stops the session: the control is detached with the page, which is what stops
+    /// its repaint pump and its resize reporting, so a hidden module tells the far end nothing.
     /// </summary>
     public void Deactivate()
     {
-        _resizeDebounce.Stop();
         SaveFontSize();
     }
 

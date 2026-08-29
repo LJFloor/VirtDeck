@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Registry file (.reg) highlighting for the answer file's registry scripts. Hand written for the
+  reason Yaml.xshd is: AvaloniaEdit ships definitions for twenty-odd languages and regedit's export
+  format is not one of them.
+
+  The colours here are placeholders. Every one is replaced at load time from the themed brushes in
+  JetBrainsClassic.axaml; see Controls/CodeHighlighting.
+-->
+<SyntaxDefinition name="Registry" extensions=".reg"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment" foreground="#808080" />
+  <Color name="String" foreground="#067D17" />
+  <Color name="Number" foreground="#1750EB" />
+  <Color name="Keywords" foreground="#0033B3" />
+  <Color name="Key" foreground="#871094" />
+  <Color name="Directive" foreground="#9E880D" />
+
+  <RuleSet ignoreCase="true">
+
+    <!-- The version line, which regedit requires as the first line of the file and which is the one
+         line here that is neither a key nor a value. The words are joined with \s rather than with
+         spaces because AvalonEdit compiles these patterns with IgnorePatternWhitespace, under which
+         a literal space is not part of the pattern at all. -->
+    <Rule color="Directive">^\s*(Windows\s+Registry\s+Editor\s+Version\s+.*|REGEDIT4)\s*$</Rule>
+
+    <Span color="Comment">
+      <Begin>;</Begin>
+    </Span>
+
+    <!-- A key, whole line, including the leading hyphen that means delete it. -->
+    <Rule color="Key">^\s*\[-?[^\]\r\n]*\]</Rule>
+
+    <!-- The default value of a key is written @= rather than as a named one. -->
+    <Rule color="Key">^\s*@(?=\s*=)</Rule>
+
+    <!-- A value name on the left of the = and string data on the right are both quoted, so one span
+         covers both. -->
+    <Span color="String" multiline="false">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- The type prefix in front of everything that is not a string: dword:, qword:, hex: and the
+         hex(n): family that spells out a registry type by number. -->
+    <Rule color="Keywords">\b(dword|qword|hex(\(\w+\))?)(?=:)</Rule>
+
+    <!-- Hex data. Nothing else outside a string or a comment can be read this way by now: the
+         version line, the key and the type prefix have each been matched in full above. -->
+    <Rule color="Number">\b[0-9a-f]+\b</Rule>
+
+  </RuleSet>
+
+</SyntaxDefinition>

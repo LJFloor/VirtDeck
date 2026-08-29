@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using AvaloniaEdit.Document;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views.Unattend;
@@ -35,7 +37,6 @@ public sealed class ScriptRow : INotifyPropertyChanged
     private UnattendOption _stage;
     private UnattendOption _kind;
     private IReadOnlyList<UnattendOption> _kinds;
-    private string _content;
 
     public ScriptRow() : this(new UnattendScript()) { }
 
@@ -49,7 +50,12 @@ public sealed class ScriptRow : INotifyPropertyChanged
         var kind = Find(AllKinds, script.Kind.ToString());
         _kind = _kinds.Contains(kind) ? kind : _kinds[0];
 
-        _content = script.Content;
+        // The editor edits a document rather than a string: AvaloniaEdit's TextEditor exposes no
+        // bindable Text, and a document is the right thing for a row to own anyway, since it
+        // survives the DataTemplate rebuilding the editor around it. The row goes on announcing
+        // Content so the page's script count still follows what is typed.
+        Document = new TextDocument(script.Content);
+        Document.TextChanged += (_, _) => Raise(nameof(Content));
     }
 
     /// <summary>The stage dropdown's items. An instance property so the row's DataTemplate can bind it.</summary>
@@ -71,6 +77,7 @@ public sealed class ScriptRow : INotifyPropertyChanged
             Raise(nameof(Stage));
             Raise(nameof(Kinds));
             Raise(nameof(Kind));
+            Raise(nameof(Language));
         }
     }
 
@@ -84,19 +91,28 @@ public sealed class ScriptRow : INotifyPropertyChanged
             if (value == null || ReferenceEquals(_kind, value)) return;
             _kind = value;
             Raise(nameof(Kind));
+            Raise(nameof(Language));
         }
     }
 
-    public string Content
+    /// <summary>The script itself, as the editor's own document.</summary>
+    public TextDocument Document { get; }
+
+    public string Content => Document.Text;
+
+    /// <summary>
+    /// What the box holds, which is the language the chosen kind is written in. The .reg and .cmd
+    /// kinds have no definition in AvaloniaEdit and are two of the three this app writes itself.
+    /// </summary>
+    public CodeLanguage Language => _kind.Id switch
     {
-        get => _content;
-        set
-        {
-            if (_content == value) return;
-            _content = value;
-            Raise(nameof(Content));
-        }
-    }
+        nameof(ScriptKind.Ps1) => CodeLanguage.PowerShell,
+        nameof(ScriptKind.Cmd) => CodeLanguage.Batch,
+        nameof(ScriptKind.Reg) => CodeLanguage.Registry,
+        nameof(ScriptKind.Vbs) => CodeLanguage.VBScript,
+        nameof(ScriptKind.Js) => CodeLanguage.JavaScript,
+        _ => CodeLanguage.None,
+    };
 
     /// <summary>A row nobody typed anything into. Dropped rather than embedded as an empty file.</summary>
     public bool IsEmpty => Content.Trim().Length == 0;

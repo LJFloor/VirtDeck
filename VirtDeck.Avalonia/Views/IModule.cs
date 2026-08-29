@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using VirtDeck.Services;
+using VirtDeck.Updates;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -63,6 +64,27 @@ public interface IModule
     /// a module stays a TabItem plus a UserControl.
     /// </summary>
     string? BusyReason => null;
+
+    /// <summary>
+    /// The tools this module needs on the host for its tab to be worth drawing at all. The shell
+    /// unions these into one <c>command -v</c> probe, so a module names its own and nothing outside
+    /// it changes: adding a module stays a TabItem plus a UserControl.
+    ///
+    /// Defaulted empty, which is the answer for a module that needs nothing but the SSH connection
+    /// the shell already holds (File explorer and Terminal: a connection implies a filesystem and a
+    /// shell). Such a module is never hidden.
+    /// </summary>
+    IReadOnlyList<string> RequiredTools => [];
+
+    /// <summary>
+    /// Whether this module belongs on this host, given what the probe found. False takes its tab
+    /// out of the side menu entirely.
+    ///
+    /// The default is every required tool present, which is the answer for all but one of them.
+    /// Software updates overrides it because its question is "any of four, weighted by os-release",
+    /// which is <c>PackageManagers.Detect</c> and not a conjunction.
+    /// </summary>
+    bool IsRelevant(HostToolset host) => RequiredTools.All(host.Has);
 
     /// <summary>Raised when either status string changed. The shell repaints only if this module is active.</summary>
     event Action? StatusChanged;

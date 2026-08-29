@@ -358,7 +358,7 @@ namespace VirtDeck.Updates
                 if (when.Length == 0 || action.Length == 0) continue;
                 list.Add(new UpdateTransaction
                 {
-                    When = when,
+                    When = PackageScripts.When(when),
                     Action = action,
                     Packages = Names(packages),
                     Error = error,

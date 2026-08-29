@@ -157,6 +157,25 @@
            this one and too weak on the other. -->
       <SolidColorBrush x:Key="JbLinkForeground" Color="#FF589DF6" />
 
+      <!-- The code editors' tokens, Darcula's own: the compose file on the Stacks tab and the
+           thirteen script and markup boxes in the answer-file window. Themed for the reason the
+           link and the sixteen terminal colours are: a syntax colour fixed in an .xshd would read
+           as syntax on one face and as noise on the other. Every definition carries placeholders
+           and Controls/CodeHighlighting replaces them from these at load time, so this is the only
+           place they are decided. Six of them for eight languages, so a token kind and a colour are
+           deliberately not one to one; the mapping is that file's own table. -->
+      <SolidColorBrush x:Key="JbCodeComment" Color="#FF7A7E85" />
+      <SolidColorBrush x:Key="JbCodeKey" Color="#FF9876AA" />
+      <SolidColorBrush x:Key="JbCodeString" Color="#FF6A8759" />
+      <SolidColorBrush x:Key="JbCodeNumber" Color="#FF6897BB" />
+      <SolidColorBrush x:Key="JbCodeConstant" Color="#FFCC7832" />
+      <SolidColorBrush x:Key="JbCodeAnchor" Color="#FFBBB529" />
+
+      <!-- The line-number gutter, which is chrome rather than syntax and is IntelliJ's own gutter
+           grey: dimmer than the comment colour on purpose, so the numbers stay countable without
+           competing with the code beside them. AvaloniaEdit's default is a flat Brushes.Gray. -->
+      <SolidColorBrush x:Key="JbCodeLineNumber" Color="#FF606366" />
+
       <!-- The container console's own surface and the sixteen colours an escape sequence can name.
            Darcula's terminal palette. The other 240 of the 256 are computed (a 6x6x6 cube and 24
            greys) and are the same on either face, because they are absolute colours; only these
@@ -314,6 +333,16 @@
       <!-- A link out of the app; see the Dark dictionary. IntelliJ Light's, darkened to hold its
            contrast on white. -->
       <SolidColorBrush x:Key="JbLinkForeground" Color="#FF2470B3" />
+
+      <!-- The code tokens on the light face; see the Dark dictionary. IntelliJ Light's own, which
+           are darker rather than different: a key is still violet and a string still green. -->
+      <SolidColorBrush x:Key="JbCodeComment" Color="#FF8C8C8C" />
+      <SolidColorBrush x:Key="JbCodeKey" Color="#FF871094" />
+      <SolidColorBrush x:Key="JbCodeString" Color="#FF067D17" />
+      <SolidColorBrush x:Key="JbCodeNumber" Color="#FF1750EB" />
+      <SolidColorBrush x:Key="JbCodeConstant" Color="#FF0033B3" />
+      <SolidColorBrush x:Key="JbCodeAnchor" Color="#FF9E880D" />
+      <SolidColorBrush x:Key="JbCodeLineNumber" Color="#FF999999" />
 
       <!-- The console on the light face; see the Dark dictionary. The sixteen are darkened rather
            than swapped, because a terminal colour has to keep its identity (red is red) while

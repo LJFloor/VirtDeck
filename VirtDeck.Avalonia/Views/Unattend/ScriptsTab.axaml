@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
              x:Class="VirtDeck.Avalonia.Views.Unattend.ScriptsTab">
 
@@ -45,8 +47,9 @@
                             SelectedItem="{Binding Kind, Mode=TwoWay}" />
                   <Button Grid.Column="4" Content="Remove" Click="RemoveScript" />
                 </Grid>
-                <TextBox Classes="script"
-                         Text="{Binding Content, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <edit:TextEditor Classes="script"
+                                 c:CodeEditor.Language="{Binding Language}"
+                                 Document="{Binding Document}" />
               </StackPanel>
             </Border>
           </DataTemplate>

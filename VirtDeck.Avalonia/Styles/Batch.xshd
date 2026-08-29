@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Batch highlighting, for the answer file's .cmd scripts and for the two Windows PE boxes, which are
+  written in the same language. Hand written for the reason Yaml.xshd is: AvaloniaEdit ships
+  definitions for twenty-odd languages and cmd.exe is not one of them.
+
+  The colours here are placeholders. Every one is replaced at load time from the themed brushes in
+  JetBrainsClassic.axaml; see Controls/CodeHighlighting.
+-->
+<SyntaxDefinition name="Batch" extensions=".cmd;.bat"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment" foreground="#808080" />
+  <Color name="String" foreground="#067D17" />
+  <Color name="Number" foreground="#1750EB" />
+  <Color name="Keywords" foreground="#0033B3" />
+  <Color name="Variable" foreground="#871094" />
+  <Color name="Label" foreground="#9E880D" />
+
+  <RuleSet ignoreCase="true">
+
+    <!-- Both ways of writing a comment. :: is really a label nothing can jump to, so it has to be
+         matched before the label rule below. -->
+    <Span color="Comment">
+      <Begin>::</Begin>
+    </Span>
+
+    <Span color="Comment">
+      <Begin>\brem\b</Begin>
+    </Span>
+
+    <!-- A label, which only ever occupies a whole line. -->
+    <Rule color="Label">^\s*:[\w.\-]+</Rule>
+
+    <!-- A quoted string still expands variables inside it, and "%ProgramFiles%\x" is how half the
+         lines in a real script are written, so the substitutions keep their own colour in there.
+         This is the shape the bundled XML definition uses for entities inside an attribute value. -->
+    <Span color="String" multiline="false" ruleSet="Substitutions">
+      <Begin>"</Begin>
+      <End>"</End>
+    </Span>
+
+    <Import ruleSet="Substitutions" />
+
+    <Keywords color="Keywords">
+      <Word>if</Word>
+      <Word>else</Word>
+      <Word>for</Word>
+      <Word>in</Word>
+      <Word>do</Word>
+      <Word>goto</Word>
+      <Word>call</Word>
+      <Word>exit</Word>
+      <Word>set</Word>
+      <Word>setlocal</Word>
+      <Word>endlocal</Word>
+      <Word>shift</Word>
+      <Word>echo</Word>
+      <Word>on</Word>
+      <Word>off</Word>
+      <Word>not</Word>
+      <Word>exist</Word>
+      <Word>defined</Word>
+      <Word>errorlevel</Word>
+      <Word>equ</Word>
+      <Word>neq</Word>
+      <Word>lss</Word>
+      <Word>leq</Word>
+      <Word>gtr</Word>
+      <Word>geq</Word>
+      <Word>nul</Word>
+      <Word>pause</Word>
+      <Word>start</Word>
+      <Word>cls</Word>
+      <Word>title</Word>
+      <Word>cd</Word>
+      <Word>chdir</Word>
+      <Word>pushd</Word>
+      <Word>popd</Word>
+      <Word>md</Word>
+      <Word>mkdir</Word>
+      <Word>rd</Word>
+      <Word>rmdir</Word>
+      <Word>del</Word>
+      <Word>copy</Word>
+      <Word>xcopy</Word>
+      <Word>move</Word>
+      <Word>ren</Word>
+      <Word>rename</Word>
+      <Word>type</Word>
+      <Word>find</Word>
+      <Word>findstr</Word>
+      <Word>timeout</Word>
+      <Word>choice</Word>
+      <Word>path</Word>
+      <Word>reg</Word>
+      <Word>sc</Word>
+      <Word>net</Word>
+      <Word>wmic</Word>
+      <Word>powershell</Word>
+    </Keywords>
+
+    <Rule color="Number">\b\d+\b</Rule>
+
+  </RuleSet>
+
+  <!-- Everything that stands for something else at run time: %%i inside a script, %1 as an
+       argument, %~dp0 and its family, %PATH% as an environment variable, and !VAR! where delayed
+       expansion is on. -->
+  <RuleSet name="Substitutions" ignoreCase="true">
+    <Rule color="Variable">%%~?[a-z]</Rule>
+    <Rule color="Variable">%~[\w$]*</Rule>
+    <Rule color="Variable">%[\w.:$]+%</Rule>
+    <Rule color="Variable">%\d</Rule>
+    <Rule color="Variable">![\w]+!</Rule>
+  </RuleSet>
+
+</SyntaxDefinition>

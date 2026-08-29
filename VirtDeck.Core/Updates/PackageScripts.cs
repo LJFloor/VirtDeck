@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace VirtDeck.Updates
 {
@@ -50,6 +51,36 @@ namespace VirtDeck.Updates
             int.TryParse(done.Trim(), out var n) && int.TryParse(total.Trim(), out var m) && m > 0
                 ? Math.Clamp(n * 100.0 / m, 0, 100)
                 : null;
+
+        // All three logs open with an ISO date, and nothing else here is a timestamp. Testing for it
+        // is what keeps a bare time out of the parser, which would otherwise be dated today.
+        private static readonly Regex IsoDate = new(@"^\d{4}-\d{2}-\d{2}", RegexOptions.Compiled);
+
+        /// <summary>
+        /// One past transaction's timestamp, as the History table draws it: <c>yyyy-MM-dd HH:mm</c>,
+        /// the spelling the file explorer's Modified column already uses, so this one sorts
+        /// lexicographically too. The three tools word themselves differently, and the widest of them
+        /// is wider than the column: pacman writes full ISO 8601 with a <c>+0200</c> offset, apt puts
+        /// two spaces between the date and the time, dnf's table has dropped the seconds already.
+        ///
+        /// The wall clock is kept exactly as the log states it and the offset is dropped rather than
+        /// converted. apt and dnf log the host's local time with no offset at all, so turning
+        /// pacman's into this client's zone would make one manager's column mean a different thing
+        /// from the other two's, and the reader is being told when the host did something.
+        ///
+        /// Anything that is not an ISO date falls back to the host's own words unchanged, which is
+        /// the same rule the rest of this module follows: a spelling nobody anticipated is reported
+        /// as the tool wrote it rather than guessed at.
+        /// </summary>
+        internal static string When(string raw)
+        {
+            var text = raw.Trim();
+            if (!IsoDate.IsMatch(text)) return text;
+
+            return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+                ? when.DateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+                : text;
+        }
 
         /// <summary>
         /// A base64 blob a script sent back whole, for a payload with newlines in it that would

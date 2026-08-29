@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using VirtDeck.Imaging;
 using VirtDeck.Models;
 using VirtDeck.Services;
+using VirtDeck.Updates;
 using VirtDeck.Unattend;
 
 namespace VirtDeck.Avalonia.Views;
@@ -89,6 +90,13 @@ public partial class VirtualMachinesModule : UserControl, IModule
         NetworkList.SelectedItems?.Cast<NetworkRow>().ToList() ?? new List<NetworkRow>();
 
     // ---- IModule ------------------------------------------------------
+
+    /// <summary>
+    /// Without the libvirt client this module has no command it can run, so its tab is not drawn.
+    /// The test is that virsh is installed and not that libvirtd is up: a stopped daemon is a state
+    /// somebody wants to see reported, and the status slot below is where it is reported.
+    /// </summary>
+    public IReadOnlyList<string> RequiredTools => ["virsh"];
 
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";

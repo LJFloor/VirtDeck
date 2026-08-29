@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit">
 
   <!--
     The shared vocabulary of the answer-file window's section pages. Declared once here rather than
@@ -46,16 +47,30 @@
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
-  <!-- A box holding a script or a fragment of markup: monospaced, no wrapping, scrolls both ways.
-       Several pages take one, so the shape is set here rather than per page. Note that the scroll
-       bars are attached ScrollViewer properties; TextBox has none of its own. -->
-  <Style Selector="TextBox.script">
-    <Setter Property="AcceptsReturn" Value="True" />
-    <Setter Property="TextWrapping" Value="NoWrap" />
-    <Setter Property="FontFamily" Value="monospace" />
+  <!-- A box holding a script or a fragment of markup, and an editor rather than a text box because
+       these are code: line numbers are available, a tab key types a tab, and Controls/CodeEditor
+       paints each one in the colours of whatever language it holds. Several pages take one, so the
+       shape is set here rather than per page; the monospace family, the font baseline and the
+       gutter colour are in App.axaml, since the compose editor wants those too and wants none of
+       the metrics below. Line numbers are here rather than there because whether a box is numbered
+       is a fact about the box: the compose editor asks for its own in its markup.
+
+       The maximum height is what keeps a long script from swallowing the page it is on, and it also
+       bounds what the editor is asked to measure: without it a box in a scrolling page is measured
+       against an unlimited height. -->
+  <Style Selector="edit|TextEditor.script">
+    <Setter Property="ShowLineNumbers" Value="True" />
     <Setter Property="MinHeight" Value="120" />
-    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
-    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="MaxHeight" Value="360" />
+    <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+  </Style>
+
+  <!-- A disabled control tells the user so by going dim, which every Fluent control theme does for
+       itself and AvaloniaEdit's does not. It matters here more than most: most of these boxes sit
+       under a radio button and are inert until it is chosen. -->
+  <Style Selector="edit|TextEditor.script:disabled">
+    <Setter Property="Opacity" Value="0.5" />
   </Style>
 
   <!-- The page itself: one column of group boxes, breathing room against the tab strip. -->

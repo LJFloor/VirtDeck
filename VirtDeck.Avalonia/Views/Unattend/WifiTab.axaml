@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.Unattend.WifiTab">
 
   <ScrollViewer Padding="16">
@@ -42,7 +44,8 @@
 
           <RadioButton Name="WifiProfileRadio" GroupName="WifiMode"
                        Content="Use a WLAN profile exported from another machine:" />
-          <TextBox Name="WifiXmlBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="WifiXmlBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="Xml" />
           <TextBlock Classes="subnote"
                      Text="Produced by netsh.exe wlan export profile key=clear. It is checked against the WLAN profile schema, so a truncated or wrong file is reported here rather than failing silently during Setup." />
 

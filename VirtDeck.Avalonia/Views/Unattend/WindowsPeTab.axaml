@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.Unattend.WindowsPeTab">
 
   <ScrollViewer Padding="16">
@@ -48,7 +50,8 @@
 
           <RadioButton Name="PeScriptRadio" GroupName="PeMode"
                        Content="Replace Windows Setup with this script:" />
-          <TextBox Name="PeScriptBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="PeScriptBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="Batch" />
           <TextBlock Classes="subnote"
                      Text="A .cmd file run inside the PE session. It is on its own from there: nothing below applies to it." />
 
@@ -110,7 +113,8 @@
 
             <RadioButton Name="PartScriptRadio" GroupName="PePartition"
                          Content="Run this diskpart script:" />
-            <TextBox Name="PartScriptBox" Classes="script" Margin="21,0,0,0" />
+            <edit:TextEditor Name="PartScriptBox" Classes="script" Margin="21,0,0,0"
+                             c:CodeEditor.Language="Batch" />
             <TextBlock Classes="subnote"
                        Text="It must assign the letters W: and S: to the Windows and system partitions, and name the disk with a line such as SELECT DISK=0." />
 
@@ -152,7 +156,8 @@
               <RadioButton Name="AssertSkipRadio" GroupName="PeAssert" Content="Check nothing" />
 
               <RadioButton Name="AssertScriptRadio" GroupName="PeAssert" Content="Run this script:" />
-              <TextBox Name="AssertScriptBox" Classes="script" Margin="21,0,0,0" />
+              <edit:TextEditor Name="AssertScriptBox" Classes="script" Margin="21,0,0,0"
+                               c:CodeEditor.Language="VBScript" />
               <TextBlock Classes="subnote"
                          Text="VBScript, run with cscript.exe. Exit with a non-zero code to halt Setup." />
             </StackPanel>

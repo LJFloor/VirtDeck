@@ -4,7 +4,14 @@ namespace VirtDeck.Updates
 {
     /// <summary>
     /// What one probe of the host found: which distribution family it says it is, and which of the
-    /// package tools VirtDeck knows are actually on it, with the first line of each one's version.
+    /// tools it was asked about are actually on it, with the first line of each one's version.
+    ///
+    /// It lives here because the package managers were the first thing to need it, but it is the
+    /// host's toolset generally and not a package-manager fact: <c>HostTools.ProbeAsync</c> fills it
+    /// for whatever list a caller names, and the module side menu asks about <c>virsh</c>,
+    /// <c>docker</c> and <c>systemctl</c> through the same record to decide which of its modules
+    /// belong on this host. Extra tools in the dictionary are invisible to everything here, since
+    /// <see cref="PackageManagers.Detect"/> only ever asks about the ones it knows.
     ///
     /// A value rather than a live connection, so <see cref="PackageManagers.Detect"/> is a pure
     /// function of it and can be read without an SSH session anywhere in sight.
@@ -35,8 +42,8 @@ namespace VirtDeck.Updates
     /// The pair travels together because <b>which of the two runners a script goes to is a property of
     /// the script, not of the call site</b>, and it is not uniform even within one manager: apt's
     /// history log is world readable while dnf's history lives in a root-only sqlite database, and
-    /// pacman's update check deliberately needs no root at all where apt's needs it. A flag per
-    /// interface member would have been three flags drifting apart; this is one answer per script.
+    /// pacman lists what is upgradable with no root at all while syncing the index needs it. A flag
+    /// per interface member would have been three flags drifting apart; this is one answer per script.
     /// </summary>
     /// <param name="Body">A bash script body. The service supplies the wrapper.</param>
     /// <param name="Elevated">Whether it goes through the sudo runner.</param>
@@ -79,9 +86,10 @@ namespace VirtDeck.Updates
         string SecurityUnsupportedReason { get; }
 
         /// <summary>
-        /// Why refreshing the package index is not on offer, or empty when it is. Non-empty only on an
-        /// Arch host without pacman-contrib, where the only refresh pacman itself offers is
-        /// <c>pacman -Sy</c>, which puts the host one package install away from a partial upgrade.
+        /// Why refreshing the package index is not on offer, or empty when it is. Every real manager
+        /// answers empty; it stays on the interface because <see cref="NullPackageManager"/> is the
+        /// case it exists for, and because a manager that cannot safely re-read its index has to be
+        /// able to say so on the disabled button rather than have the button quietly disappear.
         /// </summary>
         string RefreshUnavailableReason { get; }
 
@@ -110,8 +118,8 @@ namespace VirtDeck.Updates
 
         /// <summary>
         /// Re-reads the remote package index, or <see cref="HostScript.None"/> where there is nothing
-        /// safe to run. Elevated for apt and dnf; not for pacman, whose <c>checkupdates</c> syncs into
-        /// a database of its own precisely so it does not have to be.
+        /// to run. Elevated in all three, pacman's included: it syncs into a database of its own so
+        /// the host's is never touched, which is what makes it safe, not what makes it unprivileged.
         /// </summary>
         HostScript RefreshScript { get; }
 
@@ -158,7 +166,7 @@ namespace VirtDeck.Updates
         /// before dnf, because a host with both wants the newer one; and pacman first, because it is
         /// the one tool no other family ships, so its presence is nearly proof on its own.
         /// </summary>
-        public static readonly string[] Probed = { "pacman", "checkupdates", "dnf5", "dnf", "apt-get" };
+        public static readonly string[] Probed = { "pacman", "dnf5", "dnf", "apt-get" };
 
         /// <summary>
         /// <b>os-release decides the preference and <c>command -v</c> decides what is possible.</b>
@@ -169,7 +177,7 @@ namespace VirtDeck.Updates
         public static IPackageManager Detect(HostToolset host)
         {
             if (host.Family("arch", "archarm", "manjaro", "endeavouros") && host.Has("pacman"))
-                return new PacmanPackageManager(host.Has("checkupdates"));
+                return new PacmanPackageManager();
 
             if (host.Family("fedora", "rhel", "centos", "almalinux", "rocky") && Dnf(host) is { } byFamily)
                 return byFamily;
@@ -179,7 +187,7 @@ namespace VirtDeck.Updates
 
             // Nothing in os-release matched, or the family's own tool is not installed. Fall through
             // to whatever is actually there, in the order above.
-            if (host.Has("pacman")) return new PacmanPackageManager(host.Has("checkupdates"));
+            if (host.Has("pacman")) return new PacmanPackageManager();
             if (Dnf(host) is { } present) return present;
             if (host.Has("apt-get")) return new AptPackageManager();
 

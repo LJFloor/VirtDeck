@@ -48,6 +48,11 @@ namespace VirtDeck.Services
         /// What the right-hand status slot says. An unprobed host says it is still looking rather than
         /// claiming there is nothing, because those are different answers and only one of them is
         /// worth acting on.
+        ///
+        /// The index age goes here, in the containers module's <c>docker 29.1.3 · compose 2.29.7</c>
+        /// shape, because it belongs beside the tool rather than beside the count: it qualifies every
+        /// answer the table gives, not just the empty one, and it must not go away the moment a
+        /// listing does have rows in it.
         /// </summary>
         public string CapabilityText
         {
@@ -57,7 +62,11 @@ namespace VirtDeck.Services
                 if (Manager.Id.Length == 0) return "no package manager found";
 
                 var version = PackageManagers.VersionOf(Manager, Host);
-                return version.Length > 0 ? version : Manager.DisplayName;
+                var text = version.Length > 0 ? version : Manager.DisplayName;
+
+                return Catalog.ManagerId == Manager.Id && Catalog.IndexAgeText is { Length: > 0 } age
+                    ? $"{text} · synced {age}"
+                    : text;
             }
         }
 
@@ -93,27 +102,6 @@ namespace VirtDeck.Services
 
         // ---- Probing ---------------------------------------------------------
 
-        // Which distribution the host says it is, and which of the tools VirtDeck knows are on it,
-        // with the first line of each one's version. One round trip, un-elevated, in the tagged-record
-        // idiom.
-        //
-        // The version is asked for here rather than on demand because it is one `--version` per tool
-        // found, which is at most two on any real host, and asking later would mean a second round
-        // trip before the status bar could say anything.
-        //
-        // `. /etc/os-release` is fenced: a host without the file is an ordinary case (it is not
-        // universal), and the tool search below still answers on its own.
-        private const string ProbeBody = """
-            export LC_ALL=C
-            . /etc/os-release 2>/dev/null
-            printf 'o\t%s\t%s\n' "${ID:-}" "${ID_LIKE:-}"
-            for m in TOOLS; do
-              p=$(command -v "$m" 2>/dev/null) || continue
-              printf 'v\t%s\t%s\n' "$m" "$("$p" --version 2>/dev/null | head -n 1)"
-            done
-            exit 0
-            """;
-
         /// <summary>
         /// Finds the host's package manager and caches it. Run on <b>every</b> activation of the
         /// module, not once per session: a host that had nothing when VirtDeck connected may have
@@ -122,11 +110,7 @@ namespace VirtDeck.Services
         /// </summary>
         public async Task<IPackageManager> ProbeAsync(CancellationToken ct = default)
         {
-            var raw = await Task.Run(
-                () => _ssh.RunCommand(ShellScript.Wrap(
-                    ProbeBody.Replace("TOOLS", string.Join(' ', PackageManagers.Probed)))), ct);
-
-            Host = ParseProbe(raw);
+            Host = await HostTools.ProbeAsync(_ssh, PackageManagers.Probed, ct);
             Manager = PackageManagers.Detect(Host);
             _probed = true;
 
@@ -136,40 +120,6 @@ namespace VirtDeck.Services
                 (Manager.Id.Length > 0 ? Manager.DisplayName : "none"));
 
             return Manager;
-        }
-
-        internal static HostToolset ParseProbe(string raw)
-        {
-            var id = string.Empty;
-            var idLike = string.Empty;
-            var tools = new Dictionary<string, string>(StringComparer.Ordinal);
-
-            foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
-            {
-                switch (tag)
-                {
-                    case "o":
-                    {
-                        var f = text.Split('\t', 2);
-                        id = f[0].Trim();
-                        idLike = f.Length > 1 ? f[1].Trim() : string.Empty;
-                        break;
-                    }
-
-                    case "v":
-                    {
-                        // A tool that answered nothing to --version is still installed, so the name is
-                        // what matters and an empty version is a real value. Recording only the ones
-                        // that printed something would hide a working manager behind a quiet binary.
-                        var f = text.Split('\t', 2);
-                        if (f[0].Trim() is { Length: > 0 } name)
-                            tools[name] = f.Length > 1 ? f[1].Trim() : string.Empty;
-                        break;
-                    }
-                }
-            }
-
-            return new HostToolset(id, idLike, tools);
         }
 
         // ---- Listing ---------------------------------------------------------
@@ -206,9 +156,10 @@ namespace VirtDeck.Services
         // ---- Refreshing ------------------------------------------------------
 
         /// <summary>
-        /// Whether Refresh can be offered at all, and why not when it cannot. Non-empty only on an
-        /// Arch host without pacman-contrib; see <see cref="PacmanPackageManager"/> for why VirtDeck
-        /// will not run <c>pacman -Sy</c> in its place.
+        /// Whether Refresh can be offered at all, and why not when it cannot. Only a host with no
+        /// package manager answers with a reason now: every manager VirtDeck knows can re-read its
+        /// index without endangering the host, pacman included, since it syncs into a database of
+        /// its own rather than the host's. See <see cref="PacmanPackageManager"/>.
         /// </summary>
         public string RefreshUnavailableReason =>
             Manager.Id.Length == 0

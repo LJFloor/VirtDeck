@@ -17,11 +17,23 @@
     <x:Double x:Key="ColImageId">110</x:Double>
     <x:Double x:Key="ColCreated">120</x:Double>
     <x:Double x:Key="ColSize">90</x:Double>
+
+    <x:Double x:Key="ColNetName">190</x:Double>
+    <x:Double x:Key="ColNetId">110</x:Double>
+    <x:Double x:Key="ColNetDriver">90</x:Double>
+    <x:Double x:Key="ColNetScope">70</x:Double>
+    <x:Double x:Key="ColNetSubnet">150</x:Double>
+    <x:Double x:Key="ColNetGateway">120</x:Double>
+
+    <x:Double x:Key="ColStackName">200</x:Double>
+    <x:Double x:Key="ColStackStatus">130</x:Double>
+    <x:Double x:Key="ColStackServices">70</x:Double>
+    <x:Double x:Key="ColStackSource">80</x:Double>
   </UserControl.Resources>
 
   <UserControl.Styles>
-    <!-- The amber an image row wears when no container was created from it, which is exactly
-         what Prune would take. Literal rather than themed, for the reason the state dots are:
+    <!-- The amber an image row wears when no container was created from it, and a network row
+         wears when nothing is running on it: in both tables exactly what Prune would take. Literal rather than themed, for the reason the state dots are:
          it is the app's transient amber and it has to mean the same thing on either face.
 
          A class rather than a brush bound off the row, because the other two states want the
@@ -210,6 +222,168 @@
             </ListBox>
 
             <TextBlock Name="ImagesEmptyText" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Networks">
+        <DockPanel>
+
+          <!-- The two commands that need no selection. Create is accented because on this page it
+               is the one command that brings something new onto the host, which is what that class
+               is for. Prune sits with it rather than on the menu because it applies to the whole
+               host, not to a row. No Refresh button: the same `docker events` tail now carries
+               network events too. -->
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Name="CreateNetworkButton" Content="New network…" Classes="accent"
+                      ToolTip.Tip="Create a network containers can be attached to" />
+              <Button Name="PruneNetworksButton" Content="Prune unused…"
+                      ToolTip.Tip="Remove every network no container is running on" />
+            </StackPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Name"       Width="{StaticResource ColNetName}"    FontWeight="SemiBold" />
+              <TextBlock Text="Network ID" Width="{StaticResource ColNetId}"      FontWeight="SemiBold" />
+              <TextBlock Text="Driver"     Width="{StaticResource ColNetDriver}"  FontWeight="SemiBold" />
+              <TextBlock Text="Scope"      Width="{StaticResource ColNetScope}"   FontWeight="SemiBold" />
+              <TextBlock Text="Subnet"     Width="{StaticResource ColNetSubnet}"  FontWeight="SemiBold" />
+              <TextBlock Text="Gateway"    Width="{StaticResource ColNetGateway}" FontWeight="SemiBold" />
+              <TextBlock Text="Status" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="NetworkList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="NetworkMenu">
+                  <MenuItem Name="MenuConnectContainer" Header="Connect container…" />
+                  <MenuItem Name="MenuDisconnectContainer" Header="Disconnect container…" />
+                  <Separator />
+                  <MenuItem Name="MenuRemoveNetwork" Header="Remove…" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:DockerNetworkRow">
+                  <!-- No state dot and no row dimming: a container is doing something, a network is
+                       a fact, and unlike a dangling layer no network is a leftover. -->
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Name}"    Width="{StaticResource ColNetName}"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    <TextBlock Text="{Binding ShortId}" Width="{StaticResource ColNetId}" Opacity="0.75"
+                               FontFamily="monospace" ToolTip.Tip="{Binding Id}" />
+                    <TextBlock Text="{Binding Driver}"  Width="{StaticResource ColNetDriver}" Opacity="0.75" />
+                    <TextBlock Text="{Binding Scope}"   Width="{StaticResource ColNetScope}" Opacity="0.75" />
+                    <TextBlock Text="{Binding Subnet}"  Width="{StaticResource ColNetSubnet}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Subnet}" />
+                    <TextBlock Text="{Binding Gateway}" Width="{StaticResource ColNetGateway}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Gateway}" />
+                    <!-- Blank where the listing could not ask, which is a different answer from
+                         "Unused" and is why the row keeps three states rather than a bool. The
+                         tooltip is where the part Prune does not say goes: how many *stopped*
+                         containers are still configured on a network with no live endpoint. -->
+                    <TextBlock Text="{Binding Status}" Opacity="{Binding StatusOpacity}"
+                               Classes.unused="{Binding IsUnused}"
+                               ToolTip.Tip="{Binding StatusTip}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="NetworksEmptyText" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <!-- The one page disabled whole rather than command by command: with no compose plugin the
+           three commands that matter here cannot run at all. ToolTip.ShowOnDisabled is what lets it
+           still say why, and it is the exception to the enabled-parent-Border rule the rest of the
+           app follows, because a TabItem has no parent of its own to hang one off. -->
+      <TabItem Header="Stacks" Name="StacksTab" ToolTip.ShowOnDisabled="True">
+        <DockPanel>
+
+          <!-- One command, because it is the only one on this page that needs no selection, and it
+               is accented because it is the one that brings something new onto the host. Everything
+               else acts on a stack and so lives on the right-click menu, which is the rule the
+               Networks page above follows. -->
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Name="NewStackButton" Content="New stack…" Classes="accent"
+                      ToolTip.Tip="Write a compose file to this host and bring it up" />
+            </StackPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Name"        Width="{StaticResource ColStackName}"     FontWeight="SemiBold" />
+              <TextBlock Text="Status"      Width="{StaticResource ColStackStatus}"   FontWeight="SemiBold" />
+              <TextBlock Text="Services"    Width="{StaticResource ColStackServices}" FontWeight="SemiBold" />
+              <TextBlock Text="Source"      Width="{StaticResource ColStackSource}"   FontWeight="SemiBold" />
+              <TextBlock Text="Compose file" FontWeight="SemiBold" />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="StackList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="StackMenu">
+                  <MenuItem Name="MenuEditStack" Header="Edit…" />
+                  <MenuItem Name="MenuDeployStack" Header="Deploy" />
+                  <MenuItem Name="MenuPullStack" Header="Pull images" />
+                  <Separator />
+                  <MenuItem Name="MenuStartStack" Header="Start" />
+                  <MenuItem Name="MenuStopStack" Header="Stop" />
+                  <MenuItem Name="MenuRestartStack" Header="Restart" />
+                  <Separator />
+                  <MenuItem Name="MenuDownStack" Header="Down…" />
+                  <MenuItem Name="MenuDeleteStack" Header="Delete…" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:DockerStackRow">
+                  <!-- A stack gets a state dot where a network does not: a stack is a set of
+                       containers and so it is doing something, where a network is a fact. It is
+                       green only when every container is up, because "running" is the wrong thing
+                       to tell somebody whose database container died. -->
+                  <StackPanel Orientation="Horizontal">
+                    <DockPanel Width="{StaticResource ColStackName}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    </DockPanel>
+                    <!-- Blank where the host could not be asked, which is a different answer from
+                         "Not deployed" and is why the row keeps three states rather than a count. -->
+                    <TextBlock Text="{Binding Status}"       Width="{StaticResource ColStackStatus}"
+                               Opacity="0.75" ToolTip.Tip="{Binding StatusTip}" />
+                    <TextBlock Text="{Binding ServiceCount}" Width="{StaticResource ColStackServices}"
+                               Opacity="0.75" />
+                    <TextBlock Text="{Binding Source}"       Width="{StaticResource ColStackSource}"
+                               Opacity="0.75" />
+                    <!-- Dimmed further when the file is gone, the way a broken symlink is dimmed in
+                         the file explorer: the path is still the truth about where it was. -->
+                    <TextBlock Text="{Binding ConfigPath}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ConfigTip}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="StacksEmptyText" Opacity="0.6" IsVisible="False"
                        TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Panel>

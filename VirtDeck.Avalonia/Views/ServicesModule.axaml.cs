@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using VirtDeck.Models;
 using VirtDeck.Services;
+using VirtDeck.Updates;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -222,6 +223,12 @@ public partial class ServicesModule : UserControl, IModule
     private Page Active => _pages[Math.Clamp(Tabs.SelectedIndex, 0, _pages.Length - 1)];
 
     // ---- IModule -------------------------------------------------------
+
+    /// <summary>
+    /// This module manages systemd units and nothing else, so on a host without systemd there is no
+    /// page to draw. Both scopes go through the one binary, so one name covers the pair.
+    /// </summary>
+    public IReadOnlyList<string> RequiredTools => ["systemctl"];
 
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";

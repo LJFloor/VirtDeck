@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              xmlns:u="clr-namespace:VirtDeck.Avalonia.Views.Unattend"
              x:Class="VirtDeck.Avalonia.Views.Unattend.AdvancedTab">
 
@@ -11,7 +13,8 @@
 
           <CheckBox Name="AppLockerCheck" Content="Apply this AppLocker policy:" />
           <StackPanel Name="AppLockerPanel" Classes="under">
-            <TextBox Name="AppLockerXmlBox" Classes="script" />
+            <edit:TextEditor Name="AppLockerXmlBox" Classes="script"
+                             c:CodeEditor.Language="Xml" />
             <TextBlock Classes="note"
                        Text="Export one from a machine that already has the rules you want with Get-AppLockerPolicy -Effective -Xml, or write one by hand. It is checked against AppLocker's own schema, so a truncated or wrong document is reported here rather than being ignored on the installed system." />
             <TextBlock Classes="note"
@@ -51,8 +54,9 @@
                                 SelectedItem="{Binding Pass, Mode=TwoWay}" />
                       <Button Grid.Column="3" Content="Remove" Click="RemoveComponent" />
                     </Grid>
-                    <TextBox Classes="script"
-                             Text="{Binding Xml, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <edit:TextEditor Classes="script"
+                                     c:CodeEditor.Language="Xml"
+                                     Document="{Binding Document}" />
                   </StackPanel>
                 </Border>
               </DataTemplate>

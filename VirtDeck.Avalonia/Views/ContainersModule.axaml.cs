@@ -6,22 +6,35 @@ using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Containers;
 using VirtDeck.Models;
 using VirtDeck.Services;
+using VirtDeck.Updates;
 
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// The Containers module: two tabs over one docker host.
+/// The Containers module: four tabs over one docker host.
 ///
 /// <para><b>Containers</b> is what `docker ps --all` reports, plus creating, editing, starting,
 /// stopping, restarting and removing what it lists, and reading one's log.</para>
 ///
 /// <para><b>Images</b> is what `docker image ls --all` reports, plus pulling one before anything
 /// needs it, moving one to and from this PC as a `docker save` archive, tagging, removing and
-/// pruning. Volumes and networks as objects of their own are still not here.</para>
+/// pruning.</para>
 ///
-/// <para>The two tabs are two subjects on one host, not two views of one fact, which is why each
-/// carries its own toolbar and its own empty state and why only the visible one is polled. What they
-/// share is the module's status slots, the transfer strip at the bottom, and <c>_busy</c>.</para>
+/// <para><b>Networks</b> is what `docker network ls` reports, plus creating one, removing one,
+/// pruning the unused, and attaching or detaching a container. That last pair is the only route
+/// there is: <c>docker create</c> fixes a container's networks and <c>docker update</c> does not
+/// reach them. Volumes as objects of their own are still not here.</para>
+///
+/// <para><b>Stacks</b> is docker compose projects, discovered by the labels compose stamps on the
+/// containers it creates, plus writing a compose file of VirtDeck's own and bringing a project up,
+/// down, or through start, stop and restart. It is the one page disabled whole when its tooling is
+/// missing: deploy, down and pull all read the compose file through the compose plugin, so without
+/// it there is nothing on the page worth opening.</para>
+///
+/// <para>The four tabs are four subjects on one host, not four views of one fact, which is why
+/// each carries its own toolbar and its own empty state and why only the visible one is polled.
+/// What they share is the module's status slots, the transfer strip at the bottom, and
+/// <c>_busy</c>.</para>
 /// </summary>
 public partial class ContainersModule : UserControl, IModule
 {
@@ -35,6 +48,14 @@ public partial class ContainersModule : UserControl, IModule
 
     private readonly ObservableCollection<ImageRow> _imageRows = new();
     private readonly Dictionary<string, ImageRow> _imagesByKey = new(StringComparer.Ordinal);
+
+    private readonly ObservableCollection<DockerNetworkRow> _netRows = new();
+    private readonly Dictionary<string, DockerNetworkRow> _netById = new(StringComparer.Ordinal);
+
+    // Keyed by project name, because a compose project has no id: the string compose stamps on
+    // every container it makes is the whole of its identity.
+    private readonly ObservableCollection<DockerStackRow> _stackRows = new();
+    private readonly Dictionary<string, DockerStackRow> _stacksByName = new(StringComparer.Ordinal);
 
     /// <summary>Open log windows, keyed by container id. They outlive a module switch.</summary>
     private readonly Dictionary<string, ContainerLogsWindow> _logs = new();
@@ -54,9 +75,13 @@ public partial class ContainersModule : UserControl, IModule
     private readonly DispatcherTimer _tickTimer;
     private readonly DispatcherTimer _eventDebounce;
     private readonly DispatcherTimer _imageDebounce;
+    private readonly DispatcherTimer _netDebounce;
+    private readonly DispatcherTimer _stackDebounce;
 
     private bool _refreshing;
     private bool _refreshingImages;
+    private bool _refreshingNets;
+    private bool _refreshingStacks;
     private bool _active;          // false while another module is on screen: no polling, no events
     private bool _listening;       // the docker events tail is a one-off, not per activation
 
@@ -108,6 +133,29 @@ public partial class ContainersModule : UserControl, IModule
         MenuRemoveImage.Click += async (_, _) => await RemoveImagesAsync();
         MenuNewFromImage.Click += async (_, _) => await NewFromImageAsync();
 
+        NetworkList.ItemsSource = _netRows;
+        NetworkList.SelectionChanged += (_, _) => UpdateMenu();
+
+        CreateNetworkButton.Click += async (_, _) => await CreateNetworkAsync();
+        PruneNetworksButton.Click += async (_, _) => await PruneNetworksAsync();
+        MenuConnectContainer.Click += async (_, _) => await AttachAsync(connect: true);
+        MenuDisconnectContainer.Click += async (_, _) => await AttachAsync(connect: false);
+        MenuRemoveNetwork.Click += async (_, _) => await RemoveNetworksAsync();
+
+        StackList.ItemsSource = _stackRows;
+        StackList.SelectionChanged += (_, _) => UpdateMenu();
+        StackList.DoubleTapped += async (_, _) => await EditStackAsync();
+
+        NewStackButton.Click += async (_, _) => await NewStackAsync();
+        MenuEditStack.Click += async (_, _) => await EditStackAsync();
+        MenuDeployStack.Click += async (_, _) => await DeployStackAsync();
+        MenuPullStack.Click += async (_, _) => await PullStackAsync();
+        MenuStartStack.Click += async (_, _) => await StackLifecycleAsync("Starting", r => r.CanStart, s => Docker.StartStackAsync(s));
+        MenuStopStack.Click += async (_, _) => await StackLifecycleAsync("Stopping", r => r.CanStop, s => Docker.StopStackAsync(s));
+        MenuRestartStack.Click += async (_, _) => await StackLifecycleAsync("Restarting", r => r.CanRestart, s => Docker.RestartStackAsync(s));
+        MenuDownStack.Click += async (_, _) => await DownStackAsync();
+        MenuDeleteStack.Click += async (_, _) => await DeleteStackAsync();
+
         // The account cell is the module's, but it is drawn in the shell's status bar, so it is
         // wired here and handed over through StatusWidget rather than sitting in this markup.
         _hub.LoginClicked += async () => await HubLoginAsync();
@@ -125,6 +173,7 @@ public partial class ContainersModule : UserControl, IModule
         {
             if (!ReferenceEquals(e.Source, Tabs)) return;
             UpdateStatusCount();
+            SyncCaps();
             UpdateMenu();
             await RefreshActiveAsync();
         };
@@ -164,6 +213,17 @@ public partial class ContainersModule : UserControl, IModule
         _imageDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _imageDebounce.Tick += async (_, _) => { _imageDebounce.Stop(); await RefreshImagesAsync(); };
 
+        // The network half, debounced separately for the same reason: attaching one container
+        // fires a connect of its own and must not re-list the images.
+        _netDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _netDebounce.Tick += async (_, _) => { _netDebounce.Stop(); await RefreshNetworksAsync(); };
+
+        // The stacks half. It is fed by the *container* events rather than by a type of its own:
+        // compose speaks no event vocabulary, a deploy surfaces as ordinary container and network
+        // events, so the tail script and its filters are unchanged.
+        _stackDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _stackDebounce.Tick += async (_, _) => { _stackDebounce.Stop(); await RefreshStacksAsync(); };
+
         UpdateMenu();
     }
 
@@ -178,10 +238,33 @@ public partial class ContainersModule : UserControl, IModule
     private List<ImageRow> SelectedImages =>
         ImageList.SelectedItems?.Cast<ImageRow>().ToList() ?? new List<ImageRow>();
 
-    /// <summary>True while the Images page is the one on screen.</summary>
-    private bool OnImages => Tabs.SelectedIndex == 1;
+    private List<DockerNetworkRow> SelectedNetworks =>
+        NetworkList.SelectedItems?.Cast<DockerNetworkRow>().ToList() ?? new List<DockerNetworkRow>();
+
+    private List<DockerStackRow> SelectedStacks =>
+        StackList.SelectedItems?.Cast<DockerStackRow>().ToList() ?? new List<DockerStackRow>();
+
+    /// <summary>The four subjects this module draws, in tab order.</summary>
+    private enum Tab { Containers, Images, Networks, Stacks }
+
+    /// <summary>
+    /// The page on screen.
+    ///
+    /// <para>The clamp is not padding: <c>SelectedIndex</c> is -1 transiently, which the bool this
+    /// replaced absorbed by answering false, and a bare cast would put <c>(Tab)(-1)</c> through
+    /// every switch below and match none of them. <c>ServicesModule</c> clamps its own tab index
+    /// for exactly this reason.</para>
+    /// </summary>
+    private Tab Current => (Tab)Math.Clamp(Tabs.SelectedIndex, 0, (int)Tab.Stacks);
 
     // ---- IModule ------------------------------------------------------
+
+    /// <summary>
+    /// No docker CLI, no tab. The daemon being down is a different answer and keeps the tab, which
+    /// is what draws "dockerd inactive" in the status slot; only the client being absent takes the
+    /// module off the menu.
+    /// </summary>
+    public IReadOnlyList<string> RequiredTools => ["docker"];
 
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";
@@ -212,6 +295,7 @@ public partial class ContainersModule : UserControl, IModule
         _docker = new DockerService(ssh);
         _docker.ContainerEventReceived += OnContainerEvent;
         _docker.ImageEventReceived += OnImageEvent;
+        _docker.NetworkEventReceived += OnNetworkEvent;
 
         // Not for listing anything here: it is what the image dialogs hand their RemotePathBox so a
         // server path can be browsed for rather than typed from memory. It lists as root, which is
@@ -260,6 +344,8 @@ public partial class ContainersModule : UserControl, IModule
         _tickTimer.Stop();
         _eventDebounce.Stop();
         _imageDebounce.Stop();
+        _netDebounce.Stop();
+        _stackDebounce.Stop();
     }
 
     private void StartTimers()
@@ -286,6 +372,7 @@ public partial class ContainersModule : UserControl, IModule
         if (_docker is not { } docker) return;
         docker.ContainerEventReceived -= OnContainerEvent;
         docker.ImageEventReceived -= OnImageEvent;
+        docker.NetworkEventReceived -= OnNetworkEvent;
         try { docker.StopEventListener(); } catch { /* ignore */ }
     }
 
@@ -295,27 +382,47 @@ public partial class ContainersModule : UserControl, IModule
         // started here would only buy a round trip nobody sees.
         if (!_active) return;
 
-        // A container event moves the *image* table too, and only since it grew a Status column:
-        // creating or removing a container is the one thing that flips an image between "In use" and
-        // "Unused". So the event refreshes whichever table is on screen rather than only its own,
-        // which keeps the rule that the invisible one is never polled.
-        if (OnImages)
-        {
-            _imageDebounce.Stop();
-            _imageDebounce.Start();
-            return;
-        }
-
-        _eventDebounce.Stop();
-        _eventDebounce.Start();
+        // A container event moves the other two tables too, and in both cases only because they
+        // grew a Status column: creating or removing a container is the one thing that flips an
+        // image between "In use" and "Unused", and starting or stopping one is the one thing that
+        // flips a network between "Unused" and a count, because a stopped container holds no
+        // endpoint. So the event refreshes whichever table is on screen rather than only its own,
+        // which keeps the rule that the invisible ones are never polled.
+        //
+        // The stacks table needs it for a stronger reason than a column: a stack *is* its
+        // containers, so a container event is the only thing that ever moves that table. Compose
+        // speaks no event vocabulary of its own, which is why nothing was added to the tail.
+        Debounce(Current);
     });
 
     private void OnImageEvent() => Dispatcher.UIThread.Post(() =>
     {
-        if (!_active || !OnImages) return;
-        _imageDebounce.Stop();
-        _imageDebounce.Start();
+        if (!_active || Current != Tab.Images) return;
+        Debounce(Tab.Images);
     });
+
+    private void OnNetworkEvent() => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_active || Current != Tab.Networks) return;
+        Debounce(Tab.Networks);
+    });
+
+    /// <summary>
+    /// Restarts one page's coalescing timer. Bursts are the rule rather than the exception: one
+    /// `docker run` fires create, start and connect between them.
+    /// </summary>
+    private void Debounce(Tab tab)
+    {
+        var timer = tab switch
+        {
+            Tab.Images => _imageDebounce,
+            Tab.Networks => _netDebounce,
+            Tab.Stacks => _stackDebounce,
+            _ => _eventDebounce,
+        };
+        timer.Stop();
+        timer.Start();
+    }
 
     // ---- Refresh ------------------------------------------------------
 
@@ -328,12 +435,15 @@ public partial class ContainersModule : UserControl, IModule
             if (!Docker.DockerAvailable)
             {
                 SetCaps("docker not installed");
-                // Both tables, not just the one on screen: a tab whose message never arrived would
+                // Every table, not just the one on screen: a tab whose message never arrived would
                 // read as a host with no images rather than a host with no docker.
                 var message = "Docker was not found on this host.\n\n" +
                               "Install it there and reconnect to manage containers from here.";
                 ShowEmpty(EmptyText, message);
                 ShowEmpty(ImagesEmptyText, message);
+                ShowEmpty(NetworksEmptyText, message);
+                ShowEmpty(StacksEmptyText, message);
+                SyncStacksTab();
                 UpdateMenu();
                 return;
             }
@@ -341,6 +451,8 @@ public partial class ContainersModule : UserControl, IModule
             SetCaps(string.Equals(daemon, "active", StringComparison.OrdinalIgnoreCase)
                 ? $"docker {version}"
                 : $"docker {version} · dockerd {daemon}");
+
+            SyncStacksTab();
         }
         catch
         {
@@ -348,8 +460,14 @@ public partial class ContainersModule : UserControl, IModule
         }
     }
 
-    /// <summary>Reads whichever table is on screen. The hidden one is read on the way back to it.</summary>
-    private Task RefreshActiveAsync() => OnImages ? RefreshImagesAsync() : RefreshAsync();
+    /// <summary>Reads whichever table is on screen. The hidden ones are read on the way back to them.</summary>
+    private Task RefreshActiveAsync() => Current switch
+    {
+        Tab.Images => RefreshImagesAsync(),
+        Tab.Networks => RefreshNetworksAsync(),
+        Tab.Stacks => RefreshStacksAsync(),
+        _ => RefreshAsync(),
+    };
 
     private async Task RefreshAsync()
     {
@@ -405,10 +523,131 @@ public partial class ContainersModule : UserControl, IModule
         }
     }
 
+    private async Task RefreshNetworksAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _refreshingNets) return;
+        _refreshingNets = true;
+        try
+        {
+            await Docker.RefreshNetworksAsync();
+            MergeNetworks(Docker.Networks);
+            UpdateStatusCount();
+            if (_netRows.Count == 0)
+                ShowEmpty(NetworksEmptyText, "No networks on this host.\n\n" +
+                                             "That is unusual: docker predefines bridge, host and none.");
+            else
+                NetworksEmptyText.IsVisible = false;
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Refresh failed: {ex.Message}");
+            if (_netRows.Count == 0)
+                ShowEmpty(NetworksEmptyText, $"Could not list networks:\n\n{ex.Message}");
+        }
+        finally
+        {
+            _refreshingNets = false;
+            UpdateMenu();
+        }
+    }
+
+    private async Task RefreshStacksAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _refreshingStacks) return;
+        _refreshingStacks = true;
+        try
+        {
+            await Docker.RefreshStacksAsync();
+            MergeStacks(Docker.Stacks);
+            UpdateStatusCount();
+
+            // The compose version rides the same listing rather than a probe of its own, so it is
+            // known by the time there is a table to draw, and it is re-read on every pass:
+            // installing the plugin mid-session must not be a dead end.
+            SyncCaps();
+
+            // The listing carries its own version tag, so an install or a removal that happened
+            // while this page was open is picked up without waiting for the next activation.
+            SyncStacksTab();
+
+            if (_stackRows.Count == 0)
+                ShowEmpty(StacksEmptyText, "No compose stacks on this host.");
+            else
+                StacksEmptyText.IsVisible = false;
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Refresh failed: {ex.Message}");
+            if (_stackRows.Count == 0)
+                ShowEmpty(StacksEmptyText, $"Could not list stacks:\n\n{ex.Message}");
+        }
+        finally
+        {
+            _refreshingStacks = false;
+            UpdateMenu();
+            SyncCaps();
+        }
+    }
+
+    /// <summary>
+    /// Repaints the right-hand status slot for whichever tab is on screen. The stacks page adds the
+    /// compose version to it; the other three have nothing to say about compose and a fact about it
+    /// would be noise above the images table.
+    /// </summary>
+    private void SyncCaps()
+    {
+        if (_docker is null || !Docker.DockerAvailable) return;
+
+        var docker = string.Equals(Docker.DaemonState, "active", StringComparison.OrdinalIgnoreCase)
+            ? $"docker {Docker.DockerVersion}"
+            : $"docker {Docker.DockerVersion} · dockerd {Docker.DaemonState}";
+
+        // The version rides along on the page it belongs to. There is no "no compose plugin" case
+        // to draw: without it the page is disabled and says so on hover instead.
+        SetCaps(Current == Tab.Stacks && Docker.ComposeAvailable
+            ? $"{docker} · compose {Docker.ComposeVersion}"
+            : docker);
+    }
+
+    /// <summary>
+    /// Enables or disables the Stacks tab as a whole.
+    ///
+    /// <para>This is the one page in the app disabled whole rather than command by command, and the
+    /// reason is that without the compose plugin the three commands the page exists for cannot run
+    /// at all: deploy, down and pull each read the compose file through it. Leaving the page open
+    /// would offer a table of things nothing on it could act on.</para>
+    ///
+    /// <para>It still states its reason on hover, which a disabled control normally cannot do,
+    /// because a <c>TabItem</c> has no enabled parent <c>Border</c> to hang a tooltip off the way
+    /// <c>CheckRow</c> and <c>ServiceRow</c> do. <c>ToolTip.ShowOnDisabled</c> in the markup is what
+    /// buys that, and this is the only place in the app that needs it.</para>
+    ///
+    /// <para>Compose is re-probed on every activation while the answer is no, so installing the
+    /// plugin mid-session is not a dead end: leave the module and come back and the tab is there.</para>
+    /// </summary>
+    private void SyncStacksTab()
+    {
+        if (_docker is null) return;
+
+        var have = Docker.DockerAvailable && Docker.ComposeAvailable;
+        StacksTab.IsEnabled = have;
+        ToolTip.SetTip(StacksTab, have
+            ? null
+            : "The docker compose plugin was not found on this host.");
+
+        // Avalonia leaves a disabled tab selected rather than moving on, so a page that goes away
+        // under the user has to hand them somewhere to be.
+        if (!have && Current == Tab.Stacks) Tabs.SelectedIndex = (int)Tab.Containers;
+    }
+
     /// <summary>The left status slot, which says what the table on screen holds.</summary>
-    private void UpdateStatusCount() => SetStatus(OnImages
-        ? $"{_imageRows.Count} image{(_imageRows.Count == 1 ? "" : "s")}"
-        : $"{_rows.Count} container{(_rows.Count == 1 ? "" : "s")}");
+    private void UpdateStatusCount() => SetStatus(Current switch
+    {
+        Tab.Images => $"{_imageRows.Count} image{(_imageRows.Count == 1 ? "" : "s")}",
+        Tab.Networks => $"{_netRows.Count} network{(_netRows.Count == 1 ? "" : "s")}",
+        Tab.Stacks => $"{_stackRows.Count} stack{(_stackRows.Count == 1 ? "" : "s")}",
+        _ => $"{_rows.Count} container{(_rows.Count == 1 ? "" : "s")}",
+    });
 
     private static void ShowEmpty(TextBlock label, string message)
     {
@@ -485,6 +724,74 @@ public partial class ContainersModule : UserControl, IModule
         }
     }
 
+    /// <summary>
+    /// The same merge for networks, keyed by the id alone: unlike an image, a network appears
+    /// exactly once whatever it is called.
+    /// </summary>
+    private void MergeNetworks(IReadOnlyList<DockerNetworkInfo> networks)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // User-defined first and docker's predefined three last, for the reason images put dangling
+        // layers last: the rows somebody came to look at are the ones they made.
+        foreach (var network in networks
+                     .OrderBy(n => DockerService.IsPredefinedNetwork(n.Name))
+                     .ThenBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            seen.Add(network.Id);
+            if (_netById.TryGetValue(network.Id, out var row))
+            {
+                row.Update(network);
+            }
+            else
+            {
+                row = new DockerNetworkRow(network);
+                _netById[network.Id] = row;
+                _netRows.Add(row);
+            }
+        }
+
+        foreach (var id in _netById.Keys.Where(i => !seen.Contains(i)).ToList())
+        {
+            _netRows.Remove(_netById[id]);
+            _netById.Remove(id);
+        }
+    }
+
+    /// <summary>
+    /// The same merge for stacks, keyed by the project name, because a compose project has no id at
+    /// all: the label compose stamps on its containers is its whole identity.
+    /// </summary>
+    private void MergeStacks(IReadOnlyList<DockerStackInfo> stacks)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var compose = Docker.ComposeAvailable;
+
+        // Ours first and discovered ones last, for the reason the networks list puts docker's
+        // predefined three last: the rows somebody came to look at are the ones they made.
+        foreach (var stack in stacks
+                     .OrderBy(t => !t.Managed)
+                     .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            seen.Add(stack.Name);
+            if (_stacksByName.TryGetValue(stack.Name, out var row))
+            {
+                row.Update(stack, compose);
+            }
+            else
+            {
+                row = new DockerStackRow(stack, compose);
+                _stacksByName[stack.Name] = row;
+                _stackRows.Add(row);
+            }
+        }
+
+        foreach (var name in _stacksByName.Keys.Where(n => !seen.Contains(n)).ToList())
+        {
+            _stackRows.Remove(_stacksByName[name]);
+            _stacksByName.Remove(name);
+        }
+    }
+
     // ---- Actions ------------------------------------------------------
 
     /// <summary>
@@ -530,6 +837,50 @@ public partial class ContainersModule : UserControl, IModule
         MenuTagImage.IsEnabled = free && images.Count == 1;
         MenuRemoveImage.IsEnabled = free && images.Count > 0;
         MenuNewFromImage.IsEnabled = free && images.Count == 1;
+
+        var nets = SelectedNetworks;
+
+        CreateNetworkButton.IsEnabled = free;
+        PruneNetworksButton.IsEnabled = free;
+
+        // Remove fans out over a selection and follows the bulk rule above: enabled when at least
+        // one selected network can go, running only on those. Docker's three predefined networks
+        // cannot be removed, and greying the command whenever one of them is in the selection would
+        // be worse than skipping them, because a ContextMenu item has no enabled parent to hang the
+        // reason off (a disabled control is not hit-testable) and so could not say why. The
+        // confirmation says it instead.
+        MenuRemoveNetwork.IsEnabled = free && nets.Any(n => !n.IsPredefined);
+
+        // Both attach commands act on exactly one network, and both need to know what is on it:
+        // Connect lists the containers that are not, Disconnect the ones that are. MembersKnown is
+        // false when the listing's `docker ps` half could not run, and an empty picker there would
+        // read as "nothing to disconnect" rather than "nobody could look".
+        MenuConnectContainer.IsEnabled = free && nets.Count == 1 && nets[0].MembersKnown;
+        MenuDisconnectContainer.IsEnabled =
+            free && nets.Count == 1 && nets[0].MembersKnown && nets[0].Members.Count > 0;
+
+        var stacks = SelectedStacks;
+
+        NewStackButton.IsEnabled = free;
+
+        // Edit and Delete are the two commands that need the compose file to be ours to write, so
+        // they are the two a discovered stack does not get. Everything else works on either kind.
+        MenuEditStack.IsEnabled = free && stacks.Count == 1;
+        MenuDeleteStack.IsEnabled = free && stacks.Any(t => t.CanDelete);
+
+        // Deploy, Down and Pull are the three that read the compose file, so they are the three the
+        // plugin is needed for, and the three a stack whose file has gone cannot have. The reason
+        // is in the right-hand status slot rather than on the item: a ContextMenu item has no
+        // enabled parent Border to hang a tooltip off.
+        MenuDeployStack.IsEnabled = free && stacks.Any(t => t.CanDeploy);
+        MenuDownStack.IsEnabled = free && stacks.Any(t => t.CanDown);
+        MenuPullStack.IsEnabled = free && stacks.Any(t => t.CanPull);
+
+        // These three act on containers that already exist, so they need no plugin at all: that is
+        // what keeps this page useful on a host that has docker and nothing else.
+        MenuStartStack.IsEnabled = free && stacks.Any(t => t.CanStart);
+        MenuStopStack.IsEnabled = free && stacks.Any(t => t.CanStop);
+        MenuRestartStack.IsEnabled = free && stacks.Any(t => t.CanRestart);
 
         // The account cell is a command like the rest and takes the same busy rule, and like the
         // rest it is disabled with its reason rather than hidden: a control that comes and goes
@@ -1175,7 +1526,469 @@ public partial class ContainersModule : UserControl, IModule
         Tabs.SelectedIndex = 0;
     }
 
-    // ---- Dropping an archive on the image list ---------------------------
+    // ---- Networks --------------------------------------------------------
+
+    // All five are short commands with no bytes to count and nothing worth cancelling, so they set
+    // _busy by hand and skip RunOpAsync: the transfer strip would come and go before it could be
+    // read. Same reasoning TagAsync and PruneAsync are written with.
+
+    private async Task CreateNetworkAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        var taken = _netRows.Select(r => r.Name).ToList();
+        var dialog = new NetworkCreateDialog(Docker, taken);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request)
+            return;
+
+        _busy = true;
+        UpdateMenu();
+        try
+        {
+            SetStatus($"Creating {request.Name}…");
+            await Docker.CreateNetworkAsync(request);
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "New network", ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await RefreshNetworksAsync();
+    }
+
+    /// <summary>
+    /// Removes the user-defined networks in the selection. Docker's predefined three are skipped
+    /// rather than refused one at a time, which is the module's bulk rule, and the confirmation
+    /// says so instead of a tooltip the context menu has nowhere to put.
+    /// </summary>
+    private async Task RemoveNetworksAsync()
+    {
+        var selected = SelectedNetworks;
+        var rows = selected.Where(r => !r.IsPredefined).ToList();
+        var skipped = selected.Count - rows.Count;
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        // The question and nothing else, as on the stacks page. What is kept is the one line the
+        // question cannot carry: that part of the selection is being left out, which changes what
+        // happens.
+        var message = rows.Count == 1
+            ? $"Remove the network {rows[0].Name}?"
+            : $"Remove {rows.Count} networks?\n\n{Listed(rows.Select(r => r.Name))}";
+
+        if (skipped > 0)
+            message += $"\n\n{(skipped == 1 ? "One network" : $"{skipped} networks")} in the selection " +
+                       $"{(skipped == 1 ? "is" : "are")} one of docker's predefined three and " +
+                       $"{(skipped == 1 ? "is" : "are")} left alone.";
+
+        if (!await MessageDialog.Confirm(Owner, "Remove networks", message)) return;
+
+        _busy = true;
+        UpdateMenu();
+        var errors = new List<string>();
+        try
+        {
+            var n = 0;
+            foreach (var row in rows)
+            {
+                SetStatus($"Removing {row.Name} ({++n}/{rows.Count})…");
+                try { await Docker.RemoveNetworkAsync(row.Id); }
+                catch (Exception ex) { errors.Add($"{row.Name}: {ex.Message}"); }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await RefreshNetworksAsync();
+        if (errors.Count > 0)
+            await MessageDialog.Info(Owner, "Remove networks", string.Join("\n\n", errors));
+    }
+
+    /// <summary>
+    /// Removes every network nothing is running on.
+    ///
+    /// <para><see cref="MessageDialog.Confirm"/> rather than <c>Choose</c>, because unlike
+    /// <c>docker image prune</c> there is no <c>--all</c> second degree to offer. What it takes is
+    /// exactly the amber rows, which is the invariant the Status column is built to keep, but the
+    /// confirmation still has to say the part the column cannot: a stopped container holds no
+    /// endpoint, so a network it is configured on counts as unused and goes.</para>
+    /// </summary>
+    private async Task PruneNetworksAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        if (!await MessageDialog.Confirm(Owner, "Prune networks",
+                "Remove every network no container is running on?\n\n" +
+                "A stopped container configured to use one holds no connection to it, so its " +
+                "network counts as unused and goes too; that container will not start again until " +
+                "the network is recreated.\n\n" +
+                "Docker's own bridge, host and none are never removed."))
+            return;
+
+        _busy = true;
+        UpdateMenu();
+        Cursor = new Cursor(StandardCursorType.Wait);
+        string? report = null;
+        try
+        {
+            SetStatus("Removing unused networks…");
+            report = await Docker.PruneNetworksAsync();
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Prune networks", ex.Message);
+        }
+        finally
+        {
+            Cursor = Cursor.Default;
+            _busy = false;
+        }
+
+        await RefreshNetworksAsync();
+        // Docker's own report, which is a "Deleted Networks:" header and one name per line. Empty
+        // when it removed nothing, and saying so beats a dialog with a blank body.
+        if (report is not null)
+            await MessageDialog.Info(Owner, "Prune networks",
+                report.Trim().Length == 0 ? "Nothing to remove." : report.Trim());
+    }
+
+    /// <summary>
+    /// Attaches a container to the selected network or detaches one from it. The two are one
+    /// handler because they differ only in which containers the picker offers, and one dialog for
+    /// the same reason.
+    /// </summary>
+    private async Task AttachAsync(bool connect)
+    {
+        var rows = SelectedNetworks;
+        if (rows.Count != 1 || _docker is null || !Docker.DockerAvailable || _busy) return;
+        var row = rows[0];
+
+        IReadOnlyList<DockerNetworkMember> choices;
+        if (connect)
+        {
+            // The container list is the dialog's whole content, so it is read now rather than
+            // trusted to be whatever the Containers tab last saw; that tab may never have been
+            // opened. Everything already on this network is subtracted, because docker refuses a
+            // second connect and offering one would be offering an error.
+            try { await Docker.RefreshAsync(); }
+            catch (Exception ex)
+            {
+                await MessageDialog.Info(Owner, "Connect container", ex.Message);
+                return;
+            }
+
+            var already = row.Members.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+            choices = Docker.Containers
+                .Where(c => !already.Contains(c.Id))
+                .Select(c => new DockerNetworkMember(c.Id, c.Name))
+                .ToList();
+        }
+        else
+        {
+            // What is configured on it, stopped containers included: docker disconnects one of
+            // those quite happily, and it is the case somebody is most likely here to fix.
+            choices = row.Members;
+        }
+
+        var title = connect ? "Connect container" : "Disconnect container";
+
+        if (choices.Count == 0)
+        {
+            await MessageDialog.Info(Owner, title, connect
+                ? $"Every container on this host is already on {row.Name}."
+                : $"No container is on {row.Name}.");
+            return;
+        }
+
+        var dialog = new NetworkAttachDialog(connect, row.Name, choices, row.CanTakeIp);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request)
+            return;
+
+        _busy = true;
+        UpdateMenu();
+        try
+        {
+            SetStatus($"{(connect ? "Connecting" : "Disconnecting")} {request.ContainerName}…");
+            if (connect) await Docker.ConnectAsync(row.Id, request.ContainerId, request.Ip);
+            else await Docker.DisconnectAsync(row.Id, request.ContainerId);
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, title, ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await RefreshNetworksAsync();
+    }
+
+    // ---- Stacks ----------------------------------------------------------
+
+    // Three of these are short and set _busy by hand, the way the five network commands do: the
+    // transfer strip would come and go before it could be read. Deploy, Down and Pull run compose,
+    // which streams for as long as an image pull takes, so those go through RunOpAsync and get its
+    // Cancel and its line-by-line readout of compose's own output.
+
+    /// <summary>The selected stacks as the service wants them, which is what every command below is addressed to.</summary>
+    private static List<DockerStackInfo> Infos(IEnumerable<DockerStackRow> rows) =>
+        rows.Select(r => r.ToInfo()).ToList();
+
+    private async Task NewStackAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        var taken = _stackRows.Select(r => r.Name).ToList();
+        var dialog = new StackEditWindow(Docker, taken);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } saved) return;
+
+        await SaveStackAsync(saved);
+    }
+
+    private async Task EditStackAsync()
+    {
+        var rows = SelectedStacks;
+        if (rows.Count != 1 || _docker is null || _busy) return;
+        var row = rows[0];
+
+        // A discovered stack opens read-only. VirtDeck can read the file, which Portainer cannot,
+        // but writing to a directory it did not create is a different thing from reading one.
+        var taken = _stackRows.Select(r => r.Name).Where(n => n != row.Name).ToList();
+        var dialog = new StackEditWindow(Docker, taken, row.Name, row.ConfigFiles, row.CanEdit);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } saved) return;
+
+        await SaveStackAsync(saved);
+    }
+
+    /// <summary>
+    /// Writes what the editor produced, and deploys it when that is the button that was pressed.
+    /// The write and the deploy are separate steps on purpose: a compose file that will not come up
+    /// is still the file the user typed, and losing it because docker refused it would be worse than
+    /// the refusal.
+    /// </summary>
+    private async Task SaveStackAsync(StackEditWindow.StackEdit saved)
+    {
+        var written = false;
+        _busy = true;
+        UpdateMenu();
+        try
+        {
+            SetStatus($"Writing {saved.Name}…");
+            await Docker.WriteStackAsync(saved.Name, saved.Yaml);
+            written = true;
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Save stack", ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        // Always, even after a failed write: this is what puts the menu back, and a listing is the
+        // honest way to find out what actually landed.
+        await RefreshStacksAsync();
+
+        if (!written || !saved.Deploy) return;
+
+        if (_stacksByName.TryGetValue(saved.Name, out var row))
+            await DeployAsync(new[] { row });
+        else
+            await MessageDialog.Info(Owner, "Deploy stack",
+                $"{saved.Name} was written but did not appear in the list, so it was not deployed.");
+    }
+
+    private Task DeployStackAsync() => DeployAsync(SelectedStacks.Where(r => r.CanDeploy).ToList());
+
+    private async Task DeployAsync(IReadOnlyList<DockerStackRow> rows)
+    {
+        if (rows.Count == 0 || _docker is null || _busy) return;
+        var stacks = Infos(rows);
+
+        await RunOpAsync("Deploy", "Deploying", -1, async ct =>
+        {
+            var n = 0;
+            foreach (var stack in stacks)
+            {
+                n++;
+                var label = stacks.Count == 1 ? "Deploying" : $"Deploying ({n}/{stacks.Count})";
+                await Docker.ComposeUpAsync(stack, line => ReportLine(label, line), ct);
+            }
+        });
+
+        await RefreshStacksAsync();
+    }
+
+    private async Task PullStackAsync()
+    {
+        var rows = SelectedStacks.Where(r => r.CanPull).ToList();
+        if (rows.Count == 0 || _docker is null || _busy) return;
+        var stacks = Infos(rows);
+
+        await RunOpAsync("Pull images", "Pulling", -1, async ct =>
+        {
+            var n = 0;
+            foreach (var stack in stacks)
+            {
+                n++;
+                var label = stacks.Count == 1 ? "Pulling" : $"Pulling ({n}/{stacks.Count})";
+                await Docker.ComposePullAsync(stack, line => ReportLine(label, line), ct);
+            }
+        });
+
+        // Nothing in this table moves on a pull, which changes images and not containers. The
+        // listing runs anyway because its finally is what puts the menu back.
+        await RefreshStacksAsync();
+    }
+
+    private async Task DownStackAsync()
+    {
+        var rows = SelectedStacks.Where(r => r.CanDown).ToList();
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        // No paragraph of consequences, unlike Delete: down is undone by deploying again, and the
+        // list is only spelled out where the question does not already name what it is about.
+        var message = rows.Count == 1
+            ? $"Take the stack {rows[0].Name} down?"
+            : $"Take {rows.Count} stacks down?\n\n{Listed(rows.Select(r => r.Name))}";
+
+        if (!await MessageDialog.Confirm(Owner, "Take stacks down", message)) return;
+
+        var stacks = Infos(rows);
+
+        await RunOpAsync("Take stacks down", "Removing", -1, async ct =>
+        {
+            var n = 0;
+            foreach (var stack in stacks)
+            {
+                n++;
+                var label = stacks.Count == 1 ? "Removing" : $"Removing ({n}/{stacks.Count})";
+                await Docker.ComposeDownAsync(stack, removeVolumes: false, line => ReportLine(label, line), ct);
+            }
+        });
+
+        await RefreshStacksAsync();
+    }
+
+    /// <summary>
+    /// Start, stop or restart, in <see cref="RunActionAsync"/>'s shape: enabled when at least one
+    /// selected stack qualifies, run only on those. No transfer strip, because none of the three
+    /// has bytes to count and stopping one half way through would leave exactly the mess the button
+    /// was meant to avoid.
+    /// </summary>
+    private async Task StackLifecycleAsync(string verb, Func<DockerStackRow, bool> qualifies,
+                                           Func<DockerStackInfo, Task> run)
+    {
+        var rows = SelectedStacks.Where(qualifies).ToList();
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        _busy = true;
+        UpdateMenu();
+        var errors = new List<string>();
+        try
+        {
+            var n = 0;
+            foreach (var row in rows)
+            {
+                SetStatus($"{verb} {row.Name} ({++n}/{rows.Count})…");
+                try { await run(row.ToInfo()); }
+                catch (Exception ex) { errors.Add($"{row.Name}: {ex.Message}"); }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await RefreshStacksAsync();
+        if (errors.Count > 0)
+            await MessageDialog.Info(Owner, verb, string.Join("\n\n", errors));
+    }
+
+    /// <summary>
+    /// Removes a stack VirtDeck created: its containers, the networks compose made for it, and its
+    /// compose file, which is what makes this app forget it exists.
+    ///
+    /// <para><c>Choose</c> rather than <c>Confirm</c>, because a delete has a second question and
+    /// asking it in a follow-up dialog would put it after the point of no return. The question is
+    /// the named volumes, which is where a stack's data actually lives: keeping them is the
+    /// primary, so the more destructive of two irreversible options is not the one Enter presses.
+    /// Same shape and same reason as the user-account delete's question about home directories.</para>
+    ///
+    /// <para>Down is the separate, undoable command, so there is no "keep the file" answer here:
+    /// that is not a delete, and offering it as one would make the two commands the same.</para>
+    /// </summary>
+    private async Task DeleteStackAsync()
+    {
+        var selected = SelectedStacks;
+        var rows = selected.Where(r => r.CanDelete).ToList();
+        var skipped = selected.Count - rows.Count;
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        // The two buttons already say what the second question is, so the body is the question and
+        // nothing else. The one thing they cannot say is that part of the selection is being left
+        // out, which changes what happens and so stays.
+        var message = rows.Count == 1
+            ? $"Delete the stack {rows[0].Name}?"
+            : $"Delete {rows.Count} stacks?\n\n{Listed(rows.Select(r => r.Name))}";
+
+        if (skipped > 0)
+            message += $"\n\n{(skipped == 1 ? "One stack" : $"{skipped} stacks")} in the selection " +
+                       $"{(skipped == 1 ? "was" : "were")} not created by VirtDeck and will be left alone.";
+
+        var choice = await MessageDialog.Choose(Owner, "Delete stacks", message,
+            primary: "Keep the volumes",
+            alternative: "Delete the volumes too");
+
+        if (choice == MessageDialog.Choice.Cancel) return;
+        var removeVolumes = choice == MessageDialog.Choice.Alternative;
+
+        var stacks = Infos(rows);
+        var names = rows.Select(r => r.Name).ToList();
+        var errors = new List<string>();
+
+        await RunOpAsync("Delete stacks", "Removing", -1, async ct =>
+        {
+            for (var i = 0; i < stacks.Count; i++)
+            {
+                var label = stacks.Count == 1 ? "Removing" : $"Removing ({i + 1}/{stacks.Count})";
+
+                // Down before the file, always: removing a stack's compose file out from under its
+                // running containers would leave them behind with nothing in this app able to
+                // address them as a set again.
+                if (stacks[i].ConfigPresent && Docker.ComposeAvailable)
+                {
+                    try
+                    {
+                        await Docker.ComposeDownAsync(stacks[i], removeVolumes,
+                                                      line => ReportLine(label, line), ct);
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    {
+                        // Reported, not rethrown: a stack whose containers would not go is still a
+                        // stack the user asked to delete, and stopping here would leave both the
+                        // containers and the file.
+                        errors.Add($"{names[i]}: {ex.Message}");
+                    }
+                }
+
+                ct.ThrowIfCancellationRequested();
+                try { await Docker.DeleteStackDirAsync(names[i]); }
+                catch (Exception ex) { errors.Add($"{names[i]}: {ex.Message}"); }
+            }
+        });
+
+        await RefreshStacksAsync();
+        if (errors.Count > 0)
+            await MessageDialog.Info(Owner, "Delete stacks", string.Join("\n\n", errors));
+    }
+
+    // ---- Dropping a file on the module -----------------------------------
 
     private void SetUpDragDrop()
     {
@@ -1194,18 +2007,80 @@ public partial class ContainersModule : UserControl, IModule
     }
 
     /// <summary>
-    /// Only on the Images tab, and only real local files: a directory is not an answer here, unlike
-    /// in the file explorer, because there is nothing to do with one but refuse it.
+    /// What this drop would land on, or null when it would do nothing.
+    ///
+    /// <para>Two tabs take a drop and they take different files: the Images page loads an archive,
+    /// the Stacks page opens a compose file in the editor. Both take real local files only, because
+    /// a directory is not an answer here, unlike in the file explorer, where there is something to
+    /// do with one.</para>
     /// </summary>
-    private bool CanAcceptDrop(DragEventArgs e) =>
-        _docker is not null && Docker.DockerAvailable && !_busy && OnImages &&
-        DropFiles.LocalFiles(e).Count > 0;
+    private List<string>? DropTarget(DragEventArgs e)
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return null;
+
+        var files = DropFiles.LocalFiles(e);
+        if (files.Count == 0) return null;
+
+        return Current switch
+        {
+            Tab.Images => files,
+            Tab.Stacks => files.Where(IsComposeFile).ToList() is { Count: > 0 } yaml ? yaml : null,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Read off the extension alone. Compose's own default names are docker-compose.yml and
+    /// compose.yaml, but a file passed with -f can be called anything, so insisting on a name would
+    /// refuse files compose itself accepts.
+    /// </summary>
+    private static bool IsComposeFile(string path) =>
+        path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanAcceptDrop(DragEventArgs e) => DropTarget(e) is not null;
 
     private async void OnDrop(object? sender, DragEventArgs e)
     {
         e.Handled = true;
-        if (!CanAcceptDrop(e)) return;
-        await ImportLocalAsync(DropFiles.LocalFiles(e));
+        if (DropTarget(e) is not { } files) return;
+
+        // A compose file becomes one stack, so only the first is taken: several editor windows
+        // stacked on each other would be a worse answer than one.
+        if (Current == Tab.Stacks) await NewStackFromFileAsync(files[0]);
+        else await ImportLocalAsync(files);
+    }
+
+    /// <summary>
+    /// A compose file dragged in from this PC opens in the editor rather than being written to the
+    /// host on the spot: it still has to be given a project name, and dropping a file is not saying
+    /// what to call the thing it becomes.
+    /// </summary>
+    private async Task NewStackFromFileAsync(string path)
+    {
+        if (_docker is null || _busy) return;
+
+        string yaml;
+        try
+        {
+            yaml = await File.ReadAllTextAsync(path);
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "New stack", $"Could not read {path}:\n\n{ex.Message}");
+            return;
+        }
+
+        // Compose names a project after the directory its file sits in, so that is the suggestion
+        // here too, folded to what docker accepts rather than offered and then refused.
+        var suggested = DockerService.SanitizeStackName(
+            Path.GetFileName(Path.GetDirectoryName(path) ?? "") ?? "");
+
+        var taken = _stackRows.Select(r => r.Name).ToList();
+        var dialog = new StackEditWindow(Docker, taken, suggested, yaml);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } saved) return;
+
+        await SaveStackAsync(saved);
     }
 
     // ---- The transfer strip ----------------------------------------------

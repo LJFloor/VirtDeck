@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.Unattend.ComputerTab">
 
   <ScrollViewer Padding="16">
@@ -22,7 +24,8 @@
           <RadioButton Name="NameScriptRadio" GroupName="ComputerName"
                        Content="Work the computer name out with a PowerShell script:" />
           <StackPanel Name="NameScriptPanel" Classes="under">
-            <TextBox Name="ComputerNameScriptBox" Classes="script" />
+            <edit:TextEditor Name="ComputerNameScriptBox" Classes="script"
+                             c:CodeEditor.Language="PowerShell" />
             <TextBlock Classes="note"
                        Text="The script runs during Setup and must write the name to standard output. It can read the serial number, a MAC address or anything else about the machine." />
           </StackPanel>

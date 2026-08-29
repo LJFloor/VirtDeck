@@ -539,13 +539,23 @@ namespace VirtDeck.Terminal
             if (cols == Cols && rows == Rows) return;
 
             // The cursor is remembered against the whole buffer, so that pulling history into view
-            // or pushing lines out of it leaves it on the line it was actually on.
+            // or pushing lines out of it leaves it on the line it was actually on. Trimming from the
+            // bottom never disturbs it, because it only ever removes lines below it.
             var cursorAbsolute = ScreenTop + _cy;
+            var oldRows = Rows;
 
-            if (cols != Cols)
+            if (rows < oldRows)
             {
-                Resample(_primary, cols);
-                Resample(_alt, cols);
+                // Blank lines below the cursor come off the bottom before anything is allowed off
+                // the top. A shell sitting at a prompt near the top of an otherwise empty screen
+                // must not have that prompt pushed into history by a drag of the window edge: the
+                // rows the user is then looking at are the blank ones that used to be under it, the
+                // shell redraws its prompt below them when it answers SIGWINCH, and the history the
+                // shrink invented puts a scroll bar over a terminal nobody has scrolled. Only once
+                // those blank rows are used up does the top of the screen become scrollback, which
+                // is the case where the lines leaving the screen really are history.
+                TrimBottom(_primary, oldRows, rows, _useAlt ? -1 : _cy);
+                TrimBottom(_alt, oldRows, rows, _useAlt ? _cy : -1);
             }
 
             Cols = cols;
@@ -554,6 +564,11 @@ namespace VirtDeck.Terminal
             Fit(_primary, rows);
             Fit(_alt, rows);
             if (_alt.Count > rows) _alt.RemoveRange(0, _alt.Count - rows);
+
+            // After the lists are the right length, so that every line now on screen is one of the
+            // ones made the right width.
+            Resample(_primary, cols, rows);
+            Resample(_alt, cols, rows);
 
             _regionTop = 0;
             _regionBottom = rows - 1;
@@ -564,9 +579,20 @@ namespace VirtDeck.Terminal
             Touch();
         }
 
-        private static void Resample(List<TerminalCell[]> lines, int cols)
+        /// <summary>
+        /// Pads or cuts the lines on screen to the new width, and leaves everything above them
+        /// exactly as it was. A line in history is only ever drawn, never written to, and every
+        /// reader of one already stops at the line's own length: the renderer at the narrower of the
+        /// line and the screen, the selection at the line, and the cursor is never on one. Resampling
+        /// the history too cost 35 ms per column crossed at a full scrollback, paid by the UI thread
+        /// under the screen lock on every step of a drag, where the screen alone is a fixed cost in
+        /// the rows on display. What it changes to look at is nothing: a history line wider than the
+        /// window is truncated, which is what this class already does to a line it does resample, and
+        /// for the same reason it does not rewrap either.
+        /// </summary>
+        private static void Resample(List<TerminalCell[]> lines, int cols, int rows)
         {
-            for (var i = 0; i < lines.Count; i++)
+            for (var i = Math.Max(0, lines.Count - rows); i < lines.Count; i++)
             {
                 var old = lines[i];
                 if (old.Length == cols) continue;
@@ -580,6 +606,41 @@ namespace VirtDeck.Terminal
         private void Fit(List<TerminalCell[]> lines, int rows)
         {
             while (lines.Count < rows) lines.Add(NewLine());
+        }
+
+        /// <summary>
+        /// Takes up to <c>oldRows - rows</c> blank lines off the bottom of the screen area, stopping
+        /// at the cursor's own row. <paramref name="cursorRow"/> is -1 for a buffer the cursor is not
+        /// currently on, where every blank row on screen is fair game.
+        /// </summary>
+        private static void TrimBottom(List<TerminalCell[]> lines, int oldRows, int rows, int cursorRow)
+        {
+            var top = lines.Count - oldRows;
+            if (top < 0) return;
+
+            var wanted = oldRows - rows;
+            var removable = 0;
+            for (var y = oldRows - 1; y > cursorRow && removable < wanted; y--)
+            {
+                if (!IsBlank(lines[top + y])) break;
+                removable++;
+            }
+            if (removable > 0) lines.RemoveRange(lines.Count - removable, removable);
+        }
+
+        /// <summary>
+        /// Whether a line has nothing on it that could be seen. A space is only blank while it wears
+        /// the default background and no attribute: an erase under a coloured or inverse pen leaves
+        /// a band the user can see, and a resize must not throw that away as if it were empty space.
+        /// </summary>
+        private static bool IsBlank(TerminalCell[] line)
+        {
+            foreach (var cell in line)
+            {
+                if (cell.Rune is not (' ' or 0)) return false;
+                if (!cell.Bg.IsDefault || cell.Attrs != CellAttrs.None) return false;
+            }
+            return true;
         }
     }
 }

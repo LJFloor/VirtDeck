@@ -12,11 +12,6 @@ namespace VirtDeck.Avalonia.Views;
 /// </summary>
 public sealed class ContainerRow : INotifyPropertyChanged
 {
-    // The same three colours the VM list uses, so a state dot means the same thing app-wide.
-    private static readonly IBrush RunningBrush = new SolidColorBrush(Color.FromRgb(0x2e, 0x9e, 0x4f));
-    private static readonly IBrush TransientBrush = new SolidColorBrush(Color.FromRgb(0xd6, 0x8f, 0x00));
-    private static readonly IBrush StoppedBrush = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88));
-
     /// <summary>Full container id. Every action addresses the container by this, never by name.</summary>
     public string Id { get; }
 
@@ -44,9 +39,9 @@ public sealed class ContainerRow : INotifyPropertyChanged
 
     public IBrush StateBrush => _state switch
     {
-        "running" => RunningBrush,
-        "paused" or "restarting" or "removing" => TransientBrush,
-        _ => StoppedBrush
+        "running" => StateBrushes.Running,
+        "paused" or "restarting" or "removing" => StateBrushes.Transient,
+        _ => StateBrushes.Stopped
     };
 
     public bool IsRunning => _state is "running" or "restarting";

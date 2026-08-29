@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Threading;
 using SpiceClient;
 using VirtDeck.Services;
+using VirtDeck.Updates;
 
 namespace VirtDeck.Avalonia.Views;
 
@@ -30,6 +31,23 @@ public partial class MainWindow : Window
     private long _lastSampleTs;    // Stopwatch timestamp at the last sample
 
     private IModule? _current;
+
+    /// <summary>
+    /// Re-runs the module probe while the strip is not yet known to be right, and is stopped the
+    /// moment it is. See <see cref="SyncModuleVisibilityAsync"/> for why this is a poll and why it
+    /// is allowed to be one.
+    /// </summary>
+    private readonly DispatcherTimer _probeTimer;
+
+    /// <summary>A sync is in flight. It moves the selection, and it must not overlap its own tick.</summary>
+    private bool _syncing;
+
+    /// <summary>
+    /// The last probe could not run, so every tab is showing as a fallback rather than as an
+    /// answer. It keeps the poll alive, since one SSH hiccup must not settle the strip for the rest
+    /// of the session.
+    /// </summary>
+    private bool _probeFailed;
 
     /// <summary>Design-time only; the app always constructs this with a live SSH connection.</summary>
     public MainWindow() : this(new SshConnectionManager()) { }
@@ -59,6 +77,14 @@ public partial class MainWindow : Window
             module.StatusChanged += () => OnModuleStatusChanged(module);
         }
 
+        // Every conditional module starts hidden and the probe in Opened puts back the ones this
+        // host has. The other order draws the full strip for a frame and then takes tabs out of it
+        // under the pointer, which reads as a glitch rather than as an answer. Asking each module
+        // what it makes of an empty toolset is how the shell decides that without naming one: a
+        // module that needs nothing is relevant to a host nothing is known about, and one that
+        // needs a tool is not.
+        ApplyRelevance(HostToolset.Empty);
+
         Modules.SelectionChanged += async (_, _) => await SwitchModuleAsync();
 
         // Throughput is the shell's, not a module's, and its timer never stops: consoles and NBD
@@ -66,11 +92,20 @@ public partial class MainWindow : Window
         _tickTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background,
             (_, _) => UpdateThroughput());
 
+        // Created stopped. The first sync starts it if it finds anything missing, and stops it
+        // again the moment nothing is.
+        _probeTimer = new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Background,
+            async (_, _) => await SyncModuleVisibilityAsync());
+
         Opened += async (_, _) =>
         {
             _lastBytes = TotalTunnelBytes();
             _lastSampleTs = Stopwatch.GetTimestamp();
             _tickTimer.Start();
+
+            // Before the first switch, so the strip is right the first time it is drawn rather than
+            // losing a tab from under the pointer a moment later.
+            await SyncModuleVisibilityAsync();
             await SwitchModuleAsync();
         };
 
@@ -85,6 +120,104 @@ public partial class MainWindow : Window
     /// </summary>
     private IEnumerable<IModule> AllModules() =>
         Modules.Items.OfType<TabItem>().Select(t => t.Content).OfType<IModule>();
+
+    /// <summary>
+    /// The same walk, keeping the tab as well as the module, which is what showing and hiding one
+    /// needs. <see cref="AllModules"/> stays as it is: Attach, Shutdown and BusyReason all want
+    /// every module including the hidden ones.
+    /// </summary>
+    private IEnumerable<(TabItem Tab, IModule Module)> ModuleTabs() =>
+        Modules.Items.OfType<TabItem>()
+            .Where(t => t.Content is IModule)
+            .Select(t => (t, (IModule)t.Content!));
+
+    /// <summary>
+    /// Takes out of the side menu every module the host has no tooling for, and puts back any whose
+    /// tooling has since arrived.
+    ///
+    /// <para><b>Hidden, not disabled with a reason, and it is the app's one page-level exception to
+    /// that rule.</b> The rule protects a command somebody goes looking for on a page they are
+    /// already on, which is why the Stacks tab greys out instead; nobody goes looking for a page,
+    /// and a module for tooling the host does not have is a screen whose entire content is a
+    /// sentence saying so.</para>
+    ///
+    /// <para><b>The test is that the tool is installed, not that its daemon is up.</b> A stopped
+    /// libvirtd or dockerd keeps its module, because that module's own status slot is where the
+    /// state of the daemon is reported and taking the page away would hide the explanation along
+    /// with the problem.</para>
+    ///
+    /// <para><b>A probe that could not run shows every tab.</b> That is the deliberate opposite of
+    /// the absent-tooling default and the same call the KVM probes make: a false negative here does
+    /// not draw an empty table, it takes away the only route to a module. What such a tab then
+    /// draws is the module's own "not found on this host" empty state, which is exactly the right
+    /// thing for it to say. It is also why the conditional tabs start hidden rather than the whole
+    /// strip: hiding is what the shell does while it has no answer, and showing everything is what
+    /// it does when it cannot get one.</para>
+    ///
+    /// <para><b>It is a poll, and it is self-limiting.</b> A hidden module never activates, so it
+    /// can never re-probe itself the way every other absent-tooling recovery in the app does;
+    /// nothing on a host announces a package install, and hiding the page took away the last place
+    /// a Refresh button could go. So the shell polls, but only while there is something to find:
+    /// installing libvirt at a terminal makes the tab appear on its own within a few seconds, and a
+    /// fully equipped host pays one probe at startup and nothing after it. One <c>command -v</c>
+    /// round trip is about 13 ms of host work, less than the services module's own 5 s poll.</para>
+    /// </summary>
+    private async Task SyncModuleVisibilityAsync()
+    {
+        if (_syncing) return;
+        _syncing = true;
+        try
+        {
+            // Every module call here is guarded, because this runs from a timer tick and an
+            // exception out of one would take the process down rather than the module with it.
+            var tools = new List<string>();
+            foreach (var (_, module) in ModuleTabs())
+            {
+                try { tools.AddRange(module.RequiredTools); } catch { /* it needs nothing, then */ }
+            }
+
+            tools = tools.Distinct(StringComparer.Ordinal).ToList();
+            if (tools.Count == 0) return;
+
+            HostToolset? host = null;
+            try { host = await HostTools.ProbeAsync(_ssh, tools); }
+            catch { /* no answer, so the strip falls back to showing everything */ }
+
+            _probeFailed = host is null;
+            ApplyRelevance(host);
+
+            // The poll runs while the strip is not yet known to be right: something is still
+            // missing, or the last probe could not say which. A failed one is showing every tab
+            // because it could not tell rather than because it knows, so it has to be asked again.
+            if (_probeFailed || Modules.Items.OfType<TabItem>().Any(t => !t.IsVisible)) _probeTimer.Start();
+            else _probeTimer.Stop();
+        }
+        finally { _syncing = false; }
+    }
+
+    /// <summary>
+    /// Draws the strip for one answer, and hands the user somewhere to be if the page they were on
+    /// has just gone away. A null <paramref name="host"/> is the probe having failed, which shows
+    /// every tab; <see cref="HostToolset.Empty"/> is the shell having no answer yet, which hides
+    /// every conditional one.
+    /// </summary>
+    private void ApplyRelevance(HostToolset? host)
+    {
+        foreach (var (tab, module) in ModuleTabs())
+        {
+            // Guarded per module, because a sync runs from a timer tick and an exception out of
+            // one would take the process down rather than the module with it.
+            try { tab.IsVisible = host is null || module.IsRelevant(host); }
+            catch { tab.IsVisible = true; } // a module that cannot answer keeps its tab
+        }
+
+        // Avalonia leaves a hidden tab selected rather than moving on, the same trap SyncStacksTab
+        // documents one level down, so a page that goes away under the user has to hand them
+        // somewhere to be. This also settles the first selection, which the TabControl put on the
+        // first tab in the strip before anything knew whether that tab belonged on this host.
+        if (Modules.SelectedItem is not TabItem { IsVisible: true })
+            Modules.SelectedItem = Modules.Items.OfType<TabItem>().FirstOrDefault(t => t.IsVisible);
+    }
 
     private async Task SwitchModuleAsync()
     {
@@ -370,6 +503,7 @@ public partial class MainWindow : Window
     private void Shutdown()
     {
         _tickTimer.Stop();
+        _probeTimer.Stop();
 
         // Every module, not just the visible one: a hidden module still owns consoles and media
         // streams it opened while it was on screen.

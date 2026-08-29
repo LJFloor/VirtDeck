@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.Unattend.PersonalizationTab">
 
   <ScrollViewer Padding="16">
@@ -51,7 +53,8 @@
 
           <RadioButton Name="WallpaperScriptRadio" GroupName="PersonalWallpaper"
                        Content="Run a PowerShell script that loads a wallpaper image:" />
-          <TextBox Name="WallpaperScriptBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="WallpaperScriptBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="PowerShell" />
           <TextBlock Classes="subnote"
                      Text="An image cannot be carried inside an answer file, so a wallpaper has to be fetched or copied by a script that runs during Setup." />
         </StackPanel>
@@ -63,7 +66,8 @@
                        Content="Use the default lock screen image" />
           <RadioButton Name="LockScreenScriptRadio" GroupName="PersonalLockScreen"
                        Content="Run a PowerShell script that loads the lock screen image:" />
-          <TextBox Name="LockScreenScriptBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="LockScreenScriptBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="PowerShell" />
         </StackPanel>
       </HeaderedContentControl>
 

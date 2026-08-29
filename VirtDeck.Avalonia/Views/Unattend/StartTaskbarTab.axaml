@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.Unattend.StartTaskbarTab">
 
   <ScrollViewer Padding="16">
@@ -32,7 +34,8 @@
           <RadioButton Name="TaskbarIconsEmptyRadio" GroupName="TaskbarIcons" Content="Remove all icons" />
           <RadioButton Name="TaskbarIconsCustomRadio" GroupName="TaskbarIcons"
                        Content="Pin these icons, from a TaskbarLayoutModification document:" />
-          <TextBox Name="TaskbarIconsXmlBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="TaskbarIconsXmlBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="Xml" />
         </StackPanel>
       </HeaderedContentControl>
 
@@ -42,7 +45,8 @@
           <RadioButton Name="PinsEmptyRadio" GroupName="StartPins" Content="Remove all pins" />
           <RadioButton Name="PinsCustomRadio" GroupName="StartPins"
                        Content="Use these pins, from JSON produced by Export-StartLayout:" />
-          <TextBox Name="StartPinsJsonBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="StartPinsJsonBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="Json" />
         </StackPanel>
       </HeaderedContentControl>
 
@@ -52,7 +56,8 @@
           <RadioButton Name="TilesEmptyRadio" GroupName="StartTiles" Content="Remove all tiles" />
           <RadioButton Name="TilesCustomRadio" GroupName="StartTiles"
                        Content="Use these tiles, from XML produced by Export-StartLayout:" />
-          <TextBox Name="StartTilesXmlBox" Classes="script" Margin="21,0,0,0" />
+          <edit:TextEditor Name="StartTilesXmlBox" Classes="script" Margin="21,0,0,0"
+                           c:CodeEditor.Language="Xml" />
         </StackPanel>
       </HeaderedContentControl>
 

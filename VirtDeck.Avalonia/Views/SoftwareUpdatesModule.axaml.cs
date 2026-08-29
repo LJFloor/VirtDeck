@@ -112,6 +112,20 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
     // ---- IModule -------------------------------------------------------
 
+    /// <summary>
+    /// The four tools the detector knows, so the shell's one probe carries everything
+    /// <see cref="PackageManagers.Detect"/> reads.
+    /// </summary>
+    public IReadOnlyList<string> RequiredTools => PackageManagers.Probed;
+
+    /// <summary>
+    /// The one module whose question is not a conjunction: any of four tools will do, and which one
+    /// wins is weighted by os-release. That is exactly <see cref="PackageManagers.Detect"/>, so the
+    /// shell asks the same pure function this module asks, over a toolset that is a superset of the
+    /// one it probes for itself. The two can never disagree about whether this page belongs here.
+    /// </summary>
+    public bool IsRelevant(HostToolset host) => PackageManagers.Detect(host).Id.Length > 0;
+
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";
     public event Action? StatusChanged;
@@ -211,6 +225,11 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             SetStatus($"Reading available updates with {Packages.Manager.DisplayName}…");
             Draw(await Packages.ListAsync(_cts.Token));
 
+            // Repainted from the listing rather than only from the probe: the age of the package
+            // index is something only the listing learns, and it is the half of that slot that
+            // changes.
+            SetCaps(Packages.CapabilityText);
+
             await Packages.ReadRebootAsync(_cts.Token);
             DrawReboot();
         }
@@ -267,11 +286,18 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         Merge(catalog.Updates);
         UpdatesEmpty.IsVisible = false;
 
+        // "Nothing to install" is only as good as the index it was read from, so where the manager
+        // says how old that is, this says it too. It is the one empty state somebody acts on by
+        // looking away, and on an Arch host whose database nobody has synced for a week it is also
+        // the one that can be confidently wrong.
         if (_rows.Count == 0)
             ShowEmpty(UpdatesEmpty,
                 "This host is up to date.\n\n" +
-                $"{catalog.ManagerName} has nothing to install. Press the refresh button to ask the " +
-                "repositories again.");
+                $"{catalog.ManagerName} has nothing to install" +
+                (catalog.IndexAgeText is { Length: > 0 } age
+                    ? $", from a package database last synced {age}."
+                    : ".") +
+                " Press the refresh button to ask the repositories again.");
 
         UpdateStatusCount();
         UpdateCommands();
@@ -455,8 +481,9 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     {
         if (_packages is null || _busy) return;
 
-        // A manager with nothing safe to run still re-lists: on an Arch host without pacman-contrib
-        // that is the whole of what Refresh can honestly do, and the button says so on hover.
+        // Every manager VirtDeck knows can sync its index, so the empty script is the null manager's
+        // and nothing else. Re-listing anyway is what makes the button do the honest half of its job
+        // on a host that has nothing to sync.
         if (!Packages.Manager.RefreshScript.IsEmpty)
         {
             var ok = await RunOpAsync("Check for updates", "Reading repositories",
@@ -597,6 +624,12 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private void ShowXfer(string verb)
     {
         _phase = UpgradePhase.Preparing;
+
+        // The strip and the status bar are one above the other, so they must not both narrate the
+        // same package. The slot says what is running and says it once; the strip, which is the
+        // thing with the bar and the Cancel button on it, carries the line the tool is on.
+        SetStatus(verb + "…");
+
         XferText.Text = verb + "…";
         XferProgress.IsIndeterminate = true;
         XferProgress.Value = 0;
@@ -645,8 +678,6 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
             var label = Label(phase);
             XferText.Text = p.Line.Length > 0 ? $"{label} · {p.Line}" : label;
-
-            if (p.Current.Length > 0) SetStatus($"{label} {p.Current}…");
         });
     }
 

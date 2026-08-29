@@ -71,7 +71,7 @@ namespace VirtDeck.Updates
             fi
 
             set -f
-            w=$(printf '%s\n' "$u" | awk 'NF>=3 && $0 !~ /^[[:space:]]/ {print $1}')
+            w=$(printf '%s\n' "$u" | awk 'NF>=3 && $0 !~ /^[[:space:]]/ && $1 ~ /\./ {print $1}')
             if [ -n "$w" ]; then
               rpm -q --qf '%{NAME}.%{ARCH}\t%{EVR}\n' -- $w 2>/dev/null |
                 while IFS= read -r l; do
@@ -149,7 +149,8 @@ namespace VirtDeck.Updates
         /// what makes this work on both dnf and dnf5, which disagree about whether COLUMNS is honoured.
         ///
         /// Everything that is neither shape is dropped, which is what silently discards check-update's
-        /// "Obsoleting Packages" trailer and any header line that survived <c>-q</c>.
+        /// "Obsoleting Packages" trailer, any header line that survived <c>-q</c>, and the prose
+        /// <see cref="IsCell"/> is there to catch.
         /// </summary>
         private static IEnumerable<(string Name, string Version, string Repository)> Unwrap(
             IReadOnlyList<string> lines)
@@ -170,12 +171,35 @@ namespace VirtDeck.Updates
                     continue;
                 }
 
-                // A name on its own: the row continues on the next line.
-                if (f.Length == 1 && !char.IsWhiteSpace(line[0])) { held = f[0]; continue; }
+                if (char.IsWhiteSpace(line[0]) || !IsCell(f[0])) continue;
 
-                if (f.Length >= 3 && !char.IsWhiteSpace(line[0])) yield return (f[0], f[1], f[2]);
+                // A name on its own: the row continues on the next line.
+                if (f.Length == 1) { held = f[0]; continue; }
+
+                if (f.Length >= 3) yield return (f[0], f[1], f[2]);
             }
         }
+
+        /// <summary>
+        /// Whether a first field is a package cell or the first word of a sentence.
+        ///
+        /// <b>check-update prints prose on the same stream as its table.</b> With
+        /// <c>autocheck_running_kernel</c> on, which is dnf's default, a host whose newest installed
+        /// kernel is a security update it is not running answers with two lines of it:
+        /// <c>Security: kernel-core-6.12.0-124.56.5.el10_0.x86_64 is an installed security update</c>
+        /// and a second naming the running version. Both go to stdout, both survive <c>-q</c>, and
+        /// both are printed by plain check-update as well as under <c>--security</c>, which is exactly
+        /// a host in the window between a full upgrade and its reboot. Three or more words starting at
+        /// column 0 is the shape of a row, so they were read as one, and the two collapsed on
+        /// <see cref="PackageUpdate.Key"/> into a single package named <c>Security:</c> upgrading to a
+        /// kernel out of a repository named <c>is</c>, marked as a security update because the
+        /// <c>--security</c> pass printed the sentence too. A host with nothing pending listed one.
+        ///
+        /// <b>The tell is the architecture.</b> Every cell check-update prints is <c>name.arch</c> and
+        /// every rpm has one, so a first field with no dot in it is not a package, which drops these
+        /// two sentences and the metadata expiry notice and anything else the tool writes in words.
+        /// </summary>
+        private static bool IsCell(string field) => field.Contains('.');
 
         // ---- Refresh ---------------------------------------------------------
 
@@ -332,6 +356,15 @@ namespace VirtDeck.Updates
         private static readonly Regex HistoryRow =
             new(@"^\s*(\d+)\s*\|(.*?)\|(.*?)\|(.*?)\|(.*)$", RegexOptions.Compiled);
 
+        // The Altered cell is a count with dnf's own flag letters stuck to it: "274 EE", "227  <",
+        // "1254 >E". They are the legend at the foot of dnf's own table (the rpmdb changed outside
+        // dnf before or after, the transaction aborted, it output errors, --skip-broken was used),
+        // which is a footnote this column has nowhere to print and cannot be read without. So the
+        // count is what the cell draws; drawing the cell whole is what put "(227  < changed)" on a
+        // row.
+        private static readonly Regex AlteredCount =
+            new(@"^(\d+)", RegexOptions.Compiled);
+
         /// <summary>
         /// <c>dnf history list</c> is a pipe-separated table: id, command line, date, action, altered
         /// count. Anything that is not five pipe-separated cells is a header or a rule and is dropped,
@@ -339,7 +372,8 @@ namespace VirtDeck.Updates
         ///
         /// The command line is what goes in the packages column. dnf's history does not name the
         /// packages in its list view, and asking per transaction would be one round trip each, which
-        /// is the thing this whole file is written to avoid; the count is carried alongside instead.
+        /// is the thing this whole file is written to avoid; the count is carried alongside instead,
+        /// with dnf's flag letters left off it (see <see cref="AlteredCount"/>).
         /// </summary>
         public IReadOnlyList<UpdateTransaction> ParseHistory(string raw)
         {
@@ -354,13 +388,20 @@ namespace VirtDeck.Updates
                 if (HistoryRow.Match(line) is not { Success: true } m) continue;
 
                 var command = m.Groups[2].Value.Trim();
-                var altered = m.Groups[5].Value.Trim();
+                var altered = AlteredCount.Match(m.Groups[5].Value.Trim()) is { Success: true } a
+                    ? $"{a.Groups[1].Value} changed"
+                    : string.Empty;
 
+                // dnf records its own first transaction with no command line at all, so the count is
+                // the whole cell there rather than a parenthesis hanging off nothing.
                 list.Add(new UpdateTransaction
                 {
-                    When = m.Groups[3].Value.Trim(),
+                    When = PackageScripts.When(m.Groups[3].Value),
                     Action = m.Groups[4].Value.Trim(),
-                    Packages = altered.Length > 0 ? $"{command} ({altered} changed)" : command,
+                    Packages =
+                        command.Length > 0 && altered.Length > 0 ? $"{command} ({altered})"
+                        : command.Length > 0 ? command
+                        : altered,
                 });
             }
 

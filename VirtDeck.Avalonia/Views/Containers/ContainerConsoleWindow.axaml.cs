@@ -24,19 +24,10 @@ namespace VirtDeck.Avalonia.Views.Containers;
 /// </summary>
 public partial class ContainerConsoleWindow : Window
 {
-    /// <summary>
-    /// How long a resize has to settle before the far end is told. Dragging a window edge produces
-    /// one of these per frame, and each is a window-change request on the wire plus a SIGWINCH and a
-    /// full redraw inside the container.
-    /// </summary>
-    private const int ResizeSettleMs = 150;
-
     private readonly DockerService? _docker;
     private readonly string _id;
     private readonly string _name;
     private readonly ContainerExecRequest _request;
-
-    private readonly DispatcherTimer _resizeDebounce;
 
     private SshPtySession? _session;
     private CancellationTokenSource? _cts;
@@ -65,15 +56,10 @@ public partial class ContainerConsoleWindow : Window
         // and Ctrl+wheel here is saved on the way out below.
         Terminal.FontSize = AppSettings.Current.TerminalFontSize;
 
-        _resizeDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ResizeSettleMs) };
-        _resizeDebounce.Tick += (_, _) =>
-        {
-            _resizeDebounce.Stop();
-            _session?.Resize(Terminal.Columns, Terminal.Rows);
-        };
-
         Terminal.Input += OnTerminalInput;
-        Terminal.TerminalResized += (_, _) => { _resizeDebounce.Stop(); _resizeDebounce.Start(); };
+
+        // Throttled and settled by the control itself, so this is the whole forwarding rule.
+        Terminal.TerminalResized += (cols, rows) => _session?.Resize(cols, rows);
         Terminal.ViewChanged += SyncScrollBar;
         Terminal.TitleChanged += OnTitleFromGuest;
 
@@ -97,7 +83,6 @@ public partial class ContainerConsoleWindow : Window
         Closing += (_, _) =>
         {
             _closing = true;
-            _resizeDebounce.Stop();
             SaveFontSize();
             EndSession();
         };
