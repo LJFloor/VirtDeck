@@ -27,7 +27,7 @@ packaging/build-appimage.sh 1.2.3   # Linux   -> publish/VirtDeck-1.2.3-x86_64.A
 publish.bat                         # Windows -> installer\output\VirtDeckSetup-*.exe
 ```
 
-`.github/workflows/publish.yml` builds both on every push to `main`; `release.yml` does the same on a `v*` tag and attaches both to a GitHub Release (the release job needs *both* jobs green). **Both set `retention-days`, and the repo being private is why**: artifacts count against the account's Actions storage allowance, one push to `main` stores about 107 MB for the pair, and once the allowance is full *every* upload in the repo fails, so a green build reports as a failed run. `publish.yml` keeps a week (its artifacts are the deliverable); `release.yml` keeps one day (they are only a hand-off to the release job, and the permanent copy attached to the Release is separate storage).
+`.github/workflows/publish.yml` builds both on every push to `main`, and that is the whole of CI: it **uploads nothing**, so it is the no-regression gate and not a source of downloads. The repo being private is why: build artifacts count against the account's Actions storage allowance, one push to `main` stored about 107 MB for the pair, and once the allowance is full *every* upload in the repo fails, so a green build reports as a failed run. Both halves are still built, because ISCC and appimagetool are part of what can regress. There is no tag-triggered release workflow any more; a release is built locally with the two commands above.
 
 `packaging/icons/make-icons.py` is the single source for the app icon: it rasterises the hicolor PNGs, the scalable SVG and the Windows `.ico` from one set of numbers, so no build machine needs an SVG renderer.
 

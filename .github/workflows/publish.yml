@@ -1,12 +1,14 @@
 name: Build & Publish
 
-# Build the app on every merge to main and produce both release artifacts: the Windows installer
-# and the Linux AppImage. Each is uploaded as a build artifact (downloadable from the run's
-# "Artifacts" section). This mirrors publish.bat and packaging/build-appimage.sh respectively.
+# Build the app on every merge to main: the Windows installer and the Linux AppImage, mirroring
+# publish.bat and packaging/build-appimage.sh respectively. Nothing is uploaded, so this workflow
+# is purely the no-regression gate. The repo being private is why: build artifacts count against
+# the account's Actions storage allowance, one push to main stored about 107 MB for the pair, and
+# once the allowance is full every upload in the repo fails, so a green build reports as a failed
+# run. Both halves are still built, because ISCC and appimagetool are part of what can regress.
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   windows:
@@ -53,19 +55,6 @@ jobs:
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
 
-      # A week, not the 90-day default. This repo is private, so every artifact counts against the
-      # account's Actions storage allowance, and a push to main stores both of these at around
-      # 107 MB the pair; at the usual cadence the default filled the quota and then every upload in
-      # the repo started failing, builds included. A week is longer than anybody goes back for a
-      # CI build of main, and a tagged release keeps its binaries on the Release itself anyway.
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VirtDeck-installer
-          path: installer/output/*.exe
-          if-no-files-found: error
-          retention-days: 7
-
   linux:
     runs-on: ubuntu-latest
 
@@ -86,12 +75,3 @@ jobs:
       # runner needs no FUSE and no extra packages.
       - name: Build AppImage
         run: packaging/build-appimage.sh "${{ steps.ver.outputs.version }}"
-
-      # Same week as the installer above, and for the same reason.
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VirtDeck-AppImage
-          path: publish/*.AppImage
-          if-no-files-found: error
-          retention-days: 7
