@@ -51,7 +51,7 @@ public sealed class RemotePathBox : UserControl
 
     /// <summary>
     /// Label on the browse button. Defaults to the square "…" that fits tight against the field;
-    /// setting a real label (e.g. "Browse…") hands width and padding back to the Button theme, which
+    /// setting a real label (e.g. "Browse") hands width and padding back to the Button theme, which
     /// is built for one, so the result matches a plain Button placed beside the box.
     /// </summary>
     public string BrowseText

@@ -87,6 +87,31 @@
       <Setter Property="MinHeight" Value="{DynamicResource TextControlThemeMinHeight}" />
     </Style>
 
+    <!--
+      The gutter between one table column and the next, said once for all thirteen of them.
+
+      A cell used to start its text hard against the column line to its left, so a value ran up
+      against the end of the one beside it and a sorted heading's hover began exactly where its
+      label did. This is the row half of it; Controls/ColumnHeader carries the same six pixels on
+      the heading, so a column and its heading stay aligned to the pixel.
+
+      The first cell is excluded because the table's own margin already insets it: JbTableRow's
+      12px and the heading strip's matching 12 are what the leftmost column sits behind, and adding
+      a gutter on top would push it out of line with the strip above it. The file explorer's row is
+      the one written as a DockPanel, and there its direct TextBlock children are exactly the
+      columns docked from the right, its name cell being a Panel; so it needs no nth-child rule and
+      would be wrong with one, its leftmost column being the last child rather than the first.
+    -->
+    <Style Selector="StackPanel.cells > TextBlock:not(:nth-child(1))">
+      <Setter Property="Padding" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="StackPanel.cells > Border:not(:nth-child(1))">
+      <Setter Property="Padding" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="DockPanel.cells > TextBlock">
+      <Setter Property="Padding" Value="6,0,0,0" />
+    </Style>
+
     <!-- The class vocabulary the answer-file window's section pages are written in. -->
     <StyleInclude Source="avares://virtdeck/Styles/UnattendPage.axaml" />
 

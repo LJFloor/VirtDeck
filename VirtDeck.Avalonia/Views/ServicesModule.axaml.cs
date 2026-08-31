@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Models;
 using VirtDeck.Services;
 using VirtDeck.Updates;
@@ -39,7 +40,8 @@ public partial class ServicesModule : UserControl, IModule
     {
         public required UnitScope Scope { get; init; }
         public required ListBox List { get; init; }
-        public required TextBox Search { get; init; }
+        public required FilterBox Search { get; init; }
+        public required TableSort Sort { get; init; }
         public required TextBlock Empty { get; init; }
         public required Button Refresh { get; init; }
         public required MenuItem Start { get; init; }
@@ -63,15 +65,6 @@ public partial class ServicesModule : UserControl, IModule
         /// pay for a catalog instead.
         /// </summary>
         public bool Loaded { get; set; }
-
-        /// <summary>
-        /// Typing re-runs the filter, the merge and the reorder over every unit in the scope, and on
-        /// a host with 250 services that is the most expensive thing this module does on the UI
-        /// thread. One shot, stopped and restarted per keystroke, the same shape the event debounce
-        /// below uses.
-        /// </summary>
-        public DispatcherTimer SearchDebounce { get; } =
-            new() { Interval = TimeSpan.FromMilliseconds(150) };
 
         public List<ServiceRow> Selected =>
             List.SelectedItems?.Cast<ServiceRow>().ToList() ?? new List<ServiceRow>();
@@ -123,6 +116,7 @@ public partial class ServicesModule : UserControl, IModule
             {
                 Scope = UnitScope.System,
                 List = SystemList, Search = SystemSearch, Empty = SystemEmpty, Refresh = RefreshSystemButton,
+                Sort = new TableSort(SysHeaderStrip),
                 Start = MenuSysStart, Stop = MenuSysStop, Restart = MenuSysRestart, Reload = MenuSysReload,
                 Enable = MenuSysEnable, Disable = MenuSysDisable, Mask = MenuSysMask, Unmask = MenuSysUnmask,
             },
@@ -130,6 +124,7 @@ public partial class ServicesModule : UserControl, IModule
             {
                 Scope = UnitScope.User,
                 List = UserList, Search = UserSearch, Empty = UserEmpty, Refresh = RefreshUserButton,
+                Sort = new TableSort(UsrHeaderStrip),
                 Start = MenuUsrStart, Stop = MenuUsrStop, Restart = MenuUsrRestart, Reload = MenuUsrReload,
                 Enable = MenuUsrEnable, Disable = MenuUsrDisable, Mask = MenuUsrMask, Unmask = MenuUsrUnmask,
             },
@@ -157,6 +152,8 @@ public partial class ServicesModule : UserControl, IModule
             if (_active) await PollStateAsync(Active);
         };
 
+        FilterBox.AttachFindShortcut(this, () => Active.Search);
+
         UpdateMenu();
     }
 
@@ -170,21 +167,13 @@ public partial class ServicesModule : UserControl, IModule
         // file outside VirtDeck.
         page.Refresh.Click += async (_, _) => await LoadCatalogAsync(page);
 
-        // The filter only re-renders what is already in hand, so it never costs a round trip, the
-        // way the accounts module's system-accounts toggle and the file explorer's sort do not. It
-        // is still the most expensive thing this module does on the UI thread, since it re-runs the
-        // merge and the reorder over every unit in the scope, so a keystroke restarts a one-shot
-        // timer rather than doing the work.
-        page.Search.TextChanged += (_, _) =>
-        {
-            page.SearchDebounce.Stop();
-            page.SearchDebounce.Start();
-        };
-        page.SearchDebounce.Tick += (_, _) =>
-        {
-            page.SearchDebounce.Stop();
-            Populate(page);
-        };
+        // The filter and the sort both only re-render what is already in hand, so neither costs a
+        // round trip, the way the accounts module's system-accounts toggle does not. The debounce
+        // that makes typing cheap lives in FilterBox now, and the reason is unchanged: a keystroke
+        // re-runs the filter, the merge and the reorder over every unit in the scope, which on a
+        // host with 250 services is the most expensive thing this module does on the UI thread.
+        page.Search.Changed += () => Populate(page);
+        page.Sort.Changed += () => Populate(page);
 
         page.Start.Click += async (_, _) => await RunActionAsync(page, "Starting", r => r.CanStart,
             name => Services.StartAsync(page.Scope, name));
@@ -286,7 +275,7 @@ public partial class ServicesModule : UserControl, IModule
         _active = false;
         _stateTimer.Stop();
         _eventDebounce.Stop();
-        foreach (var page in _pages) page.SearchDebounce.Stop();
+        foreach (var page in _pages) page.Search.Cancel();
 
         _cts.Cancel();
         _cts.Dispose();
@@ -462,7 +451,7 @@ public partial class ServicesModule : UserControl, IModule
     /// </summary>
     private void Populate(Page page)
     {
-        var needle = page.Search.Text?.Trim() ?? "";
+        var needle = page.Search.Needle;
         var units = needle.Length == 0
             ? page.Catalog.Units
             : page.Catalog.Units.Where(u => Matches(u, needle)).ToList();
@@ -483,57 +472,26 @@ public partial class ServicesModule : UserControl, IModule
         unit.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
         unit.Description.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
-    private static void Merge(Page page, IReadOnlyList<SystemdUnit> units)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var unit in units)
-        {
-            seen.Add(unit.Name);
-            if (page.ByName.TryGetValue(unit.Name, out var row)) row.Update(unit);
-            else
-            {
-                row = new ServiceRow(unit);
-                page.ByName[unit.Name] = row;
-                page.Rows.Add(row);
-            }
-        }
-
-        foreach (var name in page.ByName.Keys.Where(n => !seen.Contains(n)).ToList())
-        {
-            page.Rows.Remove(page.ByName[name]);
-            page.ByName.Remove(name);
-        }
-
-        Reorder(page.Rows, page.Rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList());
-    }
+    private static void Merge(Page page, IReadOnlyList<SystemdUnit> units) =>
+        TableRows.Merge(page.Rows, page.ByName, units,
+            u => u.Name, u => new ServiceRow(u), (row, u) => row.Update(u), rows => Order(page, rows));
 
     /// <summary>
-    /// Puts an already-merged collection into the wanted order by moving rows rather than replacing
-    /// them, so the selection and the scroll position survive a refresh. That is the whole point of
-    /// merging, and it matters more here than anywhere else in the app: the poll fires whether or
-    /// not anybody asked, so a rebuild would throw the selection away under the pointer.
-    ///
-    /// The position index is not premature: without it this is <c>IndexOf</c>, a linear scan, inside
-    /// a linear loop, which on a host with 250 service units is tens of thousands of reference
-    /// comparisons per pass, and a keystroke in the search box runs a whole pass.
+    /// One page's order. State and autostart sort on the word the cell draws, which is right here
+    /// because both are systemd's own vocabulary rather than a rendering of something else; the unit
+    /// name is the tiebreak, so the units of one state stay alphabetical among themselves.
     /// </summary>
-    private static void Reorder<T>(ObservableCollection<T> rows, IReadOnlyList<T> wanted) where T : notnull
+    private static IEnumerable<ServiceRow> Order(Page page, IEnumerable<ServiceRow> rows) => page.Sort.Key switch
     {
-        var at = new Dictionary<T, int>(rows.Count);
-        for (var i = 0; i < rows.Count; i++) at[rows[i]] = i;
-
-        for (var i = 0; i < wanted.Count; i++)
-        {
-            var from = at[wanted[i]];
-            if (from == i) continue;
-
-            rows.Move(from, i);
-
-            // Only the span the move disturbed needs reindexing. Nothing below i can have moved,
-            // because those positions are already final, which is also why from is never less than i.
-            for (var j = i; j <= from; j++) at[rows[j]] = j;
-        }
-    }
+        "name" => page.Sort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "state" => page.Sort.By(rows, r => r.StateText, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "autostart" => page.Sort.By(rows, r => r.FileState, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "description" => page.Sort.By(rows, r => r.Description, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
     private static void Clear(Page page)
     {
@@ -571,7 +529,7 @@ public partial class ServicesModule : UserControl, IModule
         else SetStatus("Reading the units…");
     }
 
-    private static bool Filtered(Page page) => (page.Search.Text?.Trim() ?? "").Length > 0;
+    private static bool Filtered(Page page) => page.Search.HasNeedle;
 
     // ---- Commands ------------------------------------------------------
 

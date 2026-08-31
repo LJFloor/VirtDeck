@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.SoftwareUpdatesModule"
              x:DataType="vm:UpdateRow">
 
@@ -93,6 +94,9 @@
                   </Button>
                 </Border>
               </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="UpdateSearch" Width="200" Margin="10,0,0,0"
+                           PlaceholderText="Search packages"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the package name and the repository." />
               <Panel />
             </DockPanel>
           </Border>
@@ -104,7 +108,7 @@
                   Padding="12,8" Background="#18D68F00"
                   BorderThickness="0,0,0,1" BorderBrush="#55D68F00">
             <DockPanel>
-              <Button Name="RebootButton" DockPanel.Dock="Right" Content="Restart host…"
+              <Button Name="RebootButton" DockPanel.Dock="Right" Content="Restart host"
                       Margin="10,0,0,0" VerticalAlignment="Center" />
               <TextBlock Name="RebootText" VerticalAlignment="Center" TextWrapping="Wrap" />
             </DockPanel>
@@ -112,13 +116,17 @@
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="Package"    Width="{StaticResource ColPackage}"  FontWeight="SemiBold" />
-              <TextBlock Text="Installed"  Width="{StaticResource ColCurrent}"  FontWeight="SemiBold" />
-              <TextBlock Text="Available"  Width="{StaticResource ColNew}"      FontWeight="SemiBold" />
-              <TextBlock Text="Severity"   Width="{StaticResource ColSeverity}" FontWeight="SemiBold" />
-              <TextBlock Text="Repository" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- Every cell sorts; a third click returns to this table's own order, which is security
+                 first and then by name. A version sorts as the string the tool printed: comparing
+                 two of them properly is per-manager arithmetic that belongs to the package tool,
+                 and this column is for finding a package rather than for ranking one. -->
+            <DockPanel Name="UpdateHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Package"    SortKey="package"    Width="{StaticResource ColPackage}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Installed"  SortKey="installed"  Width="{StaticResource ColCurrent}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Available"  SortKey="available"  Width="{StaticResource ColNew}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Severity"   SortKey="severity"   Width="{StaticResource ColSeverity}" />
+              <c:ColumnHeader Text="Repository" SortKey="repository" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -130,8 +138,8 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:UpdateRow">
-                  <StackPanel Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
-                    <TextBlock Text="{Binding Key}" Width="{StaticResource ColPackage}"
+                  <StackPanel Classes="cells" Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+                    <TextBlock Text="{Binding Display}" Width="{StaticResource ColPackage}"
                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding CurrentText}" Width="{StaticResource ColCurrent}"
                                Opacity="0.75" VerticalAlignment="Center"
@@ -176,11 +184,14 @@
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="When"     Width="{StaticResource ColWhen}"   FontWeight="SemiBold" />
-              <TextBlock Text="Action"   Width="{StaticResource ColAction}" FontWeight="SemiBold" />
-              <TextBlock Text="Packages" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- When sorts as the string it draws, which is correct because PackageScripts.When
+                 normalises every manager's date to "yyyy-MM-dd HH:mm": lexicographic order already
+                 is chronological order, the trade the file explorer's Modified column makes. -->
+            <DockPanel Name="HistoryHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="When"     SortKey="when"     Width="{StaticResource ColWhen}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Action"   SortKey="action"   Width="{StaticResource ColAction}" />
+              <c:ColumnHeader Text="Packages" SortKey="packages" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -189,7 +200,7 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:HistoryRow">
-                  <StackPanel Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+                  <StackPanel Classes="cells" Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
                     <TextBlock Text="{Binding When}" Width="{StaticResource ColWhen}"
                                Opacity="0.75" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" />

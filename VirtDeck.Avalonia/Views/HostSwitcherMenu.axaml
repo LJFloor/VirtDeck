@@ -11,7 +11,7 @@
 
     MinHeight and Padding are not written here, unlike HubAccountMenu's: this control appears in
     two places with two different sets of metrics (the shell's status bar, where the cell fills the
-    strip and carries the bar's own side inset inside its hover, and the login form, where it keeps
+    strip and carries the bar's own side inset inside its hover, and an ordinary form, where it keeps
     the theme's toolbar figures). StatusBarMode is what chooses, and it does it in code because the
     same properties have to be settable both ways.
 

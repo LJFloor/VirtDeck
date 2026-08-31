@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Containers;
 using VirtDeck.Models;
@@ -42,6 +43,22 @@ public partial class ContainersModule : UserControl, IModule
 
     /// <summary>Only for the host-path pickers in the image dialogs; nothing here lists a directory.</summary>
     private RemoteFileService? _files;
+
+    private TableSort? _containerSortOrNull;
+    private TableSort? _imageSortOrNull;
+    private TableSort? _dockerNetSortOrNull;
+    private TableSort? _stackSortOrNull;
+
+    /// <summary>
+    /// Why each table's last listing failed, or empty. Held per table because a sort click or a
+    /// keystroke re-draws the empty state, and a table that could not be listed must go on saying so
+    /// rather than claiming the host has nothing on it. Same latch, and the same reason, as the file
+    /// explorer's failure panel.
+    /// </summary>
+    private string _containersFailure = "";
+    private string _imagesFailure = "";
+    private string _networksFailure = "";
+    private string _stacksFailure = "";
 
     private readonly ObservableCollection<ContainerRow> _rows = new();
     private readonly Dictionary<string, ContainerRow> _byId = new();
@@ -160,6 +177,28 @@ public partial class ContainersModule : UserControl, IModule
         // wired here and handed over through StatusWidget rather than sitting in this markup.
         _hub.LoginClicked += async () => await HubLoginAsync();
         _hub.LogoutClicked += async () => await HubLogoutAsync();
+
+        // All four tables sort and two of them filter, and none of it costs a round trip: a click or
+        // a keystroke re-renders the listing already in hand. A third click on a column returns to
+        // that table's own order, which is where each page's grouping lives (running containers
+        // first, dangling images last, docker's predefined networks last, ours before discovered
+        // stacks).
+        _containerSortOrNull = new TableSort(ContainerHeaderStrip);
+        _imageSortOrNull = new TableSort(ImageHeaderStrip);
+        _dockerNetSortOrNull = new TableSort(DockerNetHeaderStrip);
+        _stackSortOrNull = new TableSort(StackHeaderStrip);
+        _containerSortOrNull.Changed += PopulateContainers;
+        _imageSortOrNull.Changed += PopulateImages;
+        _dockerNetSortOrNull.Changed += PopulateNetworks;
+        _stackSortOrNull.Changed += PopulateStacks;
+        ContainerSearch.Changed += PopulateContainers;
+        ImageSearch.Changed += PopulateImages;
+        FilterBox.AttachFindShortcut(this, () => Current switch
+        {
+            Tab.Images => ImageSearch,
+            Tab.Containers => ContainerSearch,
+            _ => null,
+        });
 
         // A tab switch is a module switch in miniature: the shell's two slots are repainted from
         // whatever is now on screen, and only the incoming table is read. Same shape as
@@ -346,6 +385,8 @@ public partial class ContainersModule : UserControl, IModule
         _imageDebounce.Stop();
         _netDebounce.Stop();
         _stackDebounce.Stop();
+        ContainerSearch.Cancel();
+        ImageSearch.Cancel();
     }
 
     private void StartTimers()
@@ -476,16 +517,13 @@ public partial class ContainersModule : UserControl, IModule
         try
         {
             await Docker.RefreshAsync();
-            Merge(Docker.Containers);
-            UpdateStatusCount();
-            if (_rows.Count == 0)
-                ShowEmpty(EmptyText, "No containers on this host.");
-            else
-                EmptyText.IsVisible = false;
+            _containersFailure = "";
+            PopulateContainers();
         }
         catch (Exception ex)
         {
             SetStatus($"Refresh failed: {ex.Message}");
+            _containersFailure = ex.Message;
             if (_rows.Count == 0) ShowEmpty(EmptyText, $"Could not list containers:\n\n{ex.Message}");
         }
         finally
@@ -502,17 +540,13 @@ public partial class ContainersModule : UserControl, IModule
         try
         {
             await Docker.RefreshImagesAsync();
-            MergeImages(Docker.Images);
-            UpdateStatusCount();
-            if (_imageRows.Count == 0)
-                ShowEmpty(ImagesEmptyText, "No images on this host.\n\n" +
-                                           "Pull one, or import an archive written by docker save.");
-            else
-                ImagesEmptyText.IsVisible = false;
+            _imagesFailure = "";
+            PopulateImages();
         }
         catch (Exception ex)
         {
             SetStatus($"Refresh failed: {ex.Message}");
+            _imagesFailure = ex.Message;
             if (_imageRows.Count == 0)
                 ShowEmpty(ImagesEmptyText, $"Could not list images:\n\n{ex.Message}");
         }
@@ -530,17 +564,13 @@ public partial class ContainersModule : UserControl, IModule
         try
         {
             await Docker.RefreshNetworksAsync();
-            MergeNetworks(Docker.Networks);
-            UpdateStatusCount();
-            if (_netRows.Count == 0)
-                ShowEmpty(NetworksEmptyText, "No networks on this host.\n\n" +
-                                             "That is unusual: docker predefines bridge, host and none.");
-            else
-                NetworksEmptyText.IsVisible = false;
+            _networksFailure = "";
+            PopulateNetworks();
         }
         catch (Exception ex)
         {
             SetStatus($"Refresh failed: {ex.Message}");
+            _networksFailure = ex.Message;
             if (_netRows.Count == 0)
                 ShowEmpty(NetworksEmptyText, $"Could not list networks:\n\n{ex.Message}");
         }
@@ -558,8 +588,8 @@ public partial class ContainersModule : UserControl, IModule
         try
         {
             await Docker.RefreshStacksAsync();
-            MergeStacks(Docker.Stacks);
-            UpdateStatusCount();
+            _stacksFailure = "";
+            PopulateStacks();
 
             // The compose version rides the same listing rather than a probe of its own, so it is
             // known by the time there is a table to draw, and it is re-read on every pass:
@@ -569,15 +599,11 @@ public partial class ContainersModule : UserControl, IModule
             // The listing carries its own version tag, so an install or a removal that happened
             // while this page was open is picked up without waiting for the next activation.
             SyncStacksTab();
-
-            if (_stackRows.Count == 0)
-                ShowEmpty(StacksEmptyText, "No compose stacks on this host.");
-            else
-                StacksEmptyText.IsVisible = false;
         }
         catch (Exception ex)
         {
             SetStatus($"Refresh failed: {ex.Message}");
+            _stacksFailure = ex.Message;
             if (_stackRows.Count == 0)
                 ShowEmpty(StacksEmptyText, $"Could not list stacks:\n\n{ex.Message}");
         }
@@ -641,13 +667,18 @@ public partial class ContainersModule : UserControl, IModule
     }
 
     /// <summary>The left status slot, which says what the table on screen holds.</summary>
-    private void UpdateStatusCount() => SetStatus(Current switch
+    private void UpdateStatusCount()
     {
-        Tab.Images => $"{_imageRows.Count} image{(_imageRows.Count == 1 ? "" : "s")}",
-        Tab.Networks => $"{_netRows.Count} network{(_netRows.Count == 1 ? "" : "s")}",
-        Tab.Stacks => $"{_stackRows.Count} stack{(_stackRows.Count == 1 ? "" : "s")}",
-        _ => $"{_rows.Count} container{(_rows.Count == 1 ? "" : "s")}",
-    });
+        var (text, filtered) = Current switch
+        {
+            Tab.Images => ($"{_imageRows.Count} image{(_imageRows.Count == 1 ? "" : "s")}", ImageSearch.HasNeedle),
+            Tab.Networks => ($"{_netRows.Count} network{(_netRows.Count == 1 ? "" : "s")}", false),
+            Tab.Stacks => ($"{_stackRows.Count} stack{(_stackRows.Count == 1 ? "" : "s")}", false),
+            _ => ($"{_rows.Count} container{(_rows.Count == 1 ? "" : "s")}", ContainerSearch.HasNeedle),
+        };
+
+        SetStatus(filtered ? text + " · filtered" : text);
+    }
 
     private static void ShowEmpty(TextBlock label, string message)
     {
@@ -655,142 +686,203 @@ public partial class ContainersModule : UserControl, IModule
         label.IsVisible = true;
     }
 
-    /// <summary>
-    /// Updates rows in place, keyed by container id, so the selection and scroll position survive
-    /// a refresh. Same reason the VM and network lists merge rather than rebuild.
-    /// </summary>
-    private void Merge(IReadOnlyList<ContainerInfo> containers)
-    {
-        var seen = new HashSet<string>();
-        // Running first, then by name: a stopped container is rarely what you came to look at.
-        foreach (var c in containers
-                     .OrderByDescending(c => c.State == "running")
-                     .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            seen.Add(c.Id);
-            if (_byId.TryGetValue(c.Id, out var row))
-            {
-                row.Update(c);
-            }
-            else
-            {
-                row = new ContainerRow(c);
-                _byId[c.Id] = row;
-                _rows.Add(row);
-            }
-        }
+    private TableSort ContainerSort => _containerSortOrNull!;
+    private TableSort ImageSort => _imageSortOrNull!;
+    private TableSort DockerNetSort => _dockerNetSortOrNull!;
+    private TableSort StackSort => _stackSortOrNull!;
 
-        foreach (var id in _byId.Keys.Where(i => !seen.Contains(i)).ToList())
-        {
-            _rows.Remove(_byId[id]);
-            _byId.Remove(id);
-        }
+    /// <summary>
+    /// Rebuilds the containers table from the listing already in hand. Called by a refresh, by the
+    /// search box and by a sort click alike, so neither typing nor sorting costs a round trip.
+    ///
+    /// <para>Rows are merged and never rebuilt, keyed by container id, so the selection and the
+    /// scroll position survive; the 30 second poll and the event tail both fire whether or not
+    /// anybody asked.</para>
+    /// </summary>
+    private void PopulateContainers()
+    {
+        if (_docker is null) return;
+
+        var needle = ContainerSearch.Needle;
+        var items = needle.Length == 0
+            ? Docker.Containers.AsEnumerable()
+            : Docker.Containers.Where(c =>
+                c.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+        TableRows.Merge(_rows, _byId, items,
+            c => c.Id, c => new ContainerRow(c), (row, c) => row.Update(c), OrderContainers);
+
+        UpdateStatusCount();
+        DrawEmpty(EmptyText, _rows.Count, _containersFailure, needle,
+            "Could not list containers", "No container matches", "No containers on this host.");
     }
 
     /// <summary>
-    /// The same merge for images, and the key is the difference: <see cref="ImageRow.Key"/> is
+    /// The containers table's own order is running first and then by name: a stopped container is
+    /// rarely what somebody came to look at. Uptime sorts on the elapsed seconds rather than on the
+    /// "3d 04:11:02" string, which does not sort once a run passes a day.
+    /// </summary>
+    private IEnumerable<ContainerRow> OrderContainers(IEnumerable<ContainerRow> rows) => ContainerSort.Key switch
+    {
+        "name" => ContainerSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "image" => ContainerSort.By(rows, r => r.Image, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "state" => ContainerSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "uptime" => ContainerSort.By(rows, r => r.UptimeSeconds)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "ports" => ContainerSort.By(rows, r => r.Ports, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderByDescending(r => r.State == "running")
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
+
+    /// <summary>
+    /// The one empty state every table on this module draws, in the one order the three answers have
+    /// to be tried in: a listing that failed says so however the table was then filtered, and a
+    /// needle that matched nothing is a statement about the needle rather than about the host.
+    /// </summary>
+    private static void DrawEmpty(TextBlock label, int count, string failure, string needle,
+                                  string failedText, string noMatchText, string emptyText)
+    {
+        if (count > 0) { label.IsVisible = false; return; }
+
+        ShowEmpty(label,
+            failure.Length > 0 ? $"{failedText}:\n\n{failure}"
+            : needle.Length > 0 ? $"{noMatchText} “{needle}”."
+            : emptyText);
+    }
+
+    /// <summary>
+    /// The same for images, and the key is the difference: <see cref="ImageRow.Key"/> is
     /// id-plus-repository-plus-tag, never the id alone. One image legitimately appears once per tag
     /// it carries, and two dangling layers both read <c>&lt;none&gt;:&lt;none&gt;</c>, so an id-keyed
     /// merge would collapse rows that are genuinely separate lines in the table.
     /// </summary>
-    private void MergeImages(IReadOnlyList<ImageInfo> images)
+    private void PopulateImages()
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        // Tagged first and dangling last: an untagged layer is rarely what somebody came to look at,
-        // the same reasoning that puts running containers at the top.
-        foreach (var image in images
-                     .OrderBy(i => i.Repository == "<none>")
-                     .ThenBy(i => i.Repository, StringComparer.OrdinalIgnoreCase)
-                     .ThenBy(i => i.Tag, StringComparer.OrdinalIgnoreCase))
-        {
-            var key = ImageRow.KeyOf(image);
-            seen.Add(key);
-            if (_imagesByKey.TryGetValue(key, out var row))
-            {
-                row.Update(image);
-            }
-            else
-            {
-                row = new ImageRow(image);
-                _imagesByKey[key] = row;
-                _imageRows.Add(row);
-            }
-        }
+        if (_docker is null) return;
 
-        foreach (var key in _imagesByKey.Keys.Where(k => !seen.Contains(k)).ToList())
-        {
-            _imageRows.Remove(_imagesByKey[key]);
-            _imagesByKey.Remove(key);
-        }
+        var needle = ImageSearch.Needle;
+        var items = needle.Length == 0
+            ? Docker.Images.AsEnumerable()
+            : Docker.Images.Where(i =>
+                i.Repository.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                i.Tag.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                i.Id.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+        TableRows.Merge(_imageRows, _imagesByKey, items,
+            ImageRow.KeyOf, i => new ImageRow(i), (row, i) => row.Update(i), OrderImages);
+
+        UpdateStatusCount();
+        DrawEmpty(ImagesEmptyText, _imageRows.Count, _imagesFailure, needle,
+            "Could not list images", "No image matches",
+            "No images on this host.\n\nPull one, or import an archive written by docker save.");
     }
 
     /// <summary>
-    /// The same merge for networks, keyed by the id alone: unlike an image, a network appears
-    /// exactly once whatever it is called.
+    /// The images table's own order is tagged first and dangling last: an untagged layer is rarely
+    /// what somebody came to look at, the same reasoning that puts running containers at the top.
+    /// Created and Size sort on the values their cells were rendered from, never on docker's phrases.
     /// </summary>
-    private void MergeNetworks(IReadOnlyList<DockerNetworkInfo> networks)
+    private IEnumerable<ImageRow> OrderImages(IEnumerable<ImageRow> rows) => ImageSort.Key switch
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        // User-defined first and docker's predefined three last, for the reason images put dangling
-        // layers last: the rows somebody came to look at are the ones they made.
-        foreach (var network in networks
-                     .OrderBy(n => DockerService.IsPredefinedNetwork(n.Name))
-                     .ThenBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            seen.Add(network.Id);
-            if (_netById.TryGetValue(network.Id, out var row))
-            {
-                row.Update(network);
-            }
-            else
-            {
-                row = new DockerNetworkRow(network);
-                _netById[network.Id] = row;
-                _netRows.Add(row);
-            }
-        }
+        "repository" => ImageSort.By(rows, r => r.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Tag, StringComparer.OrdinalIgnoreCase),
+        "tag" => ImageSort.By(rows, r => r.Tag, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Repository, StringComparer.OrdinalIgnoreCase),
+        "id" => ImageSort.By(rows, r => r.Id, StringComparer.Ordinal),
+        "created" => ImageSort.By(rows, r => r.CreatedAt, StringComparer.Ordinal)
+            .ThenBy(r => r.Repository, StringComparer.OrdinalIgnoreCase),
+        "size" => ImageSort.By(rows, r => r.SizeBytes)
+            .ThenBy(r => r.Repository, StringComparer.OrdinalIgnoreCase),
+        "status" => ImageSort.By(rows, r => r.Status, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Repository, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderBy(r => r.IsDangling)
+            .ThenBy(r => r.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Tag, StringComparer.OrdinalIgnoreCase),
+    };
 
-        foreach (var id in _netById.Keys.Where(i => !seen.Contains(i)).ToList())
-        {
-            _netRows.Remove(_netById[id]);
-            _netById.Remove(id);
-        }
+    /// <summary>
+    /// The same for networks, keyed by the id alone: unlike an image, a network appears exactly once
+    /// whatever it is called. No search box on this page, because a host has a handful of networks.
+    /// </summary>
+    private void PopulateNetworks()
+    {
+        if (_docker is null) return;
+
+        TableRows.Merge(_netRows, _netById, Docker.Networks,
+            n => n.Id, n => new DockerNetworkRow(n), (row, n) => row.Update(n), OrderDockerNets);
+
+        UpdateStatusCount();
+        DrawEmpty(NetworksEmptyText, _netRows.Count, _networksFailure, "",
+            "Could not list networks", "",
+            "No networks on this host.\n\nThat is unusual: docker predefines bridge, host and none.");
     }
 
     /// <summary>
-    /// The same merge for stacks, keyed by the project name, because a compose project has no id at
-    /// all: the label compose stamps on its containers is its whole identity.
+    /// The networks table's own order is user-defined first and docker's predefined three last, for
+    /// the reason images put dangling layers last: the rows somebody came to look at are the ones
+    /// they made.
     /// </summary>
-    private void MergeStacks(IReadOnlyList<DockerStackInfo> stacks)
+    private IEnumerable<DockerNetworkRow> OrderDockerNets(IEnumerable<DockerNetworkRow> rows) => DockerNetSort.Key switch
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        "name" => DockerNetSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "id" => DockerNetSort.By(rows, r => r.Id, StringComparer.Ordinal),
+        "driver" => DockerNetSort.By(rows, r => r.Driver, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "scope" => DockerNetSort.By(rows, r => r.Scope, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "subnet" => DockerNetSort.By(rows, r => r.Subnet, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "gateway" => DockerNetSort.By(rows, r => r.Gateway, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "status" => DockerNetSort.By(rows, r => r.Status, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderBy(r => r.IsPredefined)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
+
+    /// <summary>
+    /// The same for stacks, keyed by the project name, because a compose project has no id at all:
+    /// the label compose stamps on its containers is its whole identity.
+    /// </summary>
+    private void PopulateStacks()
+    {
+        if (_docker is null) return;
+
         var compose = Docker.ComposeAvailable;
+        TableRows.Merge(_stackRows, _stacksByName, Docker.Stacks,
+            t => t.Name, t => new DockerStackRow(t, compose), (row, t) => row.Update(t, compose), OrderStacks);
 
-        // Ours first and discovered ones last, for the reason the networks list puts docker's
-        // predefined three last: the rows somebody came to look at are the ones they made.
-        foreach (var stack in stacks
-                     .OrderBy(t => !t.Managed)
-                     .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            seen.Add(stack.Name);
-            if (_stacksByName.TryGetValue(stack.Name, out var row))
-            {
-                row.Update(stack, compose);
-            }
-            else
-            {
-                row = new DockerStackRow(stack, compose);
-                _stacksByName[stack.Name] = row;
-                _stackRows.Add(row);
-            }
-        }
-
-        foreach (var name in _stacksByName.Keys.Where(n => !seen.Contains(n)).ToList())
-        {
-            _stackRows.Remove(_stacksByName[name]);
-            _stacksByName.Remove(name);
-        }
+        UpdateStatusCount();
+        DrawEmpty(StacksEmptyText, _stackRows.Count, _stacksFailure, "",
+            "Could not list stacks", "", "No compose stacks on this host.");
     }
+
+    /// <summary>
+    /// The stacks table's own order is ours first and discovered ones last, for the reason the
+    /// networks list puts docker's predefined three last. Services sorts on the count the cell
+    /// draws, because "10" sorts below "2" as text.
+    /// </summary>
+    private IEnumerable<DockerStackRow> OrderStacks(IEnumerable<DockerStackRow> rows) => StackSort.Key switch
+    {
+        "name" => StackSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "status" => StackSort.By(rows, r => r.Status, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "services" => StackSort.By(rows, r => r.Services).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "source" => StackSort.By(rows, r => r.Source, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "file" => StackSort.By(rows, r => r.ConfigPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderBy(r => !r.Managed)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
     // ---- Actions ------------------------------------------------------
 

@@ -51,7 +51,7 @@ namespace VirtDeck.Unattend
 
         /// <summary>
         /// Forces the tables to load. Call it off the UI thread while the user is still doing something
-        /// else, so the first click of "Customize Windows setup..." does not pay for the JSON parse.
+        /// else, so the first click of "Customize Windows setup" does not pay for the JSON parse.
         /// Safe to call any number of times, and safe to call concurrently with a real use.
         /// </summary>
         public static void Prime() => _ = Loaded.Value;

@@ -9,7 +9,7 @@ namespace VirtDeck.Avalonia.Views;
 /// <summary>Builds a <see cref="DiskAddOp"/>: new qcow2 file, existing/new ZFS volume, CD-ROM or floppy.</summary>
 public partial class AddDiskDialog : Window
 {
-    private const string CreateZvolItem = "➕  Create new ZVOL…";
+    private const string CreateZvolItem = "➕  Create new ZVOL";
     private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
     // A zvol name is pool[/dataset]+/name: at least one slash, ZFS-legal characters only.
     private static readonly Regex ZvolNameRegex =
@@ -129,7 +129,7 @@ public partial class AddDiskDialog : Window
 
         if (ZvolRadio.IsChecked == true)
         {
-            if (ZvolBox.SelectedItem is string) // "Create new ZVOL…"
+            if (ZvolBox.SelectedItem is string) // "Create new ZVOL"
             {
                 var name = NewVolBox.Text?.Trim() ?? "";
                 if (!ZvolNameRegex.IsMatch(name))

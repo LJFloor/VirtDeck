@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Models;
 
 namespace VirtDeck.Avalonia.Views.Containers;

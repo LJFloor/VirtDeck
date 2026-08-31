@@ -16,11 +16,11 @@
              Windows reads and cannot be re-imported, which is why they are separate buttons rather
              than one Import/Export pair over one format. -->
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-          <Button Name="LoadPresetButton" Content="Load preset..." MinWidth="88"
+          <Button Name="LoadPresetButton" Content="Load preset" MinWidth="88"
                   ToolTip.Tip="Fill these pages in from a preset saved on this PC." />
-          <Button Name="SavePresetButton" Content="Save preset..." MinWidth="88"
+          <Button Name="SavePresetButton" Content="Save preset" MinWidth="88"
                   ToolTip.Tip="Save everything on these pages to a file on this PC, to load again later." />
-          <Button Name="ExportButton" Content="Export XML..." MinWidth="88"
+          <Button Name="ExportButton" Content="Export XML" MinWidth="88"
                   ToolTip.Tip="Write the autounattend.xml these pages describe to a file on this PC. This is what the answer disc carries; it cannot be loaded back into this window." />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">

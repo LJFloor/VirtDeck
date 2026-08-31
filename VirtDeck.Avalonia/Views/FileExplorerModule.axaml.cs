@@ -7,7 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using AvaloniaPath = Avalonia.Controls.Shapes.Path;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Services;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -43,9 +43,6 @@ namespace VirtDeck.Avalonia.Views;
 /// </summary>
 public partial class FileExplorerModule : UserControl, IModule
 {
-    /// <summary>Which column the list is ordered by. Directories come first whatever this says.</summary>
-    private enum SortKey { Name, Size, Modified, Permissions, Owner, Group }
-
     private RemoteFileService? _files;
     private RemoteTransferService? _transfers;
 
@@ -78,8 +75,15 @@ public partial class FileExplorerModule : UserControl, IModule
     private readonly List<string> _history = new();
     private int _historyAt = -1;
 
-    private SortKey _sort = SortKey.Name;
-    private bool _sortDescending;
+    /// <summary>
+    /// Which column the list is ordered by, and which way. Constructed over the heading strip, so
+    /// the six click handlers and the six-entry caret table this used to keep are the shared
+    /// control's. Directories still come first whatever it says, which is why it is built with no
+    /// third state: see the note on the strip in the markup.
+    /// </summary>
+    private TableSort? _sortOrNull;
+
+    private TableSort Sort => _sortOrNull!;
 
     /// <summary>
     /// Bumped on every navigation. A listing that comes back holding a stale token is dropped:
@@ -169,12 +173,8 @@ public partial class FileExplorerModule : UserControl, IModule
             await NavigateTo(PathBox.Text?.Trim() ?? "/", record: true);
         };
 
-        NameHeader.Click += (_, _) => SortBy(SortKey.Name);
-        SizeHeader.Click += (_, _) => SortBy(SortKey.Size);
-        ModifiedHeader.Click += (_, _) => SortBy(SortKey.Modified);
-        PermsHeader.Click += (_, _) => SortBy(SortKey.Permissions);
-        OwnerHeader.Click += (_, _) => SortBy(SortKey.Owner);
-        GroupHeader.Click += (_, _) => SortBy(SortKey.Group);
+        _sortOrNull = new TableSort(HeaderStrip, initialKey: "name", allowDefault: false);
+        Sort.Changed += PopulateList;
 
         FileList.DoubleTapped += async (_, _) => await OpenSelection();
         FileList.SelectionChanged += (_, _) => SyncMenu();
@@ -201,7 +201,6 @@ public partial class FileExplorerModule : UserControl, IModule
 
         SetUpDragDrop();
 
-        PaintSortCarets();
         SyncHistoryButtons();
     }
 
@@ -658,33 +657,6 @@ public partial class FileExplorerModule : UserControl, IModule
     }
 
     // ---- The list ------------------------------------------------------
-
-    private void SortBy(SortKey key)
-    {
-        if (_sort == key) _sortDescending = !_sortDescending;
-        else { _sort = key; _sortDescending = false; }
-        PaintSortCarets();
-        PopulateList();
-    }
-
-    private void PaintSortCarets()
-    {
-        (SortKey Key, AvaloniaPath Caret)[] carets =
-        {
-            (SortKey.Name, NameCaret),
-            (SortKey.Size, SizeCaret),
-            (SortKey.Modified, ModifiedCaret),
-            (SortKey.Permissions, PermsCaret),
-            (SortKey.Owner, OwnerCaret),
-            (SortKey.Group, GroupCaret),
-        };
-
-        foreach (var (key, caret) in carets)
-        {
-            caret.IsVisible = key == _sort;
-            caret.RenderTransform = _sortDescending ? new RotateTransform(180) : null;
-        }
-    }
 
     // ---- Renaming ------------------------------------------------------
 
@@ -1899,23 +1871,28 @@ public partial class FileExplorerModule : UserControl, IModule
         // Directories first whatever the sort says, which is the one thing every file manager
         // agrees on; the direction applies to the key inside each of the two groups.
         var ordered = visible.OrderBy(e => !e.IsDir);
-        ordered = (_sort, _sortDescending) switch
+        var desc = Sort.Descending;
+        ordered = Sort.Key switch
         {
-            (SortKey.Size, false) => ordered.ThenBy(e => e.Size),
-            (SortKey.Size, true) => ordered.ThenByDescending(e => e.Size),
+            "size" => desc ? ordered.ThenByDescending(e => e.Size) : ordered.ThenBy(e => e.Size),
             // Modified sorts as a string on purpose: it is formatted host-side as
             // "yyyy-MM-dd HH:mm", fixed width and ISO ordered, so lexicographic order already is
             // chronological order and there is nothing to parse.
-            (SortKey.Modified, false) => ordered.ThenBy(e => e.Modified, StringComparer.Ordinal),
-            (SortKey.Modified, true) => ordered.ThenByDescending(e => e.Modified, StringComparer.Ordinal),
-            (SortKey.Permissions, false) => ordered.ThenBy(e => e.Permissions, StringComparer.Ordinal),
-            (SortKey.Permissions, true) => ordered.ThenByDescending(e => e.Permissions, StringComparer.Ordinal),
-            (SortKey.Owner, false) => ordered.ThenBy(e => e.Owner, StringComparer.OrdinalIgnoreCase),
-            (SortKey.Owner, true) => ordered.ThenByDescending(e => e.Owner, StringComparer.OrdinalIgnoreCase),
-            (SortKey.Group, false) => ordered.ThenBy(e => e.Group, StringComparer.OrdinalIgnoreCase),
-            (SortKey.Group, true) => ordered.ThenByDescending(e => e.Group, StringComparer.OrdinalIgnoreCase),
-            (_, true) => ordered.ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase),
-            _ => ordered.ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase),
+            "modified" => desc
+                ? ordered.ThenByDescending(e => e.Modified, StringComparer.Ordinal)
+                : ordered.ThenBy(e => e.Modified, StringComparer.Ordinal),
+            "perms" => desc
+                ? ordered.ThenByDescending(e => e.Permissions, StringComparer.Ordinal)
+                : ordered.ThenBy(e => e.Permissions, StringComparer.Ordinal),
+            "owner" => desc
+                ? ordered.ThenByDescending(e => e.Owner, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenBy(e => e.Owner, StringComparer.OrdinalIgnoreCase),
+            "group" => desc
+                ? ordered.ThenByDescending(e => e.Group, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenBy(e => e.Group, StringComparer.OrdinalIgnoreCase),
+            _ => desc
+                ? ordered.ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase),
         };
         // Name is the tiebreak for every other key, so equal sizes or owners still land in a stable
         // and readable order.

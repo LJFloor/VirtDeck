@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using VirtDeck.Avalonia.Controls;
 using Avalonia.Interactivity;
 using VirtDeck.Models;
 

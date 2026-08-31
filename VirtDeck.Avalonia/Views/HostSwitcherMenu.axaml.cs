@@ -23,13 +23,16 @@ namespace VirtDeck.Avalonia.Views;
 /// report progress and failure through and a cell with a name in it has nowhere to say that
 /// something is happening.
 ///
-/// It appears twice. In the status bar it is a status bar cell; on the login form it is an
-/// ordinary toolbar one. <see cref="StatusBarMode"/> is the difference, and it is the reason the
-/// metrics are not written in the markup the way <see cref="Containers.HubAccountMenu"/>'s are.
+/// It is a status bar cell, and <see cref="StatusBarMode"/> is what makes it one rather than an
+/// ordinary toolbar cell. That is the reason its metrics are not written in the markup the way
+/// <see cref="Containers.HubAccountMenu"/>'s are. The other mode is what it wore on the login form,
+/// before the connect window absorbed that job and grew a host list of its own; nothing sets it
+/// today, and the property stays because which of the two a cell is remains a property of where it
+/// hangs rather than of this control.
 /// </summary>
 public partial class HostSwitcherMenu : UserControl
 {
-    /// <summary>What the cell says with no connection behind it, on the login form.</summary>
+    /// <summary>What the cell says with no connection behind it.</summary>
     private const string NoHost = "Saved hosts";
 
     private bool _statusBar;
@@ -44,11 +47,14 @@ public partial class HostSwitcherMenu : UserControl
     /// <summary>A saved host was picked. Never raised for the one already connected.</summary>
     public event Action<HostProfile>? HostSelected;
 
-    /// <summary>"Add host" was picked: the caller opens a login window.</summary>
+    /// <summary>"Add host" was picked: the caller opens the connect window on a blank host.</summary>
     public event Action? AddHostClicked;
 
     /// <summary>"Forget" was picked for this host.</summary>
     public event Action<HostProfile>? ForgetHostClicked;
+
+    /// <summary>"Manage hosts" was picked: the caller opens the host manager.</summary>
+    public event Action? ManageHostsClicked;
 
     /// <summary>
     /// Whether this instance hangs in the shell's status bar (the default) or sits in an ordinary
@@ -108,8 +114,8 @@ public partial class HostSwitcherMenu : UserControl
     /// </summary>
     public void Show(HostProfile? current, IReadOnlyList<HostProfile> hosts, string? disabledReason = null)
     {
-        // A profile with no host in it is not a host: the design-time shell and a blank login form
-        // both produce one, and neither is connected to anything.
+        // A profile with no host in it is not a host: the design-time shell produces one, and it is
+        // not connected to anything.
         if (current is { Host.Length: 0 }) current = null;
 
         _currentKey = current?.Key ?? "";
@@ -120,6 +126,10 @@ public partial class HostSwitcherMenu : UserControl
         {
             bool isCurrent = host.Key == _currentKey;
             var item = new MenuItem { Header = host.DisplayName };
+            // A name hides the address, so the address goes on hover. Set for every row rather
+            // than only the named ones, so the tip is somewhere to look rather than somewhere it
+            // sometimes is.
+            ToolTip.SetTip(item, host.Label);
 
             if (isCurrent)
             {
@@ -139,7 +149,14 @@ public partial class HostSwitcherMenu : UserControl
         }
 
         if (items.Count != 0) items.Add(new Separator());
-        items.Add(Command("Add host…", () => AddHostClicked?.Invoke()));
+        items.Add(Command("Add host", () => AddHostClicked?.Invoke()));
+
+        // Offered whatever the list holds, including nothing: it is where a host is defined
+        // deliberately, rather than being created as a side effect of connecting to it. "Add host"
+        // stays beside it as the connect-now route; neither replaces the other.
+        var manage = Command("Manage hosts", () => ManageHostsClicked?.Invoke());
+        ToolTip.SetTip(manage, "Name, edit, reorder and remove the saved hosts.");
+        items.Add(manage);
 
         // Only for a host that is actually in the list. The shell goes on naming the host it is
         // connected to after that host has been forgotten, and offering to forget it twice would
@@ -147,7 +164,7 @@ public partial class HostSwitcherMenu : UserControl
         if (current != null && hosts.Any(h => h.Key == current.Key))
         {
             var target = current;
-            var forget = Command($"Forget {target.DisplayName}…", () => ForgetHostClicked?.Invoke(target));
+            var forget = Command($"Forget {target.DisplayName}", () => ForgetHostClicked?.Invoke(target));
             ToolTip.SetTip(forget, "Removes it from this list and deletes its saved passwords. " +
                                    "The connection you are on now stays open.");
             items.Add(forget);
@@ -158,7 +175,7 @@ public partial class HostSwitcherMenu : UserControl
         HostItem.IsEnabled = disabledReason is null;
         // The tip hangs off the Menu, which stays enabled, so it is still read when the item is not.
         ToolTip.SetTip(MenuHost, disabledReason ?? (current != null
-            ? $"Connected to {current.DisplayName}. Pick another saved host to switch."
+            ? $"Connected to {current.Label}. Pick another saved host to switch."
             : "Hosts you have connected to before."));
     }
 

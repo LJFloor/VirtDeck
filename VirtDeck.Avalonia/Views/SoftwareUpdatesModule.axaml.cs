@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Models;
 using VirtDeck.Updates;
 using VirtDeck.Services;
@@ -40,6 +41,18 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private readonly ObservableCollection<HistoryRow> _history = new();
 
     /// <summary>
+    /// The last listing and the last history read, held so that sorting and filtering re-render
+    /// what is in hand instead of asking the host again. The catalog is also what says which of the
+    /// four states the table is in, which is why <see cref="Populate"/> can refuse to run.
+    /// </summary>
+    private UpdateCatalog _catalog = new();
+
+    private IReadOnlyList<UpdateTransaction> _transactions = Array.Empty<UpdateTransaction>();
+
+    private TableSort? _updateSortOrNull;
+    private TableSort? _historySortOrNull;
+
+    /// <summary>
     /// Cancels the reads, and only the reads. A module switch should stop a listing nobody is going
     /// to look at, because it is holding the shared SSH lock; it must never touch
     /// <see cref="_opCts"/>, or stepping over to another module would kill an upgrade half way
@@ -76,6 +89,16 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         UpdateList.ItemsSource = _rows;
         HistoryList.ItemsSource = _history;
+
+        // Both tables sort and the updates table filters; none of it costs a round trip. A third
+        // click on a column returns to that table's own order: security first for the updates,
+        // newest first for the history.
+        _updateSortOrNull = new TableSort(UpdateHeaderStrip);
+        _historySortOrNull = new TableSort(HistoryHeaderStrip);
+        _updateSortOrNull.Changed += Populate;
+        _historySortOrNull.Changed += PopulateHistory;
+        UpdateSearch.Changed += Populate;
+        FilterBox.AttachFindShortcut(this, () => Tabs.SelectedIndex == 0 ? UpdateSearch : null);
 
         InstallAllButton.Click += async (_, _) => await UpgradeAsync(securityOnly: false);
         InstallSecurityButton.Click += async (_, _) => await UpgradeAsync(securityOnly: true);
@@ -161,6 +184,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     public void Deactivate()
     {
         _active = false;
+        UpdateSearch.Cancel();
 
         _cts.Cancel();
         _cts.Dispose();
@@ -253,6 +277,8 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// </summary>
     private void Draw(UpdateCatalog catalog)
     {
+        _catalog = catalog;
+
         if (!catalog.Available)
         {
             Clear();
@@ -283,34 +309,67 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             return;
         }
 
-        Merge(catalog.Updates);
+        Populate();
+        UpdateCommands();
+    }
+
+    private TableSort UpdateSort => _updateSortOrNull!;
+    private TableSort HistorySort => _historySortOrNull!;
+
+    /// <summary>
+    /// Rebuilds the updates table from the listing already in hand. Called by a read, by the search
+    /// box and by a sort click alike, so neither typing nor sorting costs a round trip.
+    ///
+    /// <para>It refuses to run for a listing that could not be read, because those three states
+    /// have their reason on screen and re-populating would replace it with an empty table saying
+    /// nothing. Same latch, and the same reason, as the file explorer's failure panel.</para>
+    /// </summary>
+    private void Populate()
+    {
+        var catalog = _catalog;
+        if (!catalog.Available || catalog.ListFailure.Length > 0 || !catalog.Read) return;
+
+        var needle = UpdateSearch.Needle;
+        var updates = needle.Length == 0
+            ? catalog.Updates
+            : catalog.Updates.Where(u =>
+                u.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                u.Repository.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Merge(updates);
         UpdatesEmpty.IsVisible = false;
 
         // "Nothing to install" is only as good as the index it was read from, so where the manager
         // says how old that is, this says it too. It is the one empty state somebody acts on by
         // looking away, and on an Arch host whose database nobody has synced for a week it is also
-        // the one that can be confidently wrong.
+        // the one that can be confidently wrong. A needle that matches nothing is a different
+        // answer and gets its own line, because the table being empty then says nothing about the
+        // host.
         if (_rows.Count == 0)
-            ShowEmpty(UpdatesEmpty,
-                "This host is up to date.\n\n" +
-                $"{catalog.ManagerName} has nothing to install" +
-                (catalog.IndexAgeText is { Length: > 0 } age
-                    ? $", from a package database last synced {age}."
-                    : ".") +
-                " Press the refresh button to ask the repositories again.");
+            ShowEmpty(UpdatesEmpty, needle.Length > 0
+                ? $"No package matches “{needle}”."
+                : "This host is up to date.\n\n" +
+                  $"{catalog.ManagerName} has nothing to install" +
+                  (catalog.IndexAgeText is { Length: > 0 } age
+                      ? $", from a package database last synced {age}."
+                      : ".") +
+                  " Press the refresh button to ask the repositories again.");
 
         UpdateStatusCount();
-        UpdateCommands();
     }
 
     private void UpdateStatusCount()
     {
-        if (_rows.Count == 0) { SetStatus("Up to date"); return; }
+        var filtered = UpdateSearch.HasNeedle;
+
+        // "Up to date" is a claim about the host, so a table filtered down to nothing must not make
+        // it: there it is the needle that came up empty, not the repositories.
+        if (_rows.Count == 0) { SetStatus(filtered ? "No package matches" : "Up to date"); return; }
 
         var security = _rows.Count(r => r.IsSecurity);
         var text = $"{_rows.Count} update{(_rows.Count == 1 ? "" : "s")} available";
         if (security > 0) text += $", {security} security";
-        SetStatus(text);
+        SetStatus(filtered ? text + " · filtered" : text);
     }
 
     private void DrawReboot()
@@ -341,18 +400,9 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         RefreshHistoryButton.IsEnabled = false;
         try
         {
-            var transactions = await Packages.ReadHistoryAsync(_cts.Token);
-
-            // Rebuilt rather than merged, unlike the updates table: nothing polls this, so there is
-            // no refresh arriving unasked to drop a selection, and a transaction that has already
-            // happened cannot change underneath the row drawing it.
-            _history.Clear();
-            foreach (var t in transactions) _history.Add(new HistoryRow(t));
-
+            _transactions = await Packages.ReadHistoryAsync(_cts.Token);
+            PopulateHistory();
             _historyRead = true;
-            HistoryEmpty.IsVisible = false;
-            if (_history.Count == 0)
-                ShowEmpty(HistoryEmpty, "Nothing in this host's package history yet.");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -365,6 +415,62 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             RefreshHistoryButton.IsEnabled = true;
         }
     }
+
+    /// <summary>
+    /// Rebuilds the history table from the last read. Rebuilt rather than merged, unlike the
+    /// updates table: nothing polls this, so there is no refresh arriving unasked to drop a
+    /// selection, and a transaction that has already happened cannot change underneath the row
+    /// drawing it. A sort click therefore rebuilds too, which costs nothing here.
+    /// </summary>
+    private void PopulateHistory()
+    {
+        _history.Clear();
+        foreach (var row in OrderHistory(_transactions.Select(t => new HistoryRow(t))))
+            _history.Add(row);
+
+        HistoryEmpty.IsVisible = false;
+        if (_history.Count == 0)
+            ShowEmpty(HistoryEmpty, "Nothing in this host's package history yet.");
+    }
+
+    /// <summary>
+    /// The updates table's order. Its own is security first and then by name: the rows somebody came
+    /// to see are at the top. A version sorts as the string the tool printed, which is deliberate:
+    /// comparing two versions properly is per-manager arithmetic that belongs to the package tool,
+    /// and this column is for finding a package rather than for ranking one.
+    /// </summary>
+    private IEnumerable<UpdateRow> OrderUpdates(IEnumerable<UpdateRow> rows) => UpdateSort.Key switch
+    {
+        "package" => UpdateSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Architecture, StringComparer.OrdinalIgnoreCase),
+        "installed" => UpdateSort.By(rows, r => r.CurrentVersion, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "available" => UpdateSort.By(rows, r => r.NewVersion, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "severity" => UpdateSort.By(rows, r => r.IsSecurity)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "repository" => UpdateSort.By(rows, r => r.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderByDescending(r => r.IsSecurity)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Architecture, StringComparer.OrdinalIgnoreCase),
+    };
+
+    /// <summary>
+    /// The history table's order, newest first by default because that is the transaction somebody
+    /// came to check. When sorts as the string it draws: <c>PackageScripts.When</c> normalises every
+    /// manager's date to "yyyy-MM-dd HH:mm", so lexicographic order already is chronological order.
+    /// </summary>
+    private IEnumerable<HistoryRow> OrderHistory(IEnumerable<HistoryRow> rows) => HistorySort.Key switch
+    {
+        "when" => HistorySort.By(rows, r => r.When, StringComparer.Ordinal),
+        "action" => HistorySort.By(rows, r => r.Action, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(r => r.When, StringComparer.Ordinal),
+        "packages" => HistorySort.By(rows, r => r.Packages, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(r => r.When, StringComparer.Ordinal),
+        _ => rows,
+    };
 
     // ---- The table -----------------------------------------------------
 
@@ -396,34 +502,21 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             _byKey.Remove(key);
         }
 
-        // Security first, then by name: the rows somebody came to see are at the top, and within
-        // each group the order is stable so a refresh does not shuffle the table.
-        Reorder(_rows, _rows
-            .OrderByDescending(r => r.IsSecurity)
-            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(r => r.Architecture, StringComparer.OrdinalIgnoreCase)
-            .ToList());
+        // The cell draws the package's own name, so the one case it cannot draw is two rows that
+        // share one. It is counted over the whole catalog and not over the rows just merged, which
+        // are the filtered ones: a needle narrowing the table to one of a pair must not relabel it,
+        // because the qualifier would then be saying something about the search box.
+        var shared = _catalog.Updates
+            .GroupBy(u => u.Name, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var row in _rows) row.ShowArchitecture = shared.Contains(row.Name);
+
+        TableRows.Reorder(_rows, OrderUpdates(_rows).ToList());
     }
 
-    /// <summary>
-    /// Puts an already-merged collection into the wanted order by moving rows rather than replacing
-    /// them. The position index is not premature: without it this is <c>IndexOf</c>, a linear scan,
-    /// inside a linear loop. <see cref="ServicesModule"/> carries the full account.
-    /// </summary>
-    private static void Reorder<T>(ObservableCollection<T> rows, IReadOnlyList<T> wanted) where T : notnull
-    {
-        var at = new Dictionary<T, int>(rows.Count);
-        for (var i = 0; i < rows.Count; i++) at[rows[i]] = i;
-
-        for (var i = 0; i < wanted.Count; i++)
-        {
-            var from = at[wanted[i]];
-            if (from == i) continue;
-
-            rows.Move(from, i);
-            for (var j = i; j <= from; j++) at[rows[j]] = j;
-        }
-    }
 
     private void Clear()
     {
@@ -517,7 +610,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
                 $"{Packages.Manager.DisplayName} will download and install them, which can take a " +
                 "while and may pull in a new kernel. Once it starts installing it cannot be stopped " +
                 "safely, so the Cancel button goes away at that point.\n\n" +
-                Listed(targets.Select(r => r.Key))))
+                Listed(targets.Select(r => r.Display))))
             return;
 
         var verb = securityOnly ? "Installing security updates" : "Installing updates";

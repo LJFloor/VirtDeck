@@ -101,7 +101,7 @@ public partial class CreateVmWizard : Window
         IsoPicker.Files = virsh.Files;
         IsoPicker.Filter = MediaFilter;
         IsoPicker.DialogTitle = "Select install media";
-        IsoPicker.BrowseText = "Browse…"; // matches the local media row's button, same row, same job
+        IsoPicker.BrowseText = "Browse"; // matches the local media row's button, same row, same job
         IsoPicker.StartDirectory = MediaLocations.ServerStart(virsh.Files);
         IsoPicker.Browsed += (_, path) => MediaLocations.RememberServer(virsh.Files, path);
 

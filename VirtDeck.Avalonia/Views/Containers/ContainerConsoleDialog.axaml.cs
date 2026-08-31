@@ -105,7 +105,7 @@ public partial class ContainerConsoleDialog : Window
         ConnectButton.IsEnabled = !busy;
         CommandBox.IsEnabled = !busy;
         UserBox.IsEnabled = !busy;
-        ConnectButton.Content = busy ? "Checking…" : "Connect";
+        ConnectButton.Content = busy ? "Checking" : "Connect";
     }
 
     private void ShowError(string? message)

@@ -55,7 +55,7 @@
           <!-- Both inputs share the same row; only one is visible at a time. -->
           <c:RemotePathBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Name="IsoPicker" Margin="0,0,0,10" />
           <DockPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Name="LocalIsoRow" Margin="0,0,0,10">
-            <Button DockPanel.Dock="Right" Name="BrowseLocalButton" Content="Browse…" Margin="6,0,0,0" />
+            <Button DockPanel.Dock="Right" Name="BrowseLocalButton" Content="Browse" Margin="6,0,0,0" />
             <TextBox Name="LocalIsoBox" IsReadOnly="True" />
           </DockPanel>
 
@@ -83,7 +83,7 @@
                is only meaningful once the media (or the OS dropdown) says the guest is Windows. -->
           <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Name="UnattendRow"
                       Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="False">
-            <Button Name="UnattendButton" Content="Customize Windows setup…" />
+            <Button Name="UnattendButton" Content="Customize Windows setup" />
             <TextBlock Name="UnattendStatus" Text="not configured" Opacity="0.75" VerticalAlignment="Center" />
           </StackPanel>
         </Grid>
@@ -92,7 +92,7 @@
       <!-- Page 2: Network -->
       <DockPanel Name="NetworkPage" IsVisible="False">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-          <Button Name="AddNicButton" Content="Add…" />
+          <Button Name="AddNicButton" Content="Add" />
           <Button Name="RemoveNicButton" Content="Remove" />
         </StackPanel>
         <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
@@ -123,8 +123,8 @@
       <!-- Page 3: Storage -->
       <DockPanel Name="StoragePage" IsVisible="False">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-          <Button Name="AddDiskButton" Content="Add…" />
-          <Button Name="EditDiskButton" Content="Edit…" />
+          <Button Name="AddDiskButton" Content="Add" />
+          <Button Name="EditDiskButton" Content="Edit" />
           <Button Name="RemoveDiskButton" Content="Remove" />
         </StackPanel>
         <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">

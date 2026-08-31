@@ -74,6 +74,7 @@ namespace VirtDeck.Services
                     State = f[1],
                     Uuid = f[2],
                     Memory = FormatKiB(f[4]),
+                    MemoryKiB = ParseKiB(f[4]),
                 };
                 if (int.TryParse(f[3], out var cpus)) vm.VCpus = cpus;
                 if (vm.State == "running" && long.TryParse(f[5], out var seconds))
@@ -83,6 +84,17 @@ namespace VirtDeck.Services
                 vms.Add(vm);
             }
             return vms;
+        }
+
+        /// <summary>
+        /// The number out of a dominfo "Max memory: 4194304 KiB" line, or 0 when it cannot be read.
+        /// <see cref="FormatKiB"/> renders the same value for the cell; this is what the column
+        /// sorts on, since its rendered form does not sort.
+        /// </summary>
+        private static long ParseKiB(string value)
+        {
+            var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length >= 1 && long.TryParse(parts[0], out var kib) ? kib : 0;
         }
 
         private static string FormatKiB(string value)

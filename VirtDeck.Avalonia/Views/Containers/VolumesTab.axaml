@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
              x:Class="VirtDeck.Avalonia.Views.Containers.VolumesTab">
 
   <DockPanel Margin="16">
@@ -36,7 +37,7 @@
             <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
-            <DataTemplate DataType="c:MountRow">
+            <DataTemplate DataType="rows:MountRow">
               <Grid ColumnDefinitions="110,*,*,70" ColumnSpacing="6">
                 <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
                           ItemsSource="{Binding Kinds}" SelectedItem="{Binding Kind, Mode=TwoWay}" />

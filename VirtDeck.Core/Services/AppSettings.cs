@@ -193,6 +193,26 @@ namespace VirtDeck.Services
             Save();
         }
 
+        /// <summary>
+        /// Replaces the whole saved list with what the host manager settled on, and is the one
+        /// moment any of that window's editing becomes real: it edits a working copy, so Cancel
+        /// there costs nothing and a half-typed row can never transiently collide with a saved one.
+        ///
+        /// The caller owns the secrets, exactly as <see cref="ForgetHost"/>'s caller does. That
+        /// matters more here than there, because an edit to a host, port or username re-keys the
+        /// profile and the secrets filed under the old <see cref="HostProfile.Key"/> have to be
+        /// moved rather than simply left behind.
+        /// </summary>
+        public void ReplaceHosts(IReadOnlyList<HostProfile> hosts)
+        {
+            Hosts.Clear();
+            Hosts.AddRange(hosts);
+            // The last host may have been removed, or re-keyed by an edit. The caller repoints the
+            // key when it knows the new one; anything still unmatched by now genuinely went away.
+            if (FindHost(LastHostKey) == null) LastHostKey = "";
+            Save();
+        }
+
         // ---- Storage ------------------------------------------------------
 
         private static readonly JsonSerializerOptions Json = new()

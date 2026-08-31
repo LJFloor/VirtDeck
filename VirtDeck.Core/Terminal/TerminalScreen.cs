@@ -55,6 +55,19 @@ namespace VirtDeck.Terminal
         public long Revision { get; private set; }
 
         public int Cols { get; private set; }
+
+        /// <summary>
+        /// One past the rightmost column anything has been printed at since the last reset.
+        ///
+        /// It exists for a horizontal scroll bar, which a surface that folds at a fixed width
+        /// rather than at the window edge needs and which cannot be sized from <see cref="Cols"/>:
+        /// that would offer to scroll into hundreds of columns nothing was ever written to. It only
+        /// grows within a session, so once the widest line has fallen out of history this overstates
+        /// by however wide that line was. Shrinking it would mean measuring every line on every
+        /// scroll, to save a bar from being longer than it needs to be; <see cref="Reset"/> puts it
+        /// back, which is what Clear and Reload already do.
+        /// </summary>
+        public int MaxUsedColumns { get; private set; }
         public int Rows { get; private set; }
 
         public bool AutoWrap { get; set; } = true;
@@ -148,6 +161,7 @@ namespace VirtDeck.Terminal
 
             var row = Row(_cy);
             var x = Math.Clamp(_cx, 0, Cols - 1);
+            if (x >= MaxUsedColumns) MaxUsedColumns = x + 1;
             row[x].Rune = rune;
             row[x].Fg = _pen.Fg;
             row[x].Bg = _pen.Bg;
@@ -257,6 +271,7 @@ namespace VirtDeck.Terminal
                     lines.Add(NewLineWithPen());
                     if (lines.Count - Rows > MaxScrollback) lines.RemoveAt(0);
                     top = lines.Count - Rows;
+                    TrimIntoHistory(lines, top - 1);
                 }
                 else
                 {
@@ -267,6 +282,36 @@ namespace VirtDeck.Terminal
                 }
             }
             Touch();
+        }
+
+        /// <summary>
+        /// Cuts the trailing blanks off the line that has just left the screen.
+        ///
+        /// It is safe for the reason <see cref="Resample"/> gives: a line in history is only ever
+        /// drawn, never written to, and every reader of one already stops at the line's own length
+        /// rather than at <see cref="Cols"/>. The one thing that can put a history line back on the
+        /// screen is a <see cref="Resize"/> that grows the screen downwards into it, and that
+        /// resamples every line it pulls back to the full width.
+        ///
+        /// What it buys is that a line costs what was printed on it instead of the width of the
+        /// screen. That is what makes a screen wider than the window affordable at all: at the 512
+        /// columns the log window folds at, a full scrollback of eighty-character records would
+        /// otherwise be 61 MB of very nearly nothing. The console and the terminal module get the
+        /// same saving on the way past, since neither ever wanted the padding either.
+        ///
+        /// Only a cell that is blank in every respect goes. A trailing run in a background colour is
+        /// something the far end drew, so BlankWith(pen) under a coloured pen is content and stays.
+        /// </summary>
+        private static void TrimIntoHistory(List<TerminalCell[]> lines, int index)
+        {
+            if (index < 0 || index >= lines.Count) return;
+
+            var line = lines[index];
+            var used = line.Length;
+            while (used > 0 && line[used - 1].Equals(TerminalCell.Blank)) used--;
+            if (used == line.Length) return;
+
+            lines[index] = used == 0 ? Array.Empty<TerminalCell>() : line[..used];
         }
 
         public void ScrollDown(int n)
@@ -521,6 +566,7 @@ namespace VirtDeck.Terminal
             BracketedPaste = false;
             MouseMode = MouseTracking.Off;
             MouseEncoding = MouseProtocol.X10;
+            MaxUsedColumns = 0;
             ResetTabs();
             Touch();
         }

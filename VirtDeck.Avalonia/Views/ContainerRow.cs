@@ -47,6 +47,15 @@ public sealed class ContainerRow : INotifyPropertyChanged
     public bool IsRunning => _state is "running" or "restarting";
 
     /// <summary>
+    /// How long this container has been up, in seconds, and 0 for one that is not. The Uptime column
+    /// sorts on this rather than on the "3d 04:11:02" string, which does not sort once a run passes
+    /// a day. The start time is the gate rather than the state, exactly as <see cref="TickUptime"/>
+    /// has it.
+    /// </summary>
+    public double UptimeSeconds =>
+        _startedAtUtc is { } started ? Math.Max(0, (DateTime.UtcNow - started).TotalSeconds) : 0;
+
+    /// <summary>
     /// What a console applies to, which is stricter than <see cref="IsRunning"/>. Stop and Restart
     /// are worth offering on a container that is coming back up, but <c>docker exec</c> against one
     /// mid-restart simply fails, so the console asks for the state it actually needs rather than

@@ -473,7 +473,7 @@ public partial class ConsoleWindow : Window
     {
         if (_starting) return;
         _starting = true;
-        OverlayStartButton.Content = "Starting…";
+        OverlayStartButton.Content = "Starting";
         UpdateToolbarState();
         try
         {

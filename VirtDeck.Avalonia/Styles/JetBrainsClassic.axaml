@@ -592,12 +592,22 @@
   <!--
     A sortable column heading: the same flat cell again, but reading as the heading strip's text
     rather than as a control, so a table whose columns sort looks identical to one whose columns do
-    not until the pointer is over it. The strip's own 12,3 already insets it, hence no padding of
-    its own, and the row height comes from the strip, hence MinHeight 0.
+    not until the pointer is over it. MinHeight 0 because the row height comes from the strip, and
+    no padding of its own because Controls/ColumnHeader sets it: the strip's 12,3 is handed to the
+    cells so that it lands **inside** the hover rather than around it, which is the rule the status
+    bar's own cells follow. See TableSort.TakeStripInset for the whole of it.
+
+    BorderThickness 0, and that is the one figure here that is not inherited. JbToolButton keeps a
+    1px border so a tool button's pill has some air inside it, and it is transparent in every state
+    (the hover and pressed styles set Background alone), so all it does to a heading is inset the
+    content by a pixel: measured, every heading sat 1px right of the column it heads, and the strip
+    stood 2px taller than the ones drawn with plain TextBlocks. A heading has to line up with the
+    rows under it, so the border goes and the cell is exactly its column.
   -->
   <ControlTheme x:Key="JbColumnHeader" TargetType="Button" BasedOn="{StaticResource JbToolButton}">
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />

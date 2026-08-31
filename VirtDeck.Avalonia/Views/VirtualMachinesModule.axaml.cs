@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Imaging;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -24,6 +25,15 @@ public partial class VirtualMachinesModule : UserControl, IModule
     private readonly ObservableCollection<NetworkRow> _netRows = new();
     private readonly Dictionary<string, NetworkRow> _netByName = new();
 
+    /// <summary>
+    /// The last networks listing. Held because sorting must never cost a round trip: a header click
+    /// re-orders what is in hand, exactly as the VM table re-orders <c>Virsh.Vms</c>.
+    /// </summary>
+    private List<NetworkInfo> _nets = new();
+
+    private TableSort? _vmSortOrNull;
+    private TableSort? _netSortOrNull;
+
     private readonly Dictionary<string, ConsoleWindow> _consoles = new();
     private readonly List<NbdServer> _mediaServers = new(); // host NBD media streams, alive for the session
 
@@ -43,6 +53,15 @@ public partial class VirtualMachinesModule : UserControl, IModule
 
         VmList.ItemsSource = _rows;
         NetworkList.ItemsSource = _netRows;
+
+        // Both tables sort, and neither costs a round trip to do it: a click re-orders the listing
+        // already in hand. The third click on a column returns to this module's own order, by name.
+        _vmSortOrNull = new TableSort(VmHeaderStrip);
+        _netSortOrNull = new TableSort(NetHeaderStrip);
+        _vmSortOrNull.Changed += Populate;
+        _netSortOrNull.Changed += PopulateNetworks;
+        VmSearch.Changed += Populate;
+        FilterBox.AttachFindShortcut(this, () => Tabs.SelectedIndex == 0 ? VmSearch : null);
 
         WireToolbar();
         WireVmMenu();
@@ -143,6 +162,7 @@ public partial class VirtualMachinesModule : UserControl, IModule
     public void Deactivate()
     {
         _active = false;
+        VmSearch.Cancel();
         _refreshTimer.Stop();
         _tickTimer.Stop();
         _previewTimer.Stop();
@@ -213,8 +233,7 @@ public partial class VirtualMachinesModule : UserControl, IModule
         try
         {
             await Task.WhenAll(Virsh.RefreshAsync(), RefreshNetworksAsync());
-            Merge(Virsh.Vms.Values);
-            SetStatus($"{_rows.Count} VM{(_rows.Count == 1 ? "" : "s")}");
+            Populate();
 
             // State may have changed; re-capture the preview for the still-selected VM. This is
             // what gives the screenshot thumbnail its periodic refresh.
@@ -236,41 +255,64 @@ public partial class VirtualMachinesModule : UserControl, IModule
         }
     }
 
+    private TableSort VmSort => _vmSortOrNull!;
+    private TableSort NetSort => _netSortOrNull!;
+
     /// <summary>
-    /// Updates rows in place so the selection, scroll position and focus survive a refresh;
-    /// rebuilding the collection would drop all three every 30 seconds.
+    /// Rebuilds the VM table from the listing already in hand. Called by a refresh, by the search
+    /// box and by a sort click alike, so neither typing nor sorting costs a round trip.
+    ///
+    /// <para>Rows are merged rather than replaced, so the selection, the scroll position and the
+    /// focus survive; the 30 second poll would otherwise drop all three out from under the
+    /// pointer.</para>
     /// </summary>
-    private void Merge(IEnumerable<VmInfo> vms)
+    private void Populate()
     {
-        var seen = new HashSet<string>();
-        foreach (var vm in vms.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase))
+        if (_virshOrNull is null) return;
+
+        var needle = VmSearch.Needle;
+        var vms = needle.Length == 0
+            ? Virsh.Vms.Values.AsEnumerable()
+            : Virsh.Vms.Values.Where(v => v.Name.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+        TableRows.Merge(_rows, _byName, vms,
+            v => v.Name, v => new VmRow(v), (row, v) => row.Update(v), OrderVms);
+
+        VmEmptyText.IsVisible = false;
+        if (_rows.Count == 0)
         {
-            seen.Add(vm.Name);
-            if (_byName.TryGetValue(vm.Name, out var row))
-            {
-                row.Update(vm);
-            }
-            else
-            {
-                row = new VmRow(vm);
-                _byName[vm.Name] = row;
-                _rows.Add(row);
-            }
+            VmEmptyText.Text = needle.Length == 0
+                ? "No virtual machines on this host."
+                : $"No VM matches “{needle}”.";
+            VmEmptyText.IsVisible = true;
         }
 
-        foreach (var name in _byName.Keys.Where(n => !seen.Contains(n)).ToList())
-        {
-            _rows.Remove(_byName[name]);
-            _byName.Remove(name);
-        }
+        var text = $"{_rows.Count} VM{(_rows.Count == 1 ? "" : "s")}";
+        SetStatus(VmSearch.HasNeedle ? text + " · filtered" : text);
     }
+
+    /// <summary>
+    /// The VM table's order. A column sorts on the value its cell was rendered from and never on
+    /// the text in it: "512 MiB" sorts above "4 GiB" as a string, and an uptime past a day does not
+    /// sort at all. Name is the tiebreak throughout, so equal rows land somewhere readable.
+    /// </summary>
+    private IEnumerable<VmRow> OrderVms(IEnumerable<VmRow> rows) => VmSort.Key switch
+    {
+        "name" => VmSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "state" => VmSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "vcpus" => VmSort.By(rows, r => r.VCpus).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "memory" => VmSort.By(rows, r => r.MemoryKiB).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "uptime" => VmSort.By(rows, r => r.UptimeSeconds).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
     private async Task RefreshNetworksAsync()
     {
         try
         {
-            var nets = await Task.Run(() => Virsh.ListNetworksInfo());
-            MergeNetworks(nets);
+            _nets = await Task.Run(() => Virsh.ListNetworksInfo());
+            PopulateNetworks();
         }
         catch (Exception ex)
         {
@@ -278,30 +320,24 @@ public partial class VirtualMachinesModule : UserControl, IModule
         }
     }
 
-    private void MergeNetworks(List<NetworkInfo> nets)
-    {
-        var seen = new HashSet<string>();
-        foreach (var net in nets.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            seen.Add(net.Name);
-            if (_netByName.TryGetValue(net.Name, out var row))
-            {
-                row.Update(net);
-            }
-            else
-            {
-                row = new NetworkRow(net);
-                _netByName[net.Name] = row;
-                _netRows.Add(row);
-            }
-        }
+    /// <summary>
+    /// Rebuilds the networks table from the last listing. There is no search box on this page: a
+    /// host has a handful of networks, and the module deliberately gives the page no toolbar at all
+    /// rather than grow one to hold a filter for three rows.
+    /// </summary>
+    private void PopulateNetworks() =>
+        TableRows.Merge(_netRows, _netByName, _nets,
+            n => n.Name, n => new NetworkRow(n), (row, n) => row.Update(n), OrderNets);
 
-        foreach (var name in _netByName.Keys.Where(n => !seen.Contains(n)).ToList())
-        {
-            _netRows.Remove(_netByName[name]);
-            _netByName.Remove(name);
-        }
-    }
+    private IEnumerable<NetworkRow> OrderNets(IEnumerable<NetworkRow> rows) => NetSort.Key switch
+    {
+        "name" => NetSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "state" => NetSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "autostart" => NetSort.By(rows, r => r.Autostart, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
     private async Task LoadHostCapabilitiesAsync()
     {

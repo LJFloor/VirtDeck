@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Views.Users;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -39,6 +40,9 @@ public partial class UserAccountsModule : UserControl, IModule
     private readonly ObservableCollection<GroupRow> _groupRows = new();
     private readonly Dictionary<string, GroupRow> _groupByName = new(StringComparer.Ordinal);
 
+    private TableSort? _userSortOrNull;
+    private TableSort? _groupSortOrNull;
+
     /// <summary>The last catalog read. Both dialogs open against this rather than fetching their own.</summary>
     private AccountCatalog _catalog = new();
 
@@ -70,9 +74,15 @@ public partial class UserAccountsModule : UserControl, IModule
         MenuDeleteUser.Click += async (_, _) => await DeleteUsersAsync();
         MenuDeleteGroup.Click += async (_, _) => await DeleteGroupsAsync();
 
-        // Both toggles only re-render what is already in hand. Neither costs a round trip, the way
-        // the file explorer's sort and hidden-files toggle do not.
+        // The toggle, the search box and both sorts only re-render what is already in hand. None of
+        // them costs a round trip, the way the file explorer's sort and hidden-files toggle do not.
         SystemBox.IsCheckedChanged += (_, _) => Populate();
+        _userSortOrNull = new TableSort(UserHeaderStrip);
+        _groupSortOrNull = new TableSort(GroupHeaderStrip);
+        _userSortOrNull.Changed += Populate;
+        _groupSortOrNull.Changed += Populate;
+        UserSearch.Changed += Populate;
+        FilterBox.AttachFindShortcut(this, () => Tabs.SelectedIndex == 0 ? UserSearch : null);
 
         UpdateMenu();
     }
@@ -112,7 +122,12 @@ public partial class UserAccountsModule : UserControl, IModule
     /// is exactly why there is a Refresh button instead. Same reasoning, and the same empty method,
     /// as the file explorer's.
     /// </summary>
-    public void Deactivate() { }
+    /// <summary>
+    /// No timer, no tail, no window and no second connection; the one thing worth dropping is a
+    /// pending keystroke in the search box, which would otherwise re-populate a table nobody is
+    /// looking at.
+    /// </summary>
+    public void Deactivate() => UserSearch.Cancel();
 
     /// <summary>
     /// Nothing to shut down either: no window of its own and no second SSH connection. Every command
@@ -163,11 +178,20 @@ public partial class UserAccountsModule : UserControl, IModule
     /// Rebuilds both tables from the catalog already in hand. Called by a refresh and by the system
     /// accounts toggle alike, so the toggle never costs a round trip.
     /// </summary>
+    private TableSort UserSort => _userSortOrNull!;
+    private TableSort GroupSort => _groupSortOrNull!;
+
     private void Populate()
     {
         var showSystem = SystemBox.IsChecked == true;
+        var needle = UserSearch.Needle;
 
-        var users = _catalog.Users.Where(u => showSystem || !u.IsSystem).ToList();
+        var users = _catalog.Users
+            .Where(u => showSystem || !u.IsSystem)
+            .Where(u => needle.Length == 0 ||
+                        u.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                        UserAccountService.GecosHead(u.Gecos).Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         MergeUsers(users);
 
         // Which accounts have each group as their primary, so the member count says who is in the
@@ -186,11 +210,13 @@ public partial class UserAccountsModule : UserControl, IModule
 
         EmptyText.IsVisible = false;
         if (_userRows.Count == 0)
-            ShowEmpty(showSystem
-                ? "No accounts on this host."
-                : "No login accounts on this host.\n\nTick \"System accounts\" to see the ones services run as.");
+            ShowEmpty(needle.Length > 0
+                ? $"No account matches “{needle}”."
+                : showSystem
+                    ? "No accounts on this host."
+                    : "No login accounts on this host.\n\nTick \"System accounts\" to see the ones services run as.");
 
-        UpdateStatusCount(users.Count, showSystem);
+        UpdateStatusCount(users.Count, showSystem, needle.Length > 0);
         UpdateMenu();
     }
 
@@ -215,8 +241,27 @@ public partial class UserAccountsModule : UserControl, IModule
             _userByName.Remove(name);
         }
 
-        Reorder(_userRows, _userRows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList());
+        TableRows.Reorder(_userRows, OrderUsers(_userRows).ToList());
     }
+
+    /// <summary>
+    /// The users table's order. Every cell here is either the field itself or a number, so each
+    /// column sorts on what it draws; name is the tiebreak so equal shells or homes stay readable.
+    /// </summary>
+    private IEnumerable<UserRow> OrderUsers(IEnumerable<UserRow> rows) => UserSort.Key switch
+    {
+        "name" => UserSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "uid" => UserSort.By(rows, r => r.Uid).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "fullname" => UserSort.By(rows, r => r.FullName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "home" => UserSort.By(rows, r => r.Home, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "shell" => UserSort.By(rows, r => r.Shell, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "groups" => UserSort.By(rows, r => r.Groups, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
     private void MergeGroups(IReadOnlyList<UserGroup> groups, Dictionary<string, List<string>> primaryOf)
     {
@@ -241,28 +286,30 @@ public partial class UserAccountsModule : UserControl, IModule
             _groupByName.Remove(name);
         }
 
-        Reorder(_groupRows, _groupRows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList());
+        TableRows.Reorder(_groupRows, OrderGroups(_groupRows).ToList());
     }
 
     /// <summary>
-    /// Puts an already-merged collection into the wanted order by moving rows rather than replacing
-    /// them, so the selection and the scroll position survive a refresh, which is the whole point of
-    /// merging in the first place.
+    /// The groups table's order. Members sorts on the count the cell draws, Accounts on the names
+    /// beside it, which are two different questions about the same group.
     /// </summary>
-    private static void Reorder<T>(ObservableCollection<T> rows, IReadOnlyList<T> wanted)
+    private IEnumerable<GroupRow> OrderGroups(IEnumerable<GroupRow> rows) => GroupSort.Key switch
     {
-        for (var i = 0; i < wanted.Count; i++)
-        {
-            var at = rows.IndexOf(wanted[i]);
-            if (at != i) rows.Move(at, i);
-        }
-    }
+        "name" => GroupSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "gid" => GroupSort.By(rows, r => r.Gid).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "members" => GroupSort.By(rows, r => r.MemberCount).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "accounts" => GroupSort.By(rows, r => r.Members, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
 
-    private void UpdateStatusCount(int users, bool showSystem)
+    private void UpdateStatusCount(int users, bool showSystem, bool filtered)
     {
         var text = $"{users} user{(users == 1 ? "" : "s")}, " +
                    $"{_groupRows.Count} group{(_groupRows.Count == 1 ? "" : "s")}";
-        SetStatus(showSystem ? text + " · showing system accounts" : text);
+        if (showSystem) text += " · showing system accounts";
+        if (filtered) text += " · filtered";
+        SetStatus(text);
     }
 
     private void ShowEmpty(string message)

@@ -25,7 +25,7 @@
                      Content="A file on this PC" />
         <StackPanel Name="LocalPanel" Classes="under">
           <DockPanel>
-            <Button Name="LocalBrowseButton" DockPanel.Dock="Right" Content="Browse…" Margin="6,0,0,0" />
+            <Button Name="LocalBrowseButton" DockPanel.Dock="Right" Content="Browse" Margin="6,0,0,0" />
             <TextBox Name="LocalPathBox" IsReadOnly="True"
                      PlaceholderText="Choose the archive to send" />
           </DockPanel>
@@ -36,7 +36,7 @@
         <RadioButton Name="HostRadio" GroupName="ImportSource"
                      Content="A path on the server" />
         <StackPanel Name="HostPanel" Classes="under">
-          <c:RemotePathBox Name="HostPathPicker" BrowseText="Browse…" />
+          <c:RemotePathBox Name="HostPathPicker" BrowseText="Browse" />
         </StackPanel>
 
       </StackPanel>

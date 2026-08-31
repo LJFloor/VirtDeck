@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
              x:Class="VirtDeck.Avalonia.Views.Containers.EnvironmentTab">
 
   <DockPanel Margin="16">
@@ -34,7 +35,7 @@
             <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
-            <DataTemplate DataType="c:EnvRow">
+            <DataTemplate DataType="rows:EnvRow">
               <Grid ColumnDefinitions="220,*" ColumnSpacing="6">
                 <TextBox Grid.Column="0" PlaceholderText="TZ"
                          Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />

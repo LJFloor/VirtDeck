@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.UserAccountsModule"
              x:DataType="vm:UserRow">
 
@@ -39,7 +40,7 @@
         <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
           <DockPanel>
             <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
-              <Button Name="NewUserButton" Content="New user…" Classes="accent" />
+              <Button Name="NewUserButton" Content="New user" Classes="accent" />
               <!-- A real Refresh button, as in the file explorer and unlike the VM and container
                    lists: those have an event tail telling them when to re-read, and nothing on the
                    host announces that an account changed. -->
@@ -49,6 +50,11 @@
                       Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
               </Button>
             </StackPanel>
+            <!-- The search box sits at the far right, where every other module puts it. Both it and
+                 the toggle beside it re-render the listing in hand and neither costs a round trip. -->
+            <c:FilterBox DockPanel.Dock="Right" Name="UserSearch" Width="200" Margin="10,0,0,0"
+                         PlaceholderText="Search accounts"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the user name and the full name." />
             <CheckBox DockPanel.Dock="Right" Name="SystemBox" Content="System accounts" Margin="10,0,0,0"
                       ToolTip.Tip="Show the accounts outside the host's own UID_MIN to UID_MAX range, which are the ones services run as" />
             <Panel />
@@ -57,16 +63,17 @@
 
         <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                 BorderThickness="0,0,0,1" BorderBrush="#22808080">
-          <StackPanel Orientation="Horizontal">
-            <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
-                 the column. -->
-            <TextBlock Text="Name"      Width="{StaticResource ColUserName}" FontWeight="SemiBold" Padding="14,0,0,0" />
-            <TextBlock Text="UID"       Width="{StaticResource ColUid}"      FontWeight="SemiBold" />
-            <TextBlock Text="Full name" Width="{StaticResource ColFullName}" FontWeight="SemiBold" />
-            <TextBlock Text="Home"      Width="{StaticResource ColHome}"     FontWeight="SemiBold" />
-            <TextBlock Text="Shell"     Width="{StaticResource ColShell}"    FontWeight="SemiBold" />
-            <TextBlock Text="Groups" FontWeight="SemiBold" />
-          </StackPanel>
+          <DockPanel Name="UserHeaderStrip">
+            <!-- Every cell sorts; a third click returns to this table's own order, by name. Indent
+                 (not Margin) puts the heading over the rows' state dot without widening the
+                 column. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Name"      SortKey="name"     Indent="14" Width="{StaticResource ColUserName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="UID"       SortKey="uid"      Width="{StaticResource ColUid}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Full name" SortKey="fullname" Width="{StaticResource ColFullName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Home"      SortKey="home"     Width="{StaticResource ColHome}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Shell"     SortKey="shell"    Width="{StaticResource ColShell}" />
+            <c:ColumnHeader Text="Groups"    SortKey="groups" />
+          </DockPanel>
         </Border>
 
         <Panel>
@@ -75,17 +82,17 @@
                    ItemContainerTheme="{StaticResource JbTableRow}">
             <ListBox.ContextMenu>
               <ContextMenu Name="UserMenu">
-                <MenuItem Name="MenuEditUser" Header="Edit…" />
+                <MenuItem Name="MenuEditUser" Header="Edit" />
                 <Separator />
                 <MenuItem Name="MenuLock" Header="Lock" />
                 <MenuItem Name="MenuUnlock" Header="Unlock" />
                 <Separator />
-                <MenuItem Name="MenuDeleteUser" Header="Delete…" />
+                <MenuItem Name="MenuDeleteUser" Header="Delete" />
               </ContextMenu>
             </ListBox.ContextMenu>
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:UserRow">
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Classes="cells" Orientation="Horizontal">
                   <!-- The same 9px state dot the VM and container lists draw, sharing the same three
                        colours. Here it says whether the account can be logged into. -->
                   <DockPanel Width="{StaticResource ColUserName}">
@@ -123,7 +130,7 @@
 
         <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
           <StackPanel Orientation="Horizontal" Spacing="6">
-            <Button Name="NewGroupButton" Content="New group…" Classes="accent" />
+            <Button Name="NewGroupButton" Content="New group" Classes="accent" />
             <Button Name="RefreshGroupsButton" Theme="{StaticResource JbIconButton}"
                     ToolTip.Tip="Read the accounts again">
               <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
@@ -134,12 +141,13 @@
 
         <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                 BorderThickness="0,0,0,1" BorderBrush="#22808080">
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="Name"    Width="{StaticResource ColGroupName}"   FontWeight="SemiBold" />
-            <TextBlock Text="GID"     Width="{StaticResource ColGid}"         FontWeight="SemiBold" />
-            <TextBlock Text="Members" Width="{StaticResource ColMemberCount}" FontWeight="SemiBold" />
-            <TextBlock Text="Accounts" FontWeight="SemiBold" />
-          </StackPanel>
+          <DockPanel Name="GroupHeaderStrip">
+            <!-- Members sorts on the count it draws, Accounts on the names beside it. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Name"     SortKey="name"     Width="{StaticResource ColGroupName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="GID"      SortKey="gid"      Width="{StaticResource ColGid}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Members"  SortKey="members"  Width="{StaticResource ColMemberCount}" />
+            <c:ColumnHeader Text="Accounts" SortKey="accounts" />
+          </DockPanel>
         </Border>
 
         <!-- Unfiltered on purpose, where the Users tab hides system accounts behind a toggle:
@@ -150,12 +158,12 @@
                  ItemContainerTheme="{StaticResource JbTableRow}">
           <ListBox.ContextMenu>
             <ContextMenu Name="GroupMenu">
-              <MenuItem Name="MenuDeleteGroup" Header="Delete…" />
+              <MenuItem Name="MenuDeleteGroup" Header="Delete" />
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemTemplate>
             <DataTemplate DataType="vm:GroupRow">
-              <StackPanel Orientation="Horizontal">
+              <StackPanel Classes="cells" Orientation="Horizontal">
                 <TextBlock Text="{Binding Name}" Width="{StaticResource ColGroupName}"
                            TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="{Binding Gid}"         Width="{StaticResource ColGid}" Opacity="0.75" />

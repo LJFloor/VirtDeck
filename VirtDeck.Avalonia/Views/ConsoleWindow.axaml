@@ -50,8 +50,8 @@
           </MenuItem>
 
           <MenuItem Name="CdDvdMenu" Header="CD/DVD">
-            <MenuItem Name="CdServerItem" Header="Insert ISO from server…" />
-            <MenuItem Name="CdLocalItem" Header="Insert ISO from this PC…"
+            <MenuItem Name="CdServerItem" Header="Insert ISO from server" />
+            <MenuItem Name="CdLocalItem" Header="Insert ISO from this PC"
                       ToolTip.Tip="Streams the image over the SSH tunnel; it stays available while VirtDeck is open." />
             <MenuItem Name="CdGuestIsoItem" Header="Insert guest agent ISO" />
             <Separator />
@@ -60,8 +60,8 @@
 
           <!-- Floppy drives are rare: this stays hidden unless this VM has one. -->
           <MenuItem Name="FloppyMenu" Header="Floppy" IsVisible="False">
-            <MenuItem Name="FloppyServerItem" Header="Insert image from server…" />
-            <MenuItem Name="FloppyLocalItem" Header="Insert image from this PC…"
+            <MenuItem Name="FloppyServerItem" Header="Insert image from server" />
+            <MenuItem Name="FloppyLocalItem" Header="Insert image from this PC"
                       ToolTip.Tip="Streamed read-write: guest writes persist back to the local file." />
             <Separator />
             <MenuItem Name="FloppyEjectItem" Header="Eject" />
@@ -74,7 +74,7 @@
             <MenuItem Name="FitWindowItem" Header="Fit window to guest" />
             <MenuItem Name="ShowHostCursorItem" Header="Show host cursor" ToggleType="CheckBox" />
             <Separator />
-            <MenuItem Name="ScreenshotItem" Header="Save screenshot…" />
+            <MenuItem Name="ScreenshotItem" Header="Save screenshot" />
             <MenuItem Name="CopyScreenItem" Header="Copy screen to clipboard" />
           </MenuItem>
 

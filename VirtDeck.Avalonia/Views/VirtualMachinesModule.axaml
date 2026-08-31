@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.VirtualMachinesModule"
              x:DataType="vm:VmRow">
 
@@ -25,24 +26,35 @@
         <DockPanel>
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
             <!-- Only the commands that don't need a selection live here; everything per-VM is on
-                 the list's right-click menu. -->
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Name="NewVmButton" Content="New VM…" Classes="accent" />
-            </StackPanel>
+                 the list's right-click menu. The filter box is the services module's, and it works
+                 the same way: it narrows the listing already in hand and never asks the host
+                 anything. -->
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Button Name="NewVmButton" Content="New VM" Classes="accent" />
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="VmSearch" Width="220" Margin="10,0,0,0"
+                           PlaceholderText="Search VMs"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name." />
+              <Panel />
+            </DockPanel>
           </Border>
 
+          <!-- Every cell is a ColumnHeader because every column sorts. A third click drops back
+               to this table's own order, which is by name. Indent (not Margin) puts the heading
+               over the rows' state dot without widening the column. -->
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <!-- Padding (not Margin) indents the heading over the rows' state dot without widening the column. -->
-              <TextBlock Text="Name"   Width="{StaticResource ColName}"  FontWeight="SemiBold" Padding="14,0,0,0" />
-              <TextBlock Text="State"  Width="{StaticResource ColState}" FontWeight="SemiBold" />
-              <TextBlock Text="vCPUs"  Width="{StaticResource ColCpu}"   FontWeight="SemiBold" />
-              <TextBlock Text="Memory" Width="{StaticResource ColMem}"   FontWeight="SemiBold" />
-              <TextBlock Text="Uptime" FontWeight="SemiBold" />
-            </StackPanel>
+            <DockPanel Name="VmHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"   SortKey="name"   Indent="14" Width="{StaticResource ColName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="vCPUs"  SortKey="vcpus"  Width="{StaticResource ColCpu}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Memory" SortKey="memory" Width="{StaticResource ColMem}" />
+              <c:ColumnHeader Text="Uptime" SortKey="uptime" />
+            </DockPanel>
           </Border>
 
+          <Panel>
           <ListBox Name="VmList" SelectionMode="Multiple" Background="Transparent"
                    Padding="0"
                    ItemContainerTheme="{StaticResource JbTableRow}">
@@ -55,14 +67,14 @@
                 <MenuItem Name="MenuForceStop" Header="Force off" />
                 <MenuItem Name="MenuReboot" Header="Reboot" />
                 <Separator />
-                <MenuItem Name="MenuEdit" Header="Settings…" />
-                <MenuItem Name="MenuExport" Header="Export VM…" />
-                <MenuItem Name="MenuDelete" Header="Delete…" />
+                <MenuItem Name="MenuEdit" Header="Settings" />
+                <MenuItem Name="MenuExport" Header="Export VM" />
+                <MenuItem Name="MenuDelete" Header="Delete" />
               </ContextMenu>
             </ListBox.ContextMenu>
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:VmRow">
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Classes="cells" Orientation="Horizontal">
                   <!-- Same 9px state dot as the details sidebar, sharing VmRow.StateBrush. -->
                   <DockPanel Width="{StaticResource ColName}">
                     <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
@@ -78,6 +90,13 @@
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
+
+          <!-- Why the list is empty, so a filtered-to-nothing table says so rather than looking
+               like a host with no VMs on it. Hidden as soon as there is a row to show. -->
+          <TextBlock Name="VmEmptyText" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
         </DockPanel>
       </TabItem>
 
@@ -88,11 +107,11 @@
         <DockPanel>
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="Name"      Width="{StaticResource ColNetName}"  FontWeight="SemiBold" />
-              <TextBlock Text="State"     Width="{StaticResource ColNetState}" FontWeight="SemiBold" />
-              <TextBlock Text="Autostart" FontWeight="SemiBold" />
-            </StackPanel>
+            <DockPanel Name="NetHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"      SortKey="name"      Indent="14" Width="{StaticResource ColNetName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="State"     SortKey="state"     Width="{StaticResource ColNetState}" />
+              <c:ColumnHeader Text="Autostart" SortKey="autostart" />
+            </DockPanel>
           </Border>
 
           <ListBox Name="NetworkList" SelectionMode="Multiple" Background="Transparent"
@@ -109,7 +128,7 @@
             </ListBox.ContextMenu>
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:NetworkRow">
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Classes="cells" Orientation="Horizontal">
                   <!-- Same 9px state dot as the VMs tab, sharing NetworkRow.StateBrush. -->
                   <DockPanel Width="{StaticResource ColNetName}">
                     <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"

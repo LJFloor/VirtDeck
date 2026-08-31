@@ -34,6 +34,12 @@ public sealed class VmRow : INotifyPropertyChanged
     private string _memory = "";
     public string Memory { get => _memory; private set => Set(ref _memory, value); }
 
+    /// <summary>
+    /// What the Memory cell was rendered from. The column sorts on this and never on the string
+    /// beside it, because "512 MiB" sorts above "4 GiB" as text.
+    /// </summary>
+    public long MemoryKiB { get; private set; }
+
     private string _uptime = "";
     public string Uptime { get => _uptime; private set => Set(ref _uptime, value); }
 
@@ -45,6 +51,16 @@ public sealed class VmRow : INotifyPropertyChanged
     };
 
     public bool IsRunning => _state == "running";
+
+    /// <summary>
+    /// How long this VM has been up, in seconds, and 0 for one that is not running. The Uptime
+    /// column sorts on this rather than on the "02:14:09" string, which does not sort once a run
+    /// passes a day. A stopped VM has no uptime at all, so it sits with the shortest.
+    /// </summary>
+    public double UptimeSeconds =>
+        IsRunning && _startedAtUtc is { } started
+            ? Math.Max(0, (DateTime.UtcNow - started).TotalSeconds)
+            : 0;
 
     private DateTime? _startedAtUtc;
 
@@ -61,6 +77,7 @@ public sealed class VmRow : INotifyPropertyChanged
         State = info.State;
         VCpus = info.VCpus;
         Memory = info.Memory;
+        MemoryKiB = info.MemoryKiB;
         _startedAtUtc = info.StartedAtUtc;
         TickUptime();
     }

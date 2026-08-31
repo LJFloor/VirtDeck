@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using VirtDeck.Models;
 
@@ -40,6 +41,21 @@ public sealed class ImageRow : INotifyPropertyChanged
 
     private string _size = "";
     public string Size { get => _size; private set => Set(ref _size, value); }
+
+    /// <summary>
+    /// The absolute timestamp <see cref="Created"/> was rendered from, straight off the listing. Not
+    /// drawn anywhere; it is what the Created column sorts on, because "3 weeks ago" does not sort
+    /// and this does, ordinally, with nothing to parse.
+    /// </summary>
+    public string CreatedAt { get; private set; } = "";
+
+    /// <summary>
+    /// <see cref="Size"/> in bytes, and -1 where docker's phrase could not be read. What the Size
+    /// column sorts on: "999MB" sorts above "1.23GB" as text, which is the wrong answer stated
+    /// confidently. An unreadable size sorts below every readable one, which is where an unknown
+    /// belongs when the question being asked is which image is biggest.
+    /// </summary>
+    public long SizeBytes { get; private set; } = -1;
 
     /// <summary>
     /// Whether a container on the host was created from this image, or null when the listing could
@@ -119,6 +135,42 @@ public sealed class ImageRow : INotifyPropertyChanged
         Update(info);
     }
 
+    /// <summary>
+    /// Reads docker's own size phrase back into bytes, for the sort key alone: the cell goes on
+    /// drawing what the CLI printed. <c>docker image ls</c> has no raw byte field, and getting one
+    /// means a batched <c>docker image inspect</c> over every image on the host, which is a second
+    /// pass this buys nothing else with.
+    ///
+    /// <para>The units are docker's: <c>units.HumanSizeWithPrecision</c> is <b>decimal</b>, so kB is
+    /// 1000 and not 1024. Getting that wrong would not reorder anything (the factor is monotonic
+    /// either way), which is exactly why it is worth stating rather than leaving to be re-derived.
+    /// Anything unrecognised answers -1 rather than 0, so a row whose size could not be read is
+    /// distinguishable from one that is genuinely empty.</para>
+    /// </summary>
+    private static long ParseSize(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) return -1;
+
+        var i = 0;
+        while (i < t.Length && (char.IsAsciiDigit(t[i]) || t[i] == '.')) i++;
+        if (i == 0) return -1;
+        if (!double.TryParse(t[..i], NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) return -1;
+
+        double scale = t[i..].Trim() switch
+        {
+            "" or "B" => 1,
+            "kB" or "KB" => 1_000d,
+            "MB" => 1_000_000d,
+            "GB" => 1_000_000_000d,
+            "TB" => 1_000_000_000_000d,
+            "PB" => 1_000_000_000_000_000d,
+            _ => -1,
+        };
+
+        return scale < 0 ? -1 : (long)(n * scale);
+    }
+
     /// <summary>The merge key for a listing entry, computed without building a row.</summary>
     public static string KeyOf(ImageInfo info) => $"{info.Id}|{info.Repository}|{info.Tag}";
 
@@ -127,7 +179,9 @@ public sealed class ImageRow : INotifyPropertyChanged
         Repository = info.Repository;
         Tag = info.Tag;
         Created = info.Created;
+        CreatedAt = info.CreatedAt;
         Size = info.Size;
+        SizeBytes = ParseSize(info.Size);
 
         // The one field a merge changes that has no backing property of its own: creating or
         // removing a container elsewhere flips it without anything about the image itself moving.

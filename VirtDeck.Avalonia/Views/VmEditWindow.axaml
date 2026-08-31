@@ -87,7 +87,7 @@
       <TabItem Header="Storage">
         <DockPanel Margin="20,14,20,20">
           <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-            <Button Name="AddDiskButton" Content="Add…" />
+            <Button Name="AddDiskButton" Content="Add" />
             <TextBlock VerticalAlignment="Center" Opacity="0.6" Margin="8,0,0,0"
                        Text="Right-click a disk for edit / media / remove." />
           </StackPanel>
@@ -106,10 +106,10 @@
                        ItemContainerTheme="{StaticResource JbTableRow}">
                 <ListBox.ContextMenu>
                   <ContextMenu Name="DiskMenu">
-                    <MenuItem Name="MenuDiskEdit" Header="Edit…" />
-                    <MenuItem Name="MenuDiskChangeMedia" Header="Change ISO…">
-                      <MenuItem Name="MenuDiskMediaServer" Header="On the server…" />
-                      <MenuItem Name="MenuDiskMediaLocal" Header="Local machine…" />
+                    <MenuItem Name="MenuDiskEdit" Header="Edit" />
+                    <MenuItem Name="MenuDiskChangeMedia" Header="Change ISO">
+                      <MenuItem Name="MenuDiskMediaServer" Header="On the server" />
+                      <MenuItem Name="MenuDiskMediaLocal" Header="Local machine" />
                     </MenuItem>
                     <MenuItem Name="MenuDiskEject" Header="Eject" />
                     <Separator Name="MenuDiskSep" />
@@ -137,7 +137,7 @@
       <TabItem Header="Network">
         <DockPanel Margin="20,14,20,20">
           <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-            <Button Name="AddNicButton" Content="Add…" />
+            <Button Name="AddNicButton" Content="Add" />
             <Button Name="RemoveNicButton" Content="Remove" />
           </StackPanel>
           <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">

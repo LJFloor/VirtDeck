@@ -78,9 +78,13 @@ public sealed class DockerStackRow : INotifyPropertyChanged
     private int RunningCount => _members.Count(m => m.State is "running" or "restarting");
 
     /// <summary>How many services this stack has containers for, which is what the Services column counts.</summary>
-    public string ServiceCount => _members.Count == 0
-        ? ""
-        : _members.Select(m => m.Service).Distinct(StringComparer.Ordinal).Count().ToString();
+    public string ServiceCount => Services == 0 ? "" : Services.ToString();
+
+    /// <summary>
+    /// The number <see cref="ServiceCount"/> renders, which is what the Services column sorts on: a
+    /// count drawn as a string sorts "10" below "2".
+    /// </summary>
+    public int Services => _members.Select(m => m.Service).Distinct(StringComparer.Ordinal).Count();
 
     /// <summary>
     /// The stack as a whole, read off its containers.

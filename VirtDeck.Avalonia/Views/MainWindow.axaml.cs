@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using SpiceClient;
+using VirtDeck.Avalonia.Views.Hosts;
 using VirtDeck.Services;
 using VirtDeck.Updates;
 
@@ -21,10 +22,12 @@ public partial class MainWindow : Window
     /// when the list does not have it, so the cell keeps naming the host you are actually on even
     /// after that host has been forgotten.
     /// </summary>
-    private readonly HostProfile _profile;
+    // Not readonly: the host manager can rename, or re-key, the host this shell is on, and
+    // RefreshProfile picks that up without a reconnect.
+    private HostProfile _profile;
 
-    /// <summary>The login window this shell opened, kept so a second click focuses it rather than opening another.</summary>
-    private LoginWindow? _login;
+    /// <summary>The connect window this shell opened, kept so a second click focuses it rather than opening another.</summary>
+    private HostManagerWindow? _manager;
 
     private readonly DispatcherTimer _tickTimer;
     private long _lastBytes;       // total tunnel bytes at the last throughput sample
@@ -67,8 +70,9 @@ public partial class MainWindow : Window
         ShellRegistry.Register(this);
 
         HostSwitcher.HostSelected += profile => _ = SwitchToAsync(profile);
-        HostSwitcher.AddHostClicked += () => OpenLogin(null);
+        HostSwitcher.AddHostClicked += () => OpenManager(null, addNew: true);
         HostSwitcher.ForgetHostClicked += profile => _ = ForgetHostAsync(profile);
+        HostSwitcher.ManageHostsClicked += OpenHostManager;
         PaintHosts();
 
         foreach (var module in AllModules())
@@ -263,6 +267,28 @@ public partial class MainWindow : Window
         HostSwitcher.Show(_profile, AppSettings.Current.Hosts, disabledReason);
 
     /// <summary>
+    /// Opens the host manager, and does whatever it settled on.
+    ///
+    /// The manager never connects: it hands a profile back and the shell reuses
+    /// <see cref="SwitchToAsync"/>, which already early-returns for the host we are on, refuses
+    /// while a module says a teardown would destroy something, and falls through to the login
+    /// window when the stored secrets do not get there. Writing any of that a second time here is
+    /// exactly what the handback avoids.
+    /// </summary>
+    private void OpenHostManager() => OpenManager(_profile);
+
+    /// <summary>
+    /// Re-reads the profile for the connection this shell is on, after the manager may have renamed
+    /// it. It falls back to the profile in hand when the entry has gone or been re-keyed, which is
+    /// the rule Forget already follows: the cell goes on naming the host you are actually on.
+    /// </summary>
+    private void RefreshProfile()
+    {
+        _profile = AppSettings.Current.FindHost(_ssh.ProfileKey) ?? _profile;
+        Title = $"VirtDeck - {_profile.DisplayName}";
+    }
+
+    /// <summary>
     /// Moves this window to another saved host.
     ///
     /// <b>It builds a new shell and closes this one; modules are never re-attached.</b>
@@ -306,7 +332,7 @@ public partial class MainWindow : Window
         // opened prefilled rather than any of that being written a second time here.
         PaintStatus();
         PaintHosts();
-        OpenLogin(profile);
+        OpenManager(profile);
     }
 
     /// <summary>
@@ -405,31 +431,34 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Opens the login window, prefilled for <paramref name="prefill"/> or blank to add a host.
+    /// Opens the connect window, on <paramref name="prefill"/> or on this shell's own host.
     /// Non-modal, and one at a time: a second ask focuses the one already up.
     ///
     /// This shell stays live and usable while it is open, and only gives way once a connection is
-    /// actually made. Cancelling it leaves everything as it was, which is what the shell registry
-    /// exists for.
+    /// actually made. Closing it leaves everything as it was, which is what the shell registry
+    /// exists for. There is no separate login form to open instead: that window and this one were
+    /// the same field set twice, and the manager is the one that survived.
     /// </summary>
-    private void OpenLogin(HostProfile? prefill)
+    private void OpenManager(HostProfile? prefill, bool addNew = false)
     {
-        if (_login != null)
+        if (_manager != null)
         {
-            _login.Activate();
+            _manager.Activate();
             return;
         }
 
-        _login = new LoginWindow(prefill, Replace);
-        _login.Closed += (_, _) =>
+        _manager = new HostManagerWindow(prefill, _profile, Replace, addNew);
+        _manager.Closed += (_, _) =>
         {
-            _login = null;
-            // It can have added or forgotten a host without ever connecting, and nothing else here
-            // would notice. A connect replaces this window instead, so this only ever repaints a
-            // list that is still on screen.
+            _manager = null;
+            // It can have renamed, added or forgotten a host without ever connecting, and nothing
+            // else here would notice. A connect replaces this window instead, so this only ever
+            // repaints a list that is still on screen. RefreshProfile is what picks up a rename of
+            // the host this shell is on, whose profile object the commit has replaced.
+            RefreshProfile();
             PaintHosts();
         };
-        _login.Show();
+        _manager.Show();
     }
 
     /// <summary>
@@ -440,7 +469,7 @@ public partial class MainWindow : Window
     private async Task ForgetHostAsync(HostProfile profile)
     {
         if (!await MessageDialog.Confirm(this, "Forget host",
-                $"Remove {profile.DisplayName} from the saved hosts and delete the passwords saved for it?" +
+                $"Remove {profile.Label} from the saved hosts and delete the passwords saved for it?" +
                 (profile.Key == _profile.Key ? "\n\nYou stay connected to it." : "")))
             return;
 

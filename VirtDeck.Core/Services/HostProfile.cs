@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VirtDeck.Services
 {
     /// <summary>
@@ -16,6 +18,14 @@ namespace VirtDeck.Services
         public int Port { get; set; } = 22;
 
         public string Username { get; set; } = "";
+
+        /// <summary>
+        /// What the user calls this host, or <c>""</c> to be named after its address. Free text and
+        /// never part of <see cref="Key"/>: renaming a host must not re-key it, or the rename would
+        /// silently orphan its secrets. Two hosts may carry the same name, because the thing that
+        /// has to be unique is the account, and that is what <see cref="Key"/> is for.
+        /// </summary>
+        public string Name { get; set; } = "";
 
         /// <summary>
         /// <c>"Key"</c>, or anything else (including the empty default) for password. A string
@@ -40,19 +50,46 @@ namespace VirtDeck.Services
         /// store's, computed by the same method, so the settings file and the keyring can never
         /// disagree about what one host is; it also dedupes the list by construction.
         /// </summary>
+        [JsonIgnore]
         public string Key => SshCredentialStore.IdentityOf(Host, Port, Username);
 
         /// <summary>
-        /// What the host switcher and the title bar call this. The port is shown only when it is
-        /// not 22, which is the same rule the file explorer and terminal modules used for the
+        /// Where this host is, as an SSH command line would spell it. The port is shown only when
+        /// it is not 22, which is the same rule the file explorer and terminal modules used for the
         /// status bar before the shell took the job over.
         /// </summary>
-        public string DisplayName => Port == 22 ? $"{Username}@{Host}" : $"{Username}@{Host}:{Port}";
+        [JsonIgnore]
+        public string Address => Port == 22 ? $"{Username}@{Host}" : $"{Username}@{Host}:{Port}";
+
+        /// <summary>
+        /// What the host switcher, the title bar and every confirmation call this host: its
+        /// <see cref="Name"/> when it has one, else its <see cref="Address"/>. This is the exact
+        /// expression it was before names existed, which is why every caller reads correctly with
+        /// no edit: an unnamed host is still called after its address.
+        /// </summary>
+        [JsonIgnore]
+        public string DisplayName => Name.Length > 0 ? Name : Address;
+
+        /// <summary>
+        /// Both readings, for the places that have to say where a named host actually goes: a name
+        /// hides the address, and "Home lab" on its own is no help when the question is which
+        /// machine you are about to connect to. Collapses to the address alone when unnamed, so it
+        /// never says one thing twice.
+        /// </summary>
+        [JsonIgnore]
+        public string Label => Name.Length > 0 ? $"{Name} ({Address})" : Address;
 
         /// <summary>True when this profile names a key rather than a password.</summary>
+        [JsonIgnore]
         public bool UsesKey => AuthMode == KeyAuthMode;
 
         /// <summary>The <see cref="AuthMode"/> value that means key authentication.</summary>
         public const string KeyAuthMode = "Key";
+
+        /// <summary>
+        /// A detached copy, for the host manager to edit before the user commits it. A shallow
+        /// clone is a whole one here because every member is a string or an int.
+        /// </summary>
+        public HostProfile Clone() => (HostProfile)MemberwiseClone();
     }
 }

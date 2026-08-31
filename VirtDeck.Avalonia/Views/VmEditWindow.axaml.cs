@@ -252,7 +252,7 @@ public partial class VmEditWindow : Window
 
         MenuDiskEdit.IsVisible = d is { IsRemovableMedia: false }; // driver tuning: data disks only
         MenuDiskChangeMedia.IsVisible = isExistingRemovable;
-        MenuDiskChangeMedia.Header = isFloppy ? "Change floppy…" : "Change ISO…";
+        MenuDiskChangeMedia.Header = isFloppy ? "Change floppy" : "Change ISO";
         MenuDiskEject.IsVisible = isExistingRemovable;
         MenuDiskRemove.IsVisible = true;                            // any row (pending add or existing)
         MenuDiskSep.IsVisible = MenuDiskEdit.IsVisible || isExistingRemovable;

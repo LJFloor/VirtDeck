@@ -1,0 +1,160 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:svc="clr-namespace:VirtDeck.Services;assembly=VirtDeck.Core"
+        xmlns:hosts="clr-namespace:VirtDeck.Avalonia.Views.Hosts"
+        x:Class="VirtDeck.Avalonia.Views.Hosts.HostManagerWindow"
+        Title="VirtDeck - Connect"
+        Width="860" Height="600" MinWidth="700" MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <!-- Save, Login and Close, which is the shape a window that is both the site list and the
+         front door needs. Login is the accented default because it is what somebody opening the
+         app came to do; Save commits the list and stays open; Close asks before dropping an edit,
+         since here closing is also how the app is quit. -->
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0"
+            BorderBrush="#33808080" Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" Name="StatusText" Margin="0,0,12,0" TextWrapping="Wrap"
+                   VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="CloseButton" Content="Close" MinWidth="88" IsCancel="True" />
+          <Border Name="SaveButtonHost">
+            <Button Name="SaveButton" Content="Save" MinWidth="88" />
+          </Border>
+          <Border Name="LoginButtonHost">
+            <Button Name="LoginButton" Content="Login" MinWidth="88" IsDefault="True" Classes="accent" />
+          </Border>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid ColumnDefinitions="250,4,*" Margin="16">
+
+      <DockPanel Grid.Column="0">
+        <c:RowToolbar DockPanel.Dock="Top" Name="HostTools" ShowMove="True" Margin="0,0,0,6" />
+        <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}" CornerRadius="3">
+          <Panel>
+            <ListBox Name="HostList" Background="Transparent" Padding="0" BorderThickness="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="hosts:HostRow">
+                  <DockPanel>
+                    <!-- The same tick the switcher menu marks the current host with. -->
+                    <Path DockPanel.Dock="Left" Width="12" Height="12" Margin="0,0,6,0"
+                          Stretch="None" StrokeThickness="1.6" VerticalAlignment="Center"
+                          StrokeLineCap="Round" StrokeJoin="Round"
+                          Stroke="{Binding $parent[ListBoxItem].Foreground}"
+                          Data="M 1,6 L 4.5,9.5 L 11,3"
+                          IsVisible="{Binding IsConnected}"
+                          ToolTip.Tip="You are connected to this host." />
+                    <StackPanel>
+                      <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Subtitle}" Classes="note" FontSize="11"
+                                 TextTrimming="CharacterEllipsis"
+                                 IsVisible="{Binding HasSubtitle}" />
+                    </StackPanel>
+                  </DockPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Name="EmptyText" Text="No saved hosts. Press + to add one."
+                       TextWrapping="Wrap" TextAlignment="Center" Opacity="0.7" Margin="16"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False" />
+          </Panel>
+        </Border>
+      </DockPanel>
+
+      <GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns" />
+
+      <ScrollViewer Grid.Column="2" Name="FormScroll" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Classes="page" Margin="12,0,0,0">
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Connection">
+            <StackPanel Classes="options">
+              <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+                <TextBox   Grid.Row="0" Grid.Column="1" Name="NameBox"
+                           PlaceholderText="optional, e.g. Home lab" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Host" VerticalAlignment="Center" />
+                <Grid      Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,8,Auto,6,70">
+                  <TextBox   Grid.Column="0" Name="HostBox" PlaceholderText="hostname or IP" />
+                  <TextBlock Grid.Column="2" Text="Port" VerticalAlignment="Center" />
+                  <TextBox   Grid.Column="4" Name="PortBox" />
+                </Grid>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Username" VerticalAlignment="Center" />
+                <TextBox   Grid.Row="2" Grid.Column="1" Name="UserBox" />
+              </Grid>
+              <TextBlock Classes="note" TextWrapping="Wrap"
+                         Text="The username, host and port together are what identifies a saved host, both here and in the password store. Changing any of them moves this host's saved passwords with it." />
+            </StackPanel>
+          </HeaderedContentControl>
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Authentication">
+            <StackPanel Classes="options">
+              <!-- GroupName is scoped to the window, not the control, so it carries this window's
+                   name for the reason every answer-file page prefixes its own. -->
+              <StackPanel Orientation="Horizontal" Spacing="16">
+                <RadioButton Name="PasswordAuthRadio" GroupName="HostManagerAuth" Content="Password" />
+                <RadioButton Name="KeyAuthRadio" GroupName="HostManagerAuth" Content="SSH key" />
+              </StackPanel>
+
+              <StackPanel Name="PasswordPanel" Classes="under" Spacing="6">
+                <TextBlock Text="Password" />
+                <TextBox Name="PasswordBox" PasswordChar="•" />
+                <TextBlock Classes="note" TextWrapping="Wrap"
+                           Text="Used for the login and for sudo, which is what this host's one password is." />
+              </StackPanel>
+
+              <!-- A key file can be dropped anywhere on this panel. It is hidden in password mode,
+                   so the handler can only fire while key auth is showing. -->
+              <StackPanel Name="KeyPanel" Classes="under" Spacing="6" IsVisible="False">
+                <TextBlock Text="Private key" />
+                <Grid ColumnDefinitions="*,6,Auto">
+                  <ComboBox Grid.Column="0" Name="KeyCombo" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="svc:SshKeyCandidate">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <Button Grid.Column="2" Name="BrowseKeyButton" Content="…" MinWidth="30"
+                          ToolTip.Tip="Browse for a private key, or drop one here" />
+                </Grid>
+
+                <TextBlock Text="Passphrase" Margin="0,4,0,0" />
+                <TextBox Name="PassphraseBox" PasswordChar="•" />
+                <TextBlock Classes="note" TextWrapping="Wrap"
+                           Text="Leave blank if the key is not encrypted. A passphrase is saved against the key file, so every host using that key shares it." />
+
+                <TextBlock Text="Sudo password" Margin="0,4,0,0" />
+                <TextBox Name="SudoPasswordBox" PasswordChar="•" />
+                <TextBlock Classes="note" TextWrapping="Wrap"
+                           Text="Leave blank if sudo needs no password on this host." />
+              </StackPanel>
+            </StackPanel>
+          </HeaderedContentControl>
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Saved passwords">
+            <StackPanel Classes="options">
+              <Grid ColumnDefinitions="*,Auto">
+                <CheckBox Grid.Column="0" Name="RememberCheck" Content="Remember passwords"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="Saves them in your desktop keyring (Windows Credential Manager)." />
+                <Button Grid.Column="1" Name="ForgetButton" Content="Forget" MinWidth="70"
+                        ToolTip.Tip="Delete every password VirtDeck has saved on this PC" />
+              </Grid>
+              <TextBlock Name="SecretsNote" Classes="subnote" TextWrapping="Wrap" />
+            </StackPanel>
+          </HeaderedContentControl>
+
+        </StackPanel>
+      </ScrollViewer>
+
+    </Grid>
+  </DockPanel>
+</Window>

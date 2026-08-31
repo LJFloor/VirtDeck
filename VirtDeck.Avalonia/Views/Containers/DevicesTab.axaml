@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:c="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
              x:Class="VirtDeck.Avalonia.Views.Containers.DevicesTab">
 
   <DockPanel Margin="16">
@@ -37,7 +38,7 @@
             <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
-            <DataTemplate DataType="c:DeviceRow">
+            <DataTemplate DataType="rows:DeviceRow">
               <Grid ColumnDefinitions="*,*,60,60,60" ColumnSpacing="6">
                 <AutoCompleteBox Grid.Column="0" PlaceholderText="/dev/ttyUSB0"
                                  FilterMode="ContainsOrdinal" MinimumPrefixLength="0"

@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.ServicesModule"
              x:DataType="vm:ServiceRow">
 
@@ -46,23 +47,24 @@
                       Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
               </Button>
             </StackPanel>
-            <TextBox DockPanel.Dock="Right" Name="SystemSearch" Width="220" Margin="10,0,0,0"
-                     PlaceholderText="Search name or description"
-                     ToolTip.Tip="Narrows the table in hand. An ordinary host has a few hundred service units, so this is how the one you want is found." />
+            <c:FilterBox DockPanel.Dock="Right" Name="SystemSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search name or description"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F). An ordinary host has a few hundred service units, so this is how the one you want is found." />
             <Panel />
           </DockPanel>
         </Border>
 
         <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                 BorderThickness="0,0,0,1" BorderBrush="#22808080">
-          <StackPanel Orientation="Horizontal">
-            <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
-                 the column. -->
-            <TextBlock Text="Unit"        Width="{StaticResource ColSysName}"      FontWeight="SemiBold" Padding="14,0,0,0" />
-            <TextBlock Text="State"       Width="{StaticResource ColSysState}"     FontWeight="SemiBold" />
-            <TextBlock Text="Autostart"   Width="{StaticResource ColSysAutostart}" FontWeight="SemiBold" />
-            <TextBlock Text="Description" FontWeight="SemiBold" />
-          </StackPanel>
+          <DockPanel Name="SysHeaderStrip">
+            <!-- Every cell sorts; a third click returns to this table's own order, by unit name.
+                 Indent (not Margin) puts the heading over the rows' state dot without widening the
+                 column. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Unit"        SortKey="name"        Indent="14" Width="{StaticResource ColSysName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="State"       SortKey="state"       Width="{StaticResource ColSysState}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Autostart"   SortKey="autostart"   Width="{StaticResource ColSysAutostart}" />
+            <c:ColumnHeader Text="Description" SortKey="description" />
+          </DockPanel>
         </Border>
 
         <Panel>
@@ -79,13 +81,13 @@
                 <MenuItem Name="MenuSysEnable" Header="Enable" />
                 <MenuItem Name="MenuSysDisable" Header="Disable" />
                 <Separator />
-                <MenuItem Name="MenuSysMask" Header="Mask…" />
+                <MenuItem Name="MenuSysMask" Header="Mask" />
                 <MenuItem Name="MenuSysUnmask" Header="Unmask" />
               </ContextMenu>
             </ListBox.ContextMenu>
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:ServiceRow">
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Classes="cells" Orientation="Horizontal">
                   <!-- The same 9px state dot the VM, container and account lists draw, sharing the
                        same three colours plus one this module needs and they do not: red for a unit
                        that failed. -->
@@ -142,20 +144,24 @@
                       Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
               </Button>
             </StackPanel>
-            <TextBox DockPanel.Dock="Right" Name="UserSearch" Width="220" Margin="10,0,0,0"
-                     PlaceholderText="Search name or description" />
+            <c:FilterBox DockPanel.Dock="Right" Name="UserSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search name or description"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
             <Panel />
           </DockPanel>
         </Border>
 
         <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                 BorderThickness="0,0,0,1" BorderBrush="#22808080">
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="Unit"        Width="{StaticResource ColUsrName}"      FontWeight="SemiBold" Padding="14,0,0,0" />
-            <TextBlock Text="State"       Width="{StaticResource ColUsrState}"     FontWeight="SemiBold" />
-            <TextBlock Text="Autostart"   Width="{StaticResource ColUsrAutostart}" FontWeight="SemiBold" />
-            <TextBlock Text="Description" FontWeight="SemiBold" />
-          </StackPanel>
+          <DockPanel Name="UsrHeaderStrip">
+            <!-- Every cell sorts; a third click returns to this table's own order, by unit name.
+                 Indent (not Margin) puts the heading over the rows' state dot without widening the
+                 column. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Unit"        SortKey="name"        Indent="14" Width="{StaticResource ColUsrName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="State"       SortKey="state"       Width="{StaticResource ColUsrState}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Autostart"   SortKey="autostart"   Width="{StaticResource ColUsrAutostart}" />
+            <c:ColumnHeader Text="Description" SortKey="description" />
+          </DockPanel>
         </Border>
 
         <Panel>
@@ -172,13 +178,13 @@
                 <MenuItem Name="MenuUsrEnable" Header="Enable" />
                 <MenuItem Name="MenuUsrDisable" Header="Disable" />
                 <Separator />
-                <MenuItem Name="MenuUsrMask" Header="Mask…" />
+                <MenuItem Name="MenuUsrMask" Header="Mask" />
                 <MenuItem Name="MenuUsrUnmask" Header="Unmask" />
               </ContextMenu>
             </ListBox.ContextMenu>
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:ServiceRow">
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Classes="cells" Orientation="Horizontal">
                   <DockPanel Width="{StaticResource ColUsrName}">
                     <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
                              VerticalAlignment="Center" Fill="{Binding StateBrush}"

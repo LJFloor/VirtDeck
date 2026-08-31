@@ -60,15 +60,11 @@ public partial class ContainerConsoleWindow : Window
 
         // Throttled and settled by the control itself, so this is the whole forwarding rule.
         Terminal.TerminalResized += (cols, rows) => _session?.Resize(cols, rows);
-        Terminal.ViewChanged += SyncScrollBar;
         Terminal.TitleChanged += OnTitleFromGuest;
 
-        Scroll.Scroll += (_, _) =>
-        {
-            // The bar counts downwards from the top of the history, the control counts backwards
-            // from the newest line, so the two are mirrored rather than equal.
-            Terminal.ScrollOffset = (int)(Scroll.Maximum - Scroll.Value);
-        };
+        // Both directions of the scroll bar, and the mirroring rule that goes with them, in one
+        // call. Three surfaces host a terminal now, so that wiring lives on the control.
+        Terminal.BindScrollBar(Scroll);
 
         ReconnectButton.Click += async (_, _) => await ConnectAsync(reconnect: true);
         CopyButton.Click += async (_, _) => await CopyAsync();
@@ -97,7 +93,6 @@ public partial class ContainerConsoleWindow : Window
         EndSession();
         if (reconnect) Terminal.Restart();
         Terminal.Live = true;
-        SyncScrollBar();
 
         _connecting = true;
         ReconnectButton.IsEnabled = false;
@@ -264,17 +259,5 @@ public partial class ContainerConsoleWindow : Window
         }
 
         if (Terminal.HandleKey(e.Key, e.KeyModifiers)) e.Handled = true;
-    }
-
-    // ---- The scroll bar ---------------------------------------------------
-
-    private void SyncScrollBar()
-    {
-        var max = Terminal.ScrollMaximum;
-        Scroll.Maximum = max;
-        Scroll.ViewportSize = Math.Max(1, Terminal.Rows);
-        Scroll.LargeChange = Math.Max(1, Terminal.Rows - 1);
-        Scroll.Value = max - Terminal.ScrollOffset;
-        Scroll.IsEnabled = max > 0;
     }
 }

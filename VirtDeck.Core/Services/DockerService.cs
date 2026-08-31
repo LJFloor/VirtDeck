@@ -936,7 +936,9 @@ namespace VirtDeck.Services
         // One round trip, three tags, real tab characters, and the `|| exit $?` on the one command
         // whose failure means the listing failed. {{.CreatedSince}} and {{.Size}} already answer
         // what the container listing has to go and fetch with a batched inspect, because `docker ps`
-        // can report neither.
+        // can report neither. {{.CreatedAt}} rides along as the last field because the Created
+        // column sorts and its phrase does not: it is the same value as an absolute timestamp, free
+        // on a listing already being read, where a byte count for Size would cost a second pass.
         //
         // Splitting is exact and needs no cap: no field of a docker reference can contain a tab (the
         // reference grammar is alphanumerics plus . _ - / : @), and neither can docker's own size and
@@ -956,7 +958,8 @@ namespace VirtDeck.Services
         // (nobody knows). Without it a broken half would mark the whole table Unused.
         private const string ImagesScript =
             "docker image ls --all --no-trunc " +
-            "--format 'i\t{{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.CreatedSince}}\t{{.Size}}' || exit $?\n" +
+            "--format 'i\t{{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.CreatedSince}}\t{{.Size}}" +
+            "\t{{.CreatedAt}}' || exit $?\n" +
             "ids=$(docker ps --all --quiet --no-trunc 2>/dev/null) && echo k\n" +
             "if [ -n \"$ids\" ]; then\n" +
             "  printf '%s\\n' \"$ids\" | xargs docker inspect --format 'u\t{{.Image}}' 2>/dev/null\n" +
@@ -992,6 +995,11 @@ namespace VirtDeck.Services
                     Tag = f[3],
                     Created = f[4],
                     Size = f[5].Trim(),
+                    // Length-guarded against a truncated line, not against an old CLI: a Go
+                    // template naming a field the CLI does not have fails the whole command, so
+                    // there is no half-answer to fall back to. .CreatedAt has been on the image
+                    // context since docker 1.13, well below the 20.10 {{.State}} already needs.
+                    CreatedAt = f.Length > 6 ? f[6].Trim() : "",
                 });
             }
 

@@ -24,6 +24,35 @@ public sealed class UpdateRow : INotifyPropertyChanged
     /// <summary>Empty under pacman, which has no architectures, and <c>all</c> for a Debian arch:all package.</summary>
     public string Architecture { get; }
 
+    /// <summary>
+    /// Name plus the architecture, as a qualifier in brackets rather than in any one tool's syntax.
+    /// apt writes <c>libpam0g:amd64</c> and dnf writes <c>bash.x86_64</c> for the same idea, and a
+    /// table that draws one of those spellings is wrong on two hosts out of three; the bracket is
+    /// neither, and reads as what it is, which is a note about the row rather than part of the name.
+    /// </summary>
+    public string Qualified => Architecture.Length == 0 ? Name : $"{Name} ({Architecture})";
+
+    private bool _qualify;
+
+    /// <summary>
+    /// Whether another row in the same listing carries this package name, which is the only thing
+    /// the architecture is needed on screen for. Set by the merge, over the whole catalog rather than
+    /// the filtered rows, so a keystroke in the search box never relabels a row.
+    /// </summary>
+    public bool ShowArchitecture
+    {
+        get => _qualify;
+        set { if (Set(ref _qualify, value)) Raise(nameof(Display)); }
+    }
+
+    /// <summary>
+    /// What the Package cell draws: the package's own name, and nothing else in the ordinary case.
+    /// The architecture is appended only where two rows would otherwise be identical, which on a
+    /// multi-arch Debian host is a real pair (<c>libp11-kit0</c> amd64 and i386 are two files with
+    /// two versions) and everywhere else is noise on every row of the table.
+    /// </summary>
+    public string Display => _qualify ? Qualified : Name;
+
     private string _current = "";
     public string CurrentVersion { get => _current; private set => Set(ref _current, value); }
 
@@ -54,11 +83,11 @@ public sealed class UpdateRow : INotifyPropertyChanged
     /// </summary>
     public bool IsNew => _current.Length == 0;
 
-    public string CurrentText => IsNew ? "not installed" : _current;
+    public string CurrentText => IsNew ? "new" : _current;
 
     /// <summary>The whole row on one line, for the tooltip, since every cell here can be trimmed.</summary>
     public string Summary =>
-        $"{Key}\n{(IsNew ? "New package" : $"{_current}  ->  {_next}")}" +
+        $"{Qualified}\n{(IsNew ? "New package" : $"{_current}  ->  {_next}")}" +
         (_repository.Length > 0 ? $"\n{_repository}" : "");
 
     public UpdateRow(PackageUpdate update)

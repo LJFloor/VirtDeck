@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.FileExplorerModule"
              x:DataType="vm:RemoteFileRow">
 
@@ -11,10 +12,6 @@
     <x:Double x:Key="ColPerms">100</x:Double>
     <x:Double x:Key="ColOwner">90</x:Double>
     <x:Double x:Key="ColGroup">90</x:Double>
-
-    <!-- The sort direction caret, in the house style: a small box, stroked not filled. Descending
-         is the same glyph rotated, set from the code-behind. -->
-    <StreamGeometry x:Key="IconSortCaret">M0,1 L4,5 L8,1</StreamGeometry>
 
     <!-- Toolbar glyphs, the same house style as the module icons in MainWindow: a 16x16 box,
          stroked not filled, so they read at one weight. Refresh is the app's first arc; a circular
@@ -91,64 +88,29 @@
       </DockPanel>
     </Border>
 
-    <!-- The same heading strip the VM and container lists draw, with every cell a button because
-         every column sorts. JbColumnHeader is flat, so it still reads as a heading. -->
+    <!-- The same heading strip the VM and container lists draw, with every cell a ColumnHeader
+         because every column sorts. That control is the file explorer's own header cell lifted out
+         of this markup once every other table wanted one; JbColumnHeader is flat, so a heading
+         still reads as a heading until the pointer is over it.
+
+         This is the one table in the app whose headers are a two-state pair. Everywhere else a
+         third click drops back to the module's own default order, which is where its grouping
+         lives; directories-first here is a file-manager convention rather than a nicety, so there
+         is no natural order to return to and the grouping is permanent. -->
     <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
             BorderThickness="0,0,0,1" BorderBrush="#22808080">
-      <DockPanel>
-        <Button Name="GroupHeader" DockPanel.Dock="Right" Width="{StaticResource ColGroup}"
-                Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Group" />
-            <Path Name="GroupCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
-        <Button Name="OwnerHeader" DockPanel.Dock="Right" Width="{StaticResource ColOwner}"
-                Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Owner" />
-            <Path Name="OwnerCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
-        <Button Name="PermsHeader" DockPanel.Dock="Right" Width="{StaticResource ColPerms}"
-                Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Permissions" />
-            <Path Name="PermsCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
-        <Button Name="ModifiedHeader" DockPanel.Dock="Right" Width="{StaticResource ColModified}"
-                Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Modified" />
-            <Path Name="ModifiedCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
-        <Button Name="SizeHeader" DockPanel.Dock="Right" Width="{StaticResource ColSize}"
-                Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Size" />
-            <Path Name="SizeCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
-        <Button Name="NameHeader" Theme="{StaticResource JbColumnHeader}">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <TextBlock Text="Name" />
-            <Path Name="NameCaret" Data="{StaticResource IconSortCaret}" Width="8" Height="6"
-                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
-                  RenderTransformOrigin="50%,50%" VerticalAlignment="Center" IsVisible="False" />
-          </StackPanel>
-        </Button>
+      <DockPanel Name="HeaderStrip">
+        <c:ColumnHeader DockPanel.Dock="Right" Width="{StaticResource ColGroup}"
+                        Text="Group" SortKey="group" />
+        <c:ColumnHeader DockPanel.Dock="Right" Width="{StaticResource ColOwner}"
+                        Text="Owner" SortKey="owner" />
+        <c:ColumnHeader DockPanel.Dock="Right" Width="{StaticResource ColPerms}"
+                        Text="Permissions" SortKey="perms" />
+        <c:ColumnHeader DockPanel.Dock="Right" Width="{StaticResource ColModified}"
+                        Text="Modified" SortKey="modified" />
+        <c:ColumnHeader DockPanel.Dock="Right" Width="{StaticResource ColSize}"
+                        Text="Size" SortKey="size" />
+        <c:ColumnHeader Text="Name" SortKey="name" />
       </DockPanel>
     </Border>
 
@@ -183,9 +145,9 @@
             <!-- Two upload items rather than one, because a picker chooses files or a folder and
                  cannot offer both; the uploads target the directory on screen, so unlike everything
                  below them they do not need a selection. -->
-            <MenuItem Name="MenuUploadFiles" Header="Upload files..." />
-            <MenuItem Name="MenuUploadFolder" Header="Upload folder..." />
-            <MenuItem Name="MenuDownload" Header="Download..." />
+            <MenuItem Name="MenuUploadFiles" Header="Upload files" />
+            <MenuItem Name="MenuUploadFolder" Header="Upload folder" />
+            <MenuItem Name="MenuDownload" Header="Download" />
             <Separator />
             <!-- Display only: these carry Click handlers rather than commands, so naming the chord
                  here cannot also fire it. The keys themselves are bound in the code-behind. -->
@@ -202,7 +164,7 @@
         </ListBox.ContextMenu>
         <ListBox.ItemTemplate>
           <DataTemplate DataType="vm:RemoteFileRow">
-            <DockPanel Classes.cut="{Binding IsCut}" Classes.droptarget="{Binding IsDropTarget}">
+            <DockPanel Classes.cells="True" Classes.cut="{Binding IsCut}" Classes.droptarget="{Binding IsDropTarget}">
               <TextBlock DockPanel.Dock="Right" Text="{Binding Group}"       Width="{StaticResource ColGroup}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Owner}"       Width="{StaticResource ColOwner}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Permissions}" Width="{StaticResource ColPerms}"    Opacity="0.7" VerticalAlignment="Center" FontFamily="monospace" />

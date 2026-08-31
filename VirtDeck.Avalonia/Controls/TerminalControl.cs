@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using VirtDeck.Avalonia.Input;
@@ -19,6 +21,10 @@ namespace VirtDeck.Avalonia.Controls;
 /// It knows nothing about SSH, docker or containers. Bytes come in through <see cref="Receive"/> and
 /// go out through <see cref="Input"/>, so the same control serves anything that can hold a pseudo
 /// terminal open.
+///
+/// It also serves a surface that only ever receives. <see cref="ReadOnly"/> is what a log viewer
+/// sets: the same screen, the same parser and the same scrollback, with nothing ever going back the
+/// other way.
 /// </summary>
 public sealed class TerminalControl : Control
 {
@@ -85,6 +91,14 @@ public sealed class TerminalControl : Control
     /// </summary>
     private int _drawnScrollback = -1;
 
+    /// <summary>
+    /// How wide the scroll bar was last told the content is. Kept for the same reason and in the
+    /// same way as <see cref="_drawnScrollback"/>: nothing announces that a line wider than any
+    /// before it has arrived, and once the history is full the line count stops moving, so watching
+    /// that alone would leave the horizontal bar frozen at whatever it last said.
+    /// </summary>
+    private int _drawnUsedColumns = -1;
+
     private Typeface _plain, _bold, _italic, _boldItalic;
     private double _cellWidth = 8;
     private double _cellHeight = 16;
@@ -98,6 +112,14 @@ public sealed class TerminalControl : Control
 
     /// <summary>How many lines the view is scrolled back from the newest. 0 is the live bottom.</summary>
     private int _scroll;
+
+    /// <summary>
+    /// How many columns the view is scrolled right of the screen's left edge. Always 0 unless
+    /// <see cref="WrapColumns"/> made the screen wider than the window.
+    /// </summary>
+    private int _hScroll;
+
+    private int _wrapColumns;
 
     /// <summary>Selection anchors, as absolute (line, column) so they survive scrolling.</summary>
     private (int line, int col)? _selectStart;
@@ -153,11 +175,60 @@ public sealed class TerminalControl : Control
     /// <summary>
     /// False once the session is over. The screen stays exactly as it was, which is the point, but
     /// the cursor goes and keystrokes stop being sent, so a dead window cannot look live.
+    ///
+    /// Session state, which is why <see cref="Restart"/> puts it back: a reconnect is a new session.
+    /// Contrast <see cref="ReadOnly"/>, which is not.
     /// </summary>
     public bool Live { get; set; } = true;
 
+    /// <summary>
+    /// This surface never sends, whatever the far end asks for, and draws no cursor. A log is
+    /// watched rather than typed into, so a host sets this once and leaves <see cref="Live"/> alone
+    /// for the window's whole life.
+    ///
+    /// A fact about the host rather than about the session, which is the whole reason it is a
+    /// separate flag: <see cref="Restart"/> deliberately does not touch it, because a reload is
+    /// still the same read-only window. Reading history is not sending, so the scrollback keys and
+    /// the wheel go on working.
+    ///
+    /// It also takes the mouse away from the far end (see <c>MouseState</c>), which <c>Live</c>
+    /// never did.
+    /// </summary>
+    public bool ReadOnly { get; set; }
+
     public int Columns => _screen.Cols;
     public int Rows => _screen.Rows;
+
+    /// <summary>
+    /// The column a line folds at, stated in columns rather than left to the window.
+    ///
+    /// Zero, the default, folds at the window edge, which is what a terminal does and the only
+    /// thing a surface with a far end may do: that far end was told this geometry and draws to it.
+    /// A surface with no far end can ask for more, and then the screen is wider than the window and
+    /// there is somewhere to scroll sideways to. That is what a log wants: a record that runs past
+    /// the window reads better continued to the right than folded onto the next row, where it is
+    /// indistinguishable from the next record.
+    ///
+    /// It is a floor and not a fixed width, because a column the user can see has to be a column
+    /// the screen has.
+    /// </summary>
+    public int WrapColumns
+    {
+        get => _wrapColumns;
+        set
+        {
+            var wanted = Math.Max(0, value);
+            if (wanted == _wrapColumns) return;
+            _wrapColumns = wanted;
+            Relayout();
+        }
+    }
+
+    /// <summary>
+    /// How many whole columns the window shows, which is the screen's own width unless
+    /// <see cref="WrapColumns"/> made it wider.
+    /// </summary>
+    private int VisibleColumns => Math.Clamp((int)(Bounds.Width / _cellWidth), 1, _screen.Cols);
 
     public TerminalControl()
     {
@@ -180,11 +251,13 @@ public sealed class TerminalControl : Control
             long revision;
             MouseTracking mouse;
             int scrollback;
+            int used;
             lock (_screen.SyncRoot)
             {
                 revision = _screen.Revision;
-                mouse = _screen.MouseMode;
+                mouse = ReadOnly ? MouseTracking.Off : _screen.MouseMode;
                 scrollback = _screen.ScrollbackCount;
+                used = _screen.MaxUsedColumns;
             }
 
             // The mouse mode is read here rather than pushed from the parser because setting it does
@@ -198,9 +271,10 @@ public sealed class TerminalControl : Control
             // one `clear` throws away (ED 3) went on offering history that had gone. Read here
             // rather than raised from the screen because a scroll is not a mutation the revision
             // counter can carry, and this lock is already held.
-            if (scrollback != _drawnScrollback)
+            if (scrollback != _drawnScrollback || used != _drawnUsedColumns)
             {
                 _drawnScrollback = scrollback;
+                _drawnUsedColumns = used;
                 ViewChanged?.Invoke();
             }
 
@@ -339,15 +413,27 @@ public sealed class TerminalControl : Control
         // would throw the screen away just as the session was starting.
         if (Bounds.Width < _cellWidth || Bounds.Height < _cellHeight) return;
 
-        var cols = Math.Max(1, (int)(Bounds.Width / _cellWidth));
+        // The window decides how much is shown and WrapColumns decides how wide the screen is. The
+        // two are the same number unless a host asked for more, and where they are not, narrowing
+        // the window costs nothing at all: Resize is never called, so no line is resampled and none
+        // loses its tail, which is exactly what a screen tied to the window's width does to it.
+        var view = Math.Max(1, (int)(Bounds.Width / _cellWidth));
+        var cols = Math.Max(view, _wrapColumns);
         var rows = Math.Max(1, (int)(Bounds.Height / _cellHeight));
-        if (cols == _screen.Cols && rows == _screen.Rows) return;
 
-        lock (_screen.SyncRoot) _screen.Resize(cols, rows);
-        _scroll = 0;
+        if (cols != _screen.Cols || rows != _screen.Rows)
+        {
+            lock (_screen.SyncRoot) _screen.Resize(cols, rows);
+            _scroll = 0;
+            AnnounceResize();
+        }
+
+        // Outside that test on purpose: the window can change without the screen changing, and when
+        // it does, how much is off to the right of it changes with it. So the horizontal extent is
+        // restated and an offset the window has just grown past is brought back.
+        _hScroll = Math.Clamp(_hScroll, 0, ScrollMaximumX);
         InvalidateVisual();
         ViewChanged?.Invoke();
-        AnnounceResize();
     }
 
     /// <summary>
@@ -379,21 +465,74 @@ public sealed class TerminalControl : Control
     /// </summary>
     public void Receive(byte[] buffer, int count)
     {
-        lock (_screen.SyncRoot) _parser.Feed(buffer.AsSpan(0, count));
+        bool held;
+        lock (_screen.SyncRoot)
+        {
+            var before = _screen.TotalLines;
+            _parser.Feed(buffer.AsSpan(0, count));
+
+            // A console snaps to the bottom on output, because what the far end prints is the thing
+            // worth looking at. A read-only surface is the other way round: somebody scrolled up in
+            // a log is reading it, and yanking them to the newest line every time a line lands is
+            // what made the old box's scroll bar useless while following. So the offset is advanced
+            // by however many lines the feed appended, which holds the view over the same content.
+            //
+            // It holds only while the history is still growing. Past MaxScrollback the oldest line
+            // is dropped for each one appended, so TotalLines stops moving, the delta is zero, and
+            // the content under a fixed offset shifts by one. The view drifts from there, which is
+            // unavoidable: the lines it was showing are gone.
+            //
+            // Touching _scroll from here is safe only because a read-only host feeds on the UI
+            // thread, which is the same thread as every other writer of it. ContainerLogsWindow
+            // keeps its drain timer for exactly this reason; a host feeding from its own read
+            // thread must not set ReadOnly.
+            held = ReadOnly && _scroll != 0;
+            if (held)
+            {
+                // Clamped against ScrollbackCount, which is what the ScrollOffset setter clamps
+                // to, so the two cannot disagree. A raw += would push a reader near the top of the
+                // history past the end of it, and on the alternate screen there is no history at
+                // all to hold a place in.
+                _scroll = Math.Clamp(_scroll + (_screen.TotalLines - before), 0,
+                                     _screen.ScrollbackCount);
+            }
+        }
 
         if (_replies.Count > 0)
         {
-            foreach (var reply in _replies) Input?.Invoke(reply);
+            // Through the same door as a keystroke, so a surface that cannot send does not answer a
+            // device attributes query either. What is being fed here is content somebody else
+            // wrote, and a raw ESC[c in a container's log would otherwise raise Input from a window
+            // that has no far end to send it to.
+            foreach (var reply in _replies) Send(reply);
             _replies.Clear();
         }
 
-        // Output means the far end is doing something, and what it prints is the thing worth
-        // looking at, so anyone reading history is snapped back to the bottom.
-        if (_scroll != 0)
+        if (!held && _scroll != 0)
         {
             _scroll = 0;
             Dispatcher.UIThread.Post(() => ViewChanged?.Invoke());
         }
+    }
+
+    /// <summary>
+    /// Feeds text rather than bytes, for a source that hands back lines instead of a stream:
+    /// <c>DockerService.TailLogsAsync</c> reports what <c>StreamReader.ReadLine</c> already decoded.
+    ///
+    /// <b>The caller supplies its own line endings and they must be CRLF.</b>
+    /// <c>TerminalScreen.LineFeed</c> moves down only and the parser has no LNM mode, so a bare LF
+    /// leaves every line starting at the column the previous one ended in, which draws the whole log
+    /// as a staircase.
+    ///
+    /// Re-encoding something already decoded is not a lossy round trip: the reader has substituted
+    /// U+FFFD for anything invalid, so what goes back out is valid UTF-8. Escape sequences in the
+    /// text are still escape sequences, because this is the same stream, only decoded.
+    /// </summary>
+    public void Receive(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        var bytes = Encoding.UTF8.GetBytes(text);
+        Receive(bytes, bytes.Length);
     }
 
     /// <summary>Throws away the screen and its history, the way the shell's own clear does.</summary>
@@ -401,6 +540,7 @@ public sealed class TerminalControl : Control
     {
         lock (_screen.SyncRoot) _screen.Reset();
         _scroll = 0;
+        _hScroll = 0;
         _selectStart = _selectEnd = null;
         InvalidateVisual();
         ViewChanged?.Invoke();
@@ -417,7 +557,9 @@ public sealed class TerminalControl : Control
         HookParser();
         _drawnRevision = -1;
         _drawnScrollback = -1;
+        _drawnUsedColumns = -1;
         _scroll = 0;
+        _hScroll = 0;
         _selectStart = _selectEnd = null;
         Live = true;
         InvalidateVisual();
@@ -442,6 +584,114 @@ public sealed class TerminalControl : Control
             _scroll = clamped;
             InvalidateVisual();
             ViewChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// How far right there is anything to scroll to. It is measured against the widest line the
+    /// screen has held rather than against the screen's own width, or a window folding at 512 would
+    /// offer four hundred columns of blank to scroll through on a log of ordinary lines.
+    /// </summary>
+    public int ScrollMaximumX
+    {
+        get
+        {
+            lock (_screen.SyncRoot)
+                return Math.Max(0, Math.Min(_screen.Cols, _screen.MaxUsedColumns) - VisibleColumns);
+        }
+    }
+
+    /// <summary>Columns scrolled right of the screen's left edge. 0 whenever the screen fits the window.</summary>
+    public int ScrollOffsetX
+    {
+        get => _hScroll;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, ScrollMaximumX);
+            if (clamped == _hScroll) return;
+            _hScroll = clamped;
+            InvalidateVisual();
+            ViewChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Wires a scroll bar to this terminal, both ways, in one call. It was three lines and a
+    /// six line method in each host, and this is the third host, which is where every other repeated
+    /// idiom in this app got a home of its own. Which axis it is is read off the bar, so a host with
+    /// both writes the same call twice.
+    ///
+    /// What it exists to state once is the mirroring on the vertical one: the bar counts downwards
+    /// from the top of the history and the control counts backwards from the newest line, so the two
+    /// are mirrored rather than equal, and getting that the wrong way round drags the view to the far
+    /// end of the history. The horizontal one is not mirrored, because both ends count rightwards
+    /// from the left edge.
+    ///
+    /// <b>The value is never written back while the bar is the one driving</b>, and that is not
+    /// tidiness. Avalonia treats a thumb drag as a sequence of increments and compensates for a
+    /// value it did not get: after each drag <c>Track</c> compares how far the thumb was asked to
+    /// move with how far it did move, and shifts the thumb's own drag origin by the difference
+    /// (<c>Track.CalculateThumbAdjustment</c>, feeding <c>Thumb.AdjustDrag</c>), so the next pointer
+    /// move is measured from where the thumb ended up rather than from the pointer. A value the bar
+    /// was talked out of is therefore not retried: it is lost. Rounding to whole lines and writing
+    /// that back from here is exactly that, once per pointer event, and a drag is hundreds of them,
+    /// so the thumb fell progressively behind the pointer and reaching the top of a full history
+    /// meant dragging a long way past the top of the window. Leaving the bar its own fractional
+    /// value costs nothing: the offset it is read into is a whole number either way.
+    ///
+    /// The bar stays the host's rather than becoming part of this control, so the terminal itself is
+    /// still a plain grid of cells that any other module could host.
+    /// </summary>
+    public void BindScrollBar(ScrollBar bar)
+    {
+        // Set while this bar's own Scroll event is being handled, which is the one moment its value
+        // must be left alone. It is per bar rather than per control so that dragging one bar does
+        // not stop the other being kept up to date.
+        var dragging = false;
+
+        if (bar.Orientation == Orientation.Horizontal)
+        {
+            bar.Scroll += (_, _) =>
+            {
+                dragging = true;
+                try { ScrollOffsetX = (int)Math.Round(bar.Value); }
+                finally { dragging = false; }
+            };
+
+            ViewChanged += SyncX;
+            SyncX();
+            return;
+        }
+
+        bar.Scroll += (_, _) =>
+        {
+            dragging = true;
+            try { ScrollOffset = (int)Math.Round(bar.Maximum - bar.Value); }
+            finally { dragging = false; }
+        };
+
+        ViewChanged += Sync;
+        Sync();
+
+        void Sync()
+        {
+            var max = ScrollMaximum;
+            bar.Maximum = max;
+            bar.ViewportSize = Math.Max(1, Rows);
+            bar.LargeChange = Math.Max(1, Rows - 1);
+            if (!dragging) bar.Value = max - ScrollOffset;
+            bar.IsEnabled = max > 0;
+        }
+
+        void SyncX()
+        {
+            var max = ScrollMaximumX;
+            var view = VisibleColumns;
+            bar.Maximum = max;
+            bar.ViewportSize = Math.Max(1, view);
+            bar.LargeChange = Math.Max(1, view - 1);
+            if (!dragging) bar.Value = ScrollOffsetX;
+            bar.IsEnabled = max > 0;
         }
     }
 
@@ -483,15 +733,42 @@ public sealed class TerminalControl : Control
         lock (_screen.SyncRoot) alt = _screen.AltScreen;
         if (alt) { base.OnPointerWheelChanged(e); return; }
 
+        // Sideways, where there is anywhere sideways to go. A trackpad and a tilt wheel send it as
+        // Delta.X; Shift with an ordinary wheel is the convention for everything else. Both are
+        // gated on the screen being wider than the window, so a console, whose screen never is,
+        // behaves exactly as it did. The sign is Avalonia's own: a positive delta moves the content
+        // with the wheel, so it lowers the offset (ScrollContentPresenter does `x += -delta.X`).
+        if (ScrollMaximumX > 0 && (e.Delta.X != 0 || e.KeyModifiers.HasFlag(KeyModifiers.Shift)))
+        {
+            var notches = e.Delta.X != 0 ? e.Delta.X : e.Delta.Y;
+            ScrollOffsetX = _hScroll - (int)(notches * ScrollWheelLines);
+            e.Handled = true;
+            return;
+        }
+
         ScrollOffset = _scroll + (int)(e.Delta.Y * ScrollWheelLines);
         e.Handled = true;
     }
 
     // ---- Mouse reporting --------------------------------------------------
 
-    /// <summary>Both mouse settings, read together under the one lock that guards them.</summary>
+    /// <summary>
+    /// Both mouse settings, read together under the one lock that guards them.
+    ///
+    /// A surface that cannot send has no mouse mode, and saying so here says it once for every
+    /// pointer path: each of them already tests for Off, so clamping it makes
+    /// <see cref="PointerBelongsToFarEnd"/> false, <c>OnPointerMoved</c>'s <c>wanted</c> false and
+    /// the wheel's report branch unreachable, and <c>TerminalMouse.Encode</c> refuses an Off report
+    /// anyway. Threading ReadOnly through all five separately would be the same rule written five
+    /// times.
+    ///
+    /// It is not tidiness. A log is content somebody else wrote, and an <c>ESC[?1002h</c> in it
+    /// would otherwise swallow pointer presses and silently stop the text being selectable, to send
+    /// reports nowhere.
+    /// </summary>
     private (MouseTracking mode, MouseProtocol protocol) MouseState()
     {
+        if (ReadOnly) return (MouseTracking.Off, MouseProtocol.X10);
         lock (_screen.SyncRoot) return (_screen.MouseMode, _screen.MouseEncoding);
     }
 
@@ -505,7 +782,9 @@ public sealed class TerminalControl : Control
     {
         lock (_screen.SyncRoot)
         {
-            return (Math.Clamp((int)(p.X / _cellWidth) + 1, 1, _screen.Cols),
+            // Plus what is scrolled off to the left, which is zero wherever there is a far end to
+            // report to, since only a surface with none is ever wider than its window.
+            return (Math.Clamp((int)(p.X / _cellWidth) + 1 + _hScroll, 1, _screen.Cols),
                     Math.Clamp((int)(p.Y / _cellHeight) + 1, 1, _screen.Rows));
         }
     }
@@ -560,7 +839,7 @@ public sealed class TerminalControl : Control
     private (int line, int col) CellAt(Point p)
     {
         var row = (int)(p.Y / _cellHeight);
-        var col = (int)Math.Round(p.X / _cellWidth);
+        var col = (int)Math.Round(p.X / _cellWidth) + _hScroll;
         lock (_screen.SyncRoot)
         {
             var top = _screen.TotalLines - _screen.Rows - _scroll;
@@ -714,18 +993,60 @@ public sealed class TerminalControl : Control
             for (var line = from.line; line <= to.line && line < _screen.TotalLines; line++)
             {
                 var cells = _screen.LineAt(line);
-                var start = line == from.line ? from.col : 0;
-                var end = line == to.line ? to.col : cells.Length;
-                start = Math.Clamp(start, 0, cells.Length);
-                end = Math.Clamp(end, start, cells.Length);
-
-                var text = new StringBuilder();
-                for (var i = start; i < end; i++) text.Append(char.ConvertFromUtf32(cells[i].Rune));
-                if (line != to.line) sb.AppendLine(text.ToString().TrimEnd());
-                else sb.Append(text.ToString().TrimEnd());
+                AppendCells(sb, cells, line == from.line ? from.col : 0,
+                            line == to.line ? to.col : cells.Length);
+                if (line != to.line) sb.AppendLine();
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Every line the screen holds, scrollback first. What Copy falls back to when nothing is
+    /// selected, so a read-only surface's button can go on meaning "give me the whole log" the way
+    /// it did when the display was a text box.
+    ///
+    /// It holds the screen lock for the whole walk, which is why this is something a button press
+    /// does and never something on a timer.
+    /// </summary>
+    public string BufferText()
+    {
+        var sb = new StringBuilder();
+        lock (_screen.SyncRoot)
+        {
+            for (var line = 0; line < _screen.TotalLines; line++)
+            {
+                AppendCells(sb, _screen.LineAt(line), 0, int.MaxValue);
+                if (line != _screen.TotalLines - 1) sb.AppendLine();
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends one line's cells between two columns, trailing blanks dropped. Shared by the two
+    /// readers above so the padding rule is written once.
+    ///
+    /// The BMP fast path is not a micro-optimisation: <c>char.ConvertFromUtf32</c> allocates a
+    /// string per cell, which a selection can afford and a walk over five thousand lines of history
+    /// cannot. A rune of zero is a cell nothing was ever written to, and reads as a space here for
+    /// the same reason <c>DrawRun</c> draws it as one.
+    /// </summary>
+    private static void AppendCells(StringBuilder sb, TerminalCell[] cells, int start, int end)
+    {
+        start = Math.Clamp(start, 0, cells.Length);
+        end = Math.Clamp(end, start, cells.Length);
+
+        var text = new StringBuilder(end - start);
+        for (var i = start; i < end; i++)
+        {
+            var rune = cells[i].Rune;
+            if (rune is 0) text.Append(' ');
+            else if (rune < 0x10000) text.Append((char)rune);
+            else text.Append(char.ConvertFromUtf32(rune));
+        }
+
+        sb.Append(text.ToString().TrimEnd());
     }
 
     private static ((int line, int col) from, (int line, int col) to) Ordered(
@@ -745,12 +1066,13 @@ public sealed class TerminalControl : Control
     // ---- Keyboard and paste -----------------------------------------------
 
     /// <summary>
-    /// Sends bytes to the far end, and only while the session is live. Public so the window can send
-    /// a paste and the parser can send its replies through the same door.
+    /// Sends bytes to the far end, and only while the session is live and the surface can send at
+    /// all. Public so the window can send a paste and the parser can send its replies through the
+    /// same door.
     /// </summary>
     public void Send(byte[] bytes)
     {
-        if (Live) Input?.Invoke(bytes);
+        if (Live && !ReadOnly) Input?.Invoke(bytes);
     }
 
     /// <summary>
@@ -794,15 +1116,17 @@ public sealed class TerminalControl : Control
 
     private bool HandleKeyCore(Key key, KeyModifiers mods)
     {
-        if (!Live) return false;
-
         // Reading history is the one thing the window does with the keyboard rather than the far
-        // end, because the far end has no idea this scrollback exists.
+        // end, because the far end has no idea this scrollback exists. Deliberately above the gate
+        // below: a session that has ended and a surface that never had one both still have history
+        // worth paging through, and the wheel has always scrolled both.
         if (mods.HasFlag(KeyModifiers.Shift) && key is Key.PageUp or Key.PageDown)
         {
             ScrollOffset = _scroll + (key == Key.PageUp ? _screen.Rows - 1 : -(_screen.Rows - 1));
             return true;
         }
+
+        if (!Live || ReadOnly) return false;
 
         bool applicationCursor;
         lock (_screen.SyncRoot) applicationCursor = _screen.ApplicationCursorKeys;
@@ -829,7 +1153,11 @@ public sealed class TerminalControl : Control
         var alreadySent = _keyHandled;
         _keyHandled = false;
 
-        if (!Live || alreadySent || string.IsNullOrEmpty(e.Text)) { base.OnTextInput(e); return; }
+        if (!Live || ReadOnly || alreadySent || string.IsNullOrEmpty(e.Text))
+        {
+            base.OnTextInput(e);
+            return;
+        }
 
         SnapToBottom();
         Send(Encoding.UTF8.GetBytes(e.Text));
@@ -874,12 +1202,18 @@ public sealed class TerminalControl : Control
         var y = row * _cellHeight;
         var width = Math.Min(cells.Length, _screen.Cols);
 
-        var start = 0;
-        while (start < width)
+        // The part of the line the window is over, which is all of it unless WrapColumns made the
+        // screen wider. One column past the last whole one is drawn too, so a column the window only
+        // half shows is half drawn rather than missing; ClipToBounds cuts it off.
+        var first = Math.Min(_hScroll, width);
+        var last = Math.Min(width, first + (int)Math.Ceiling(Bounds.Width / _cellWidth) + 1);
+
+        var start = first;
+        while (start < last)
         {
             var selected = IsSelected(absolute, start);
             var end = start + 1;
-            while (end < width &&
+            while (end < last &&
                    cells[end].SameStyle(cells[start]) &&
                    IsSelected(absolute, end) == selected)
             {
@@ -907,7 +1241,7 @@ public sealed class TerminalControl : Control
         var fg = Resolve(fgColour, !inverse);
         var bg = Resolve(bgColour, inverse);
 
-        var x = start * _cellWidth;
+        var x = (start - _hScroll) * _cellWidth;
         var runWidth = (end - start) * _cellWidth;
         var rect = new Rect(x, y, runWidth, _cellHeight);
 
@@ -965,13 +1299,16 @@ public sealed class TerminalControl : Control
 
     private void DrawCursor(DrawingContext context)
     {
-        if (!Live || !_screen.CursorVisible) return;
+        // A read-only surface has no cursor position to show: nothing is being typed at.
+        if (!Live || ReadOnly || !_screen.CursorVisible) return;
 
         // Scrolled back into history, the cursor is somewhere below the view and drawing it at the
         // same screen row would put it on an unrelated line.
         if (_scroll != 0) return;
 
-        var rect = new Rect(_screen.CursorX * _cellWidth, _screen.CursorY * _cellHeight,
+        // Left of the window when the view is scrolled right past it, which draws at a negative x
+        // and is clipped, exactly as a cursor off the right-hand edge is.
+        var rect = new Rect((_screen.CursorX - _hScroll) * _cellWidth, _screen.CursorY * _cellHeight,
                             _cellWidth, _cellHeight);
 
         if (!IsFocused)

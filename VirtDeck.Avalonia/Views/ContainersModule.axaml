@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
              x:Class="VirtDeck.Avalonia.Views.ContainersModule"
              x:DataType="vm:ContainerRow">
 
@@ -84,22 +85,29 @@
                everything per-container is on the list's right-click menu. There is still no Refresh
                button, because `docker events` refreshes the list on its own. -->
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Name="NewContainerButton" Content="New container…" Classes="accent" />
-            </StackPanel>
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Button Name="NewContainerButton" Content="New container" Classes="accent" />
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="ContainerSearch" Width="200" Margin="10,0,0,0"
+                           PlaceholderText="Search containers"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name and the image." />
+              <Panel />
+            </DockPanel>
           </Border>
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <!-- Padding (not Margin) indents the heading over the rows' state dot without widening
-                   the column. -->
-              <TextBlock Text="Name"   Width="{StaticResource ColName}"   FontWeight="SemiBold" Padding="14,0,0,0" />
-              <TextBlock Text="Image"  Width="{StaticResource ColImage}"  FontWeight="SemiBold" />
-              <TextBlock Text="State"  Width="{StaticResource ColState}"  FontWeight="SemiBold" />
-              <TextBlock Text="Uptime" Width="{StaticResource ColUptime}" FontWeight="SemiBold" />
-              <TextBlock Text="Ports" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- Every cell sorts; a third click returns to this table's own order, which is running
+                 first and then by name. Indent (not Margin) puts the heading over the rows' state
+                 dot without widening the column. -->
+            <DockPanel Name="ContainerHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"   SortKey="name"   Indent="14" Width="{StaticResource ColName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Image"  SortKey="image"  Width="{StaticResource ColImage}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Uptime" SortKey="uptime" Width="{StaticResource ColUptime}" />
+              <c:ColumnHeader Text="Ports"  SortKey="ports" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -108,20 +116,20 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ContextMenu>
                 <ContextMenu Name="ContainerMenu">
-                  <MenuItem Name="MenuEdit" Header="Edit…" />
-                  <MenuItem Name="MenuLogs" Header="Logs…" />
-                  <MenuItem Name="MenuConsole" Header="Console…" />
+                  <MenuItem Name="MenuEdit" Header="Edit" />
+                  <MenuItem Name="MenuLogs" Header="Logs" />
+                  <MenuItem Name="MenuConsole" Header="Console" />
                   <Separator />
                   <MenuItem Name="MenuStart" Header="Start" />
                   <MenuItem Name="MenuStop" Header="Stop" />
                   <MenuItem Name="MenuRestart" Header="Restart" />
                   <Separator />
-                  <MenuItem Name="MenuRemove" Header="Remove…" />
+                  <MenuItem Name="MenuRemove" Header="Remove" />
                 </ContextMenu>
               </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:ContainerRow">
-                  <StackPanel Orientation="Horizontal">
+                  <StackPanel Classes="cells" Orientation="Horizontal">
                     <!-- Same 9px state dot as the VM list, sharing the same three colours. -->
                     <DockPanel Width="{StaticResource ColName}">
                       <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
@@ -163,26 +171,36 @@
                rather than on the menu because it applies to the whole host, not to a row. No Refresh
                button: the same `docker events` tail now carries image events. -->
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Name="PullImageButton" Content="Pull image…" Classes="accent"
-                      ToolTip.Tip="Fetch an image from a registry before anything needs it" />
-              <Button Name="ImportImageButton" Content="Import…"
-                      ToolTip.Tip="Load a .tar or .tar.gz written by docker save" />
-              <Button Name="PruneImagesButton" Content="Prune unused…"
-                      ToolTip.Tip="Remove images no container is using" />
-            </StackPanel>
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Button Name="PullImageButton" Content="Pull image" Classes="accent"
+                        ToolTip.Tip="Fetch an image from a registry before anything needs it" />
+                <Button Name="ImportImageButton" Content="Import"
+                        ToolTip.Tip="Load a .tar or .tar.gz written by docker save" />
+                <Button Name="PruneImagesButton" Content="Prune unused"
+                        ToolTip.Tip="Remove images no container is using" />
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="ImageSearch" Width="200" Margin="10,0,0,0"
+                           PlaceholderText="Search images"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the repository, the tag and the image id." />
+              <Panel />
+            </DockPanel>
           </Border>
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="Repository" Width="{StaticResource ColRepository}" FontWeight="SemiBold" />
-              <TextBlock Text="Tag"        Width="{StaticResource ColTag}"        FontWeight="SemiBold" />
-              <TextBlock Text="Image ID"   Width="{StaticResource ColImageId}"    FontWeight="SemiBold" />
-              <TextBlock Text="Created"    Width="{StaticResource ColCreated}"    FontWeight="SemiBold" />
-              <TextBlock Text="Size"       Width="{StaticResource ColSize}"       FontWeight="SemiBold" />
-              <TextBlock Text="Status" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- Created and Size sort on the values their cells were rendered from, never on the
+                 phrases docker printed: "999MB" sorts above "1.23GB" as text, and "3 weeks ago"
+                 does not sort at all. A third click returns to this table's own order, tagged
+                 before dangling. -->
+            <DockPanel Name="ImageHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Repository" SortKey="repository" Width="{StaticResource ColRepository}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Tag"        SortKey="tag"        Width="{StaticResource ColTag}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Image ID"   SortKey="id"         Width="{StaticResource ColImageId}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Created"    SortKey="created"    Width="{StaticResource ColCreated}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Size"       SortKey="size"       Width="{StaticResource ColSize}" />
+              <c:ColumnHeader Text="Status"     SortKey="status" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -191,19 +209,19 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ContextMenu>
                 <ContextMenu Name="ImageMenu">
-                  <MenuItem Name="MenuNewFromImage" Header="New container…" />
+                  <MenuItem Name="MenuNewFromImage" Header="New container" />
                   <Separator />
-                  <MenuItem Name="MenuExportImage" Header="Export…" />
-                  <MenuItem Name="MenuTagImage" Header="Tag…" />
+                  <MenuItem Name="MenuExportImage" Header="Export" />
+                  <MenuItem Name="MenuTagImage" Header="Tag" />
                   <Separator />
-                  <MenuItem Name="MenuRemoveImage" Header="Remove…" />
+                  <MenuItem Name="MenuRemoveImage" Header="Remove" />
                 </ContextMenu>
               </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:ImageRow">
                   <!-- No state dot: a container is doing something, an image is a fact. A dangling
                        layer is dimmed whole instead, the way a broken symlink is in the explorer. -->
-                  <StackPanel Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                  <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
                     <TextBlock Text="{Binding Repository}" Width="{StaticResource ColRepository}"
                                TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Repository}" />
                     <TextBlock Text="{Binding Tag}"        Width="{StaticResource ColTag}"
@@ -239,24 +257,26 @@
                network events too. -->
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
             <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Name="CreateNetworkButton" Content="New network…" Classes="accent"
+              <Button Name="CreateNetworkButton" Content="New network" Classes="accent"
                       ToolTip.Tip="Create a network containers can be attached to" />
-              <Button Name="PruneNetworksButton" Content="Prune unused…"
+              <Button Name="PruneNetworksButton" Content="Prune unused"
                       ToolTip.Tip="Remove every network no container is running on" />
             </StackPanel>
           </Border>
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="Name"       Width="{StaticResource ColNetName}"    FontWeight="SemiBold" />
-              <TextBlock Text="Network ID" Width="{StaticResource ColNetId}"      FontWeight="SemiBold" />
-              <TextBlock Text="Driver"     Width="{StaticResource ColNetDriver}"  FontWeight="SemiBold" />
-              <TextBlock Text="Scope"      Width="{StaticResource ColNetScope}"   FontWeight="SemiBold" />
-              <TextBlock Text="Subnet"     Width="{StaticResource ColNetSubnet}"  FontWeight="SemiBold" />
-              <TextBlock Text="Gateway"    Width="{StaticResource ColNetGateway}" FontWeight="SemiBold" />
-              <TextBlock Text="Status" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- A third click returns to this table's own order, user-defined before docker's
+                 predefined three. No search box: a host has a handful of networks. -->
+            <DockPanel Name="DockerNetHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"       SortKey="name"    Width="{StaticResource ColNetName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Network ID" SortKey="id"      Width="{StaticResource ColNetId}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Driver"     SortKey="driver"  Width="{StaticResource ColNetDriver}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Scope"      SortKey="scope"   Width="{StaticResource ColNetScope}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Subnet"     SortKey="subnet"  Width="{StaticResource ColNetSubnet}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Gateway"    SortKey="gateway" Width="{StaticResource ColNetGateway}" />
+              <c:ColumnHeader Text="Status"     SortKey="status" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -265,17 +285,17 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ContextMenu>
                 <ContextMenu Name="NetworkMenu">
-                  <MenuItem Name="MenuConnectContainer" Header="Connect container…" />
-                  <MenuItem Name="MenuDisconnectContainer" Header="Disconnect container…" />
+                  <MenuItem Name="MenuConnectContainer" Header="Connect container" />
+                  <MenuItem Name="MenuDisconnectContainer" Header="Disconnect container" />
                   <Separator />
-                  <MenuItem Name="MenuRemoveNetwork" Header="Remove…" />
+                  <MenuItem Name="MenuRemoveNetwork" Header="Remove" />
                 </ContextMenu>
               </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:DockerNetworkRow">
                   <!-- No state dot and no row dimming: a container is doing something, a network is
                        a fact, and unlike a dangling layer no network is a leftover. -->
-                  <StackPanel Orientation="Horizontal">
+                  <StackPanel Classes="cells" Orientation="Horizontal">
                     <TextBlock Text="{Binding Name}"    Width="{StaticResource ColNetName}"
                                TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
                     <TextBlock Text="{Binding ShortId}" Width="{StaticResource ColNetId}" Opacity="0.75"
@@ -319,20 +339,23 @@
                Networks page above follows. -->
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
             <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Name="NewStackButton" Content="New stack…" Classes="accent"
+              <Button Name="NewStackButton" Content="New stack" Classes="accent"
                       ToolTip.Tip="Write a compose file to this host and bring it up" />
             </StackPanel>
           </Border>
 
           <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
                   BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="Name"        Width="{StaticResource ColStackName}"     FontWeight="SemiBold" />
-              <TextBlock Text="Status"      Width="{StaticResource ColStackStatus}"   FontWeight="SemiBold" />
-              <TextBlock Text="Services"    Width="{StaticResource ColStackServices}" FontWeight="SemiBold" />
-              <TextBlock Text="Source"      Width="{StaticResource ColStackSource}"   FontWeight="SemiBold" />
-              <TextBlock Text="Compose file" FontWeight="SemiBold" />
-            </StackPanel>
+            <!-- Services sorts on the count the cell draws, because "10" sorts below "2" as text.
+                 A third click returns to this table's own order, ours before discovered ones.
+                 Indent (not Margin) puts the heading over the rows' state dot. -->
+            <DockPanel Name="StackHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"         SortKey="name"     Indent="14" Width="{StaticResource ColStackName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Status"       SortKey="status"   Width="{StaticResource ColStackStatus}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Services"     SortKey="services" Width="{StaticResource ColStackServices}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Source"       SortKey="source"   Width="{StaticResource ColStackSource}" />
+              <c:ColumnHeader Text="Compose file" SortKey="file" />
+            </DockPanel>
           </Border>
 
           <Panel>
@@ -341,7 +364,7 @@
                      ItemContainerTheme="{StaticResource JbTableRow}">
               <ListBox.ContextMenu>
                 <ContextMenu Name="StackMenu">
-                  <MenuItem Name="MenuEditStack" Header="Edit…" />
+                  <MenuItem Name="MenuEditStack" Header="Edit" />
                   <MenuItem Name="MenuDeployStack" Header="Deploy" />
                   <MenuItem Name="MenuPullStack" Header="Pull images" />
                   <Separator />
@@ -349,8 +372,8 @@
                   <MenuItem Name="MenuStopStack" Header="Stop" />
                   <MenuItem Name="MenuRestartStack" Header="Restart" />
                   <Separator />
-                  <MenuItem Name="MenuDownStack" Header="Down…" />
-                  <MenuItem Name="MenuDeleteStack" Header="Delete…" />
+                  <MenuItem Name="MenuDownStack" Header="Down" />
+                  <MenuItem Name="MenuDeleteStack" Header="Delete" />
                 </ContextMenu>
               </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
@@ -359,7 +382,7 @@
                        containers and so it is doing something, where a network is a fact. It is
                        green only when every container is up, because "running" is the wrong thing
                        to tell somebody whose database container died. -->
-                  <StackPanel Orientation="Horizontal">
+                  <StackPanel Classes="cells" Orientation="Horizontal">
                     <DockPanel Width="{StaticResource ColStackName}">
                       <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
                                VerticalAlignment="Center" Fill="{Binding StateBrush}" />

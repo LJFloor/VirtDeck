@@ -49,7 +49,7 @@ drivers and sound daemon, and each one degrades gracefully when missing:
 | USB redirection | `libusb-1.0-0`, `libusbredirhost1t64` (`libusbredirhost1` before the t64 transition) | `libusb1`, `usbredir` | The usbredir channels are **not connected at all** and the picker says what to install |
 | USB mass-storage hand-over | `udisks2` | `udisks2` | Falls back to `umount`, which needs the mount to be user-unmountable |
 | Guest audio | `libpulse0` (PipeWire's Pulse layer counts) | `pulseaudio-libs` | Silence: the session drops to a null sink |
-| Remembering passwords | `libsecret-1-0`, plus a keyring serving `org.freedesktop.secrets` (`gnome-keyring`, `kwalletd`/`kwallet-secrets`, KeePassXC) | `libsecret` + ditto | "Remember passwords" is disabled on the login screen with the reason under it; passwords are typed each time, exactly as before |
+| Remembering passwords | `libsecret-1-0`, plus a keyring serving `org.freedesktop.secrets` (`gnome-keyring`, `kwalletd`/`kwallet-secrets`, KeePassXC) | `libsecret` + ditto | "Remember passwords" is disabled in the connect window with the reason under it; passwords are typed each time, exactly as before |
 
 Everything on the *host* side (libvirt, QEMU/KVM, `virsh`) is reached over SSH, so a Linux client
 needs none of it locally.
