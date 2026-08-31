@@ -126,7 +126,7 @@
          embedded box are that file's .script class. Options and colours cannot be set from a style
          and are in Controls/CodeEditor. -->
     <Style Selector="edit|TextEditor">
-      <Setter Property="FontFamily" Value="monospace" />
+      <Setter Property="FontFamily" Value="{DynamicResource JbMonoFont}" />
       <Setter Property="FontSize" Value="12" />
       <Setter Property="LineNumbersForeground" Value="{DynamicResource JbCodeLineNumber}" />
     </Style>

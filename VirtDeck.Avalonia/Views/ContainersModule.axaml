@@ -227,7 +227,7 @@
                     <TextBlock Text="{Binding Tag}"        Width="{StaticResource ColTag}"
                                TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding ShortId}"    Width="{StaticResource ColImageId}" Opacity="0.75"
-                               FontFamily="monospace" ToolTip.Tip="{Binding Id}" />
+                               FontFamily="{DynamicResource JbMonoFont}" ToolTip.Tip="{Binding Id}" />
                     <TextBlock Text="{Binding Created}"    Width="{StaticResource ColCreated}" Opacity="0.75" />
                     <TextBlock Text="{Binding Size}"       Width="{StaticResource ColSize}" Opacity="0.75" />
                     <!-- Blank where the listing could not ask, which is a different answer from
@@ -299,7 +299,7 @@
                     <TextBlock Text="{Binding Name}"    Width="{StaticResource ColNetName}"
                                TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
                     <TextBlock Text="{Binding ShortId}" Width="{StaticResource ColNetId}" Opacity="0.75"
-                               FontFamily="monospace" ToolTip.Tip="{Binding Id}" />
+                               FontFamily="{DynamicResource JbMonoFont}" ToolTip.Tip="{Binding Id}" />
                     <TextBlock Text="{Binding Driver}"  Width="{StaticResource ColNetDriver}" Opacity="0.75" />
                     <TextBlock Text="{Binding Scope}"   Width="{StaticResource ColNetScope}" Opacity="0.75" />
                     <TextBlock Text="{Binding Subnet}"  Width="{StaticResource ColNetSubnet}" Opacity="0.75"

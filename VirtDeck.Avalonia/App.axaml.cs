@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Hosts;
 
 namespace VirtDeck.Avalonia;
@@ -19,6 +20,10 @@ public partial class App : Application
             // window keeps the process alive is ShellRegistry's, and it is not one window: a host
             // switch runs two shells for an instant, and a shell can open a connect window of its
             // own to add a host.
+            // Before any window: every fixed-pitch surface reads this, and resolving it here is
+            // also what guarantees the font manager is up when the one-time lookup happens.
+            Resources[MonoFont.ResourceKey] = MonoFont.Family;
+
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             desktop.MainWindow = new HostManagerWindow();
         }

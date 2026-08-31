@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using VirtDeck.Avalonia.Input;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Terminal;
 
 namespace VirtDeck.Avalonia.Controls;
@@ -338,10 +339,10 @@ public sealed class TerminalControl : Control
 
     private void BuildTypefaces()
     {
-        // The fontconfig generic alias, which is what every monospaced surface in this app already
-        // asks for (the log window, the answer-file script boxes). No font is shipped, so the
-        // desktop's own choice of monospace is the one that shows.
-        var family = new FontFamily("monospace");
+        // Resolved against what is installed rather than asked for by the fontconfig alias, which
+        // only exists on Linux; see MonoFont for what that cost. No font is shipped, so the
+        // desktop's own best monospace is the one that shows.
+        var family = MonoFont.Family;
         _plain = new Typeface(family);
         _bold = new Typeface(family, FontStyle.Normal, FontWeight.Bold);
         _italic = new Typeface(family, FontStyle.Italic);

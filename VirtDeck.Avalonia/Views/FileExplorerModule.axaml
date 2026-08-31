@@ -167,7 +167,7 @@
             <DockPanel Classes.cells="True" Classes.cut="{Binding IsCut}" Classes.droptarget="{Binding IsDropTarget}">
               <TextBlock DockPanel.Dock="Right" Text="{Binding Group}"       Width="{StaticResource ColGroup}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Owner}"       Width="{StaticResource ColOwner}"    Opacity="0.7" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-              <TextBlock DockPanel.Dock="Right" Text="{Binding Permissions}" Width="{StaticResource ColPerms}"    Opacity="0.7" VerticalAlignment="Center" FontFamily="monospace" />
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Permissions}" Width="{StaticResource ColPerms}"    Opacity="0.7" VerticalAlignment="Center" FontFamily="{DynamicResource JbMonoFont}" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Modified}"    Width="{StaticResource ColModified}" Opacity="0.7" VerticalAlignment="Center" />
               <TextBlock DockPanel.Dock="Right" Text="{Binding Size}"        Width="{StaticResource ColSize}"     Opacity="0.7" VerticalAlignment="Center" />
               <!-- The desktop's icon for the type, or the badge when it has none to give. Whichever
