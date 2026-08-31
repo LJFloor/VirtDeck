@@ -40,8 +40,12 @@ namespace VirtDeck.Services
         }
 
         // One server-side loop over all domains in a single SSH round-trip (base64'd to dodge quoting),
-        // emitting tab-separated rows: name, state, uuid, cpus, maxmem, etimes. Per-VM dominfo over SSH
-        // was the list's main latency source.
+        // emitting tab-separated rows: name, state, uuid, cpus, maxmem, etimes, autostart, persistent.
+        // Per-VM dominfo over SSH was the list's main latency source.
+        //
+        // The last two are free: dominfo is already being fetched and already carries both, so the
+        // table's autostart tick costs two seds rather than a round trip per row. Both are carried
+        // as the words virsh printed, because an empty one has to stay distinguishable from "no".
         private const string ListVmsScript =
             "virsh list --all --name | grep . | while IFS= read -r n; do\n" +
             "  info=$(virsh dominfo \"$n\" 2>/dev/null)\n" +
@@ -49,12 +53,14 @@ namespace VirtDeck.Services
             "  uuid=$(printf '%s\\n' \"$info\" | sed -n 's/^UUID: *//p')\n" +
             "  cpus=$(printf '%s\\n' \"$info\" | sed -n 's/^CPU(s): *//p')\n" +
             "  maxmem=$(printf '%s\\n' \"$info\" | sed -n 's/^Max memory: *//p')\n" +
+            "  auto=$(printf '%s\\n' \"$info\" | sed -n 's/^Autostart: *//p')\n" +
+            "  persist=$(printf '%s\\n' \"$info\" | sed -n 's/^Persistent: *//p')\n" +
             "  et=\"\"\n" +
             "  if [ \"$state\" = \"running\" ]; then\n" +
             "    pid=$(cat /var/run/libvirt/qemu/\"$n\".pid 2>/dev/null)\n" +
             "    if [ -n \"$pid\" ]; then et=$(ps -o etimes= -p \"$pid\" 2>/dev/null | tr -d ' '); fi\n" +
             "  fi\n" +
-            "  printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$n\" \"$state\" \"$uuid\" \"$cpus\" \"$maxmem\" \"$et\"\n" +
+            "  printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$n\" \"$state\" \"$uuid\" \"$cpus\" \"$maxmem\" \"$et\" \"$auto\" \"$persist\"\n" +
             "done";
 
         private List<VmInfo> FetchAllVms()
@@ -66,7 +72,7 @@ namespace VirtDeck.Services
             foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 var f = line.Split('\t');
-                if (f.Length < 6 || string.IsNullOrWhiteSpace(f[0])) continue;
+                if (f.Length < 8 || string.IsNullOrWhiteSpace(f[0])) continue;
 
                 var vm = new VmInfo
                 {
@@ -75,6 +81,10 @@ namespace VirtDeck.Services
                     Uuid = f[2],
                     Memory = FormatKiB(f[4]),
                     MemoryKiB = ParseKiB(f[4]),
+                    Autostart = f[6].Trim(),
+                    // Only an explicit "no" makes a domain transient. A dominfo that could not be
+                    // read leaves this empty, and the row is better off with a tick it can use.
+                    Persistent = !f[7].Trim().Equals("no", StringComparison.OrdinalIgnoreCase),
                 };
                 if (int.TryParse(f[3], out var cpus)) vm.VCpus = cpus;
                 if (vm.State == "running" && long.TryParse(f[5], out var seconds))
@@ -362,22 +372,33 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
-        /// Whether the domain starts with the host. Public because a command reads back only what
-        /// it touched: the details pane's autostart tick is put from this rather than from what
-        /// <see cref="SetAutostart"/> was asked to do, so the client never leads the host.
-        /// Answers false when it could not be read, which is what it answered before it had a
-        /// second caller.
+        /// Whether the domain starts with the host. Answers false when it could not be read, which
+        /// is the reading the edit window wants: a tickbox has nowhere to say "unknown".
         /// </summary>
-        public bool GetAutostart(string vmName)
+        public bool GetAutostart(string vmName) => GetAutostartWord(vmName) == "enable";
+
+        /// <summary>
+        /// The word `virsh dominfo` prints for autostart ("enable" or "disable"), or empty when it
+        /// could not be read.
+        ///
+        /// Public because a command reads back only what it touched: the VM table's autostart tick
+        /// is put from this rather than from what <see cref="SetAutostart"/> was asked to do, so
+        /// the client never leads the host. It answers the word and not a bool for the reason
+        /// <see cref="VmInfo.Autostart"/> carries one: a row that could not be read must not be
+        /// drawn as a row that starts at boot.
+        /// </summary>
+        public string GetAutostartWord(string vmName)
         {
             try
             {
                 foreach (var line in _ssh.RunSudoCommand($"virsh dominfo {vmName}").Split('\n'))
                     if (line.StartsWith("Autostart", StringComparison.OrdinalIgnoreCase))
-                        return line.Contains("enable", StringComparison.OrdinalIgnoreCase);
+                        return line.Contains("enable", StringComparison.OrdinalIgnoreCase)
+                            ? "enable"
+                            : "disable";
             }
-            catch { /* ignore */ }
-            return false;
+            catch { /* the caller leaves the row as the listing last had it */ }
+            return "";
         }
 
         private static long ReadMemMiB(XElement? el)

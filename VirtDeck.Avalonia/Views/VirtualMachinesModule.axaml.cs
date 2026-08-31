@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Imaging;
@@ -78,7 +79,14 @@ public partial class VirtualMachinesModule : UserControl, IModule
         VmList.SelectionChanged += (_, _) => OnVmSelectionChanged();
         NetworkList.SelectionChanged += (_, _) => UpdateNetworkMenu();
         Details.PreviewClicked += (_, _) => OpenConsole();
-        Details.AutostartRequested += async wanted => await SetAutostartAsync(wanted);
+
+        // The row's autostart tick, driven by Click rather than by a two-way binding, for the
+        // reason the services module gives: Click fires only when somebody presses the box, where
+        // IsCheckedChanged also fires when a refresh pushes a value in, and the 30 second poll
+        // would then generate commands. The handler is on the list because a row's CheckBox is
+        // created and destroyed by virtualisation.
+        VmList.AddHandler(Button.ClickEvent,
+            async (object? _, RoutedEventArgs e) => await OnAutostartClickedAsync(e));
 
         // Poll as a safety net; libvirt lifecycle events do the fast path.
         _refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
@@ -332,6 +340,9 @@ public partial class VirtualMachinesModule : UserControl, IModule
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "vcpus" => VmSort.By(rows, r => r.VCpus).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "memory" => VmSort.By(rows, r => r.MemoryKiB).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        // On the tick and not on virsh's word: the cell draws the tick, and a VM whose autostart
+        // could not be read draws an empty box, so it belongs with the rest of the empty ones.
+        "autostart" => VmSort.By(rows, r => r.AutostartOn).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "uptime" => VmSort.By(rows, r => r.UptimeSeconds).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
     };
@@ -454,32 +465,50 @@ public partial class VirtualMachinesModule : UserControl, IModule
     }
 
     /// <summary>
-    /// The details pane's autostart tick. Reads the answer back off the host rather than trusting
-    /// the command, which is what the tick is then put from: this module's rule everywhere else is
-    /// that the client never leads the host, and a tick is exactly the kind of control that would
-    /// otherwise sit there claiming a state nothing confirmed. `virsh dominfo` is one cheap round
-    /// trip, so reading back only what the command touched costs less than reloading the pane.
+    /// The table's autostart tick. Reads the answer back off the host rather than trusting the
+    /// command, which is what the tick is then put from: this module's rule everywhere else is that
+    /// the client never leads the host, and a tick is exactly the kind of control that would
+    /// otherwise sit there claiming a state nothing confirmed. One `virsh dominfo` is cheap, so
+    /// reading back only what the command touched costs less than re-listing every VM.
     /// </summary>
-    private async Task SetAutostartAsync(bool wanted)
+    private async Task OnAutostartClickedAsync(RoutedEventArgs e)
     {
-        if (_virshOrNull is null || Selected is not { } row) { Details.SetAutostartBusy(false); return; }
-        string name = row.Name;
+        if (e.Source is not CheckBox box || box.DataContext is not VmRow row) return;
 
-        Details.SetAutostartBusy(true);
+        // The box has already flipped itself, so the row is what still knows the host's answer, and
+        // a refusal to act has to put the tick back rather than leave it claiming a state nothing
+        // confirmed. A second click while the first is in flight is one such refusal:
+        // AutostartChangeable is false while the row is busy.
+        if (_virshOrNull is null || !row.AutostartChangeable)
+        {
+            box.IsChecked = row.AutostartOn;
+            return;
+        }
+
+        bool wanted = !row.AutostartOn;
+        string name = row.Name;
+        row.AutostartBusy = true;
+
         string? error = null;
-        bool actual = wanted;
+        string actual = row.Autostart;
         await Task.Run(() =>
         {
             try { Virsh.SetAutostart(name, wanted); }
             catch (Exception ex) { error = ex.Message; }
-            actual = Virsh.GetAutostart(name);
+
+            // Whatever the command did or refused to do, the row is put from this and never from
+            // what it was asked for. An unreadable answer leaves the row as the listing had it.
+            var word = Virsh.GetAutostartWord(name);
+            if (word.Length > 0) actual = word;
         });
 
-        // The selection may have moved while virsh was running, in which case the pane is about a
-        // different VM and must not be told anything about this one.
-        if (Selected?.Name != name) { Details.SetAutostartBusy(false); return; }
+        row.SetAutostartWord(actual);
 
-        Details.SetAutostart(actual);
+        // The binding pushes only when the value moved, so a command that left the state where it
+        // was (a refusal, or a VM already there) needs the box put back by hand. The list may have
+        // recycled this box onto another row while virsh ran, and then it is not ours to write.
+        if (ReferenceEquals(box.DataContext, row)) box.IsChecked = row.AutostartOn;
+
         if (error != null)
             await MessageDialog.Info(Owner, "Autostart", $"Couldn't change autostart for {name}:\n{error}");
     }
