@@ -691,6 +691,94 @@ namespace VirtDeck.Services
             catch { return -1; }
         }
 
+        // One round trip for every disk of a domain, in the tagged-record idiom. The obvious
+        // alternative, GetFileSize above, is one RunSudoCommand per path holding _ioLock for each,
+        // which is the per-VM round-trip problem the VM listing was already fixed for.
+        //
+        // Three probes per path, first answer wins. `qemu-img info` is the one worth having: a
+        // qcow2 is routinely a 40 GiB disk in a 12 GiB file and only it can say both. `-U` skips
+        // the image lock check, without which a running domain's disk is refused; it is safe here
+        // because nothing in this script writes. Older qemu-img has no `-U` and simply fails, which
+        // is why the stat fallback is not only for hosts without qemu-img.
+        //
+        // Every probe is fenced with 2>/dev/null so a best-effort half cannot take the exit status
+        // with it, and the script ends `exit 0`: a size that could not be read is a blank cell, a
+        // value the pane draws, never an exception. A path that is not absolute is skipped rather
+        // than passed to a tool, which is what makes the missing `--` safe (qemu-img parses its own
+        // options and does not document one); libvirt writes file and dev sources absolute, and a
+        // network-protocol disk reaches us with an empty source anyway.
+        private const string DiskSizeBody = """
+            export LC_ALL=C
+            PATHS
+            i=0
+            for f in "${p[@]}"; do
+              v=""; a=""
+              case "$f" in
+                /*)
+                  j=$(qemu-img info -U --output=json "$f" 2>/dev/null)
+                  if [ -n "$j" ]; then
+                    v=$(printf '%s' "$j" | sed -n 's/.*"virtual-size":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n 1)
+                    a=$(printf '%s' "$j" | sed -n 's/.*"actual-size":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n 1)
+                  fi
+                  if [ -z "$a" ]; then
+                    if [ -b "$f" ]; then a=$(blockdev --getsize64 "$f" 2>/dev/null)
+                    else a=$(stat -c %s "$f" 2>/dev/null); fi
+                  fi
+                  ;;
+              esac
+              printf 'd\t%s\t%s\t%s\n' "$i" "$v" "$a"
+              i=$((i + 1))
+            done
+            exit 0
+            """;
+
+        /// <summary>
+        /// Virtual and on-disk size of one disk image, in bytes. Either half is -1 when the host
+        /// could not answer, which is an ordinary outcome (no qemu-img, a path that has gone, a
+        /// network-protocol disk with no local file) and is drawn as a blank cell.
+        /// </summary>
+        public readonly record struct DiskSize(long VirtualBytes, long ActualBytes)
+        {
+            public static readonly DiskSize Unknown = new(-1, -1);
+            public bool HasAny => VirtualBytes >= 0 || ActualBytes >= 0;
+        }
+
+        /// <summary>
+        /// Measures every disk of a domain in one elevated round trip, keyed by the caller's own
+        /// index into <paramref name="paths"/> so nothing has to match on a path string. A path the
+        /// host could not measure is absent from the answer rather than present as a zero.
+        /// </summary>
+        public async Task<Dictionary<int, DiskSize>> MeasureDisksAsync(
+            IReadOnlyList<string> paths, CancellationToken ct = default)
+        {
+            var sizes = new Dictionary<int, DiskSize>();
+            if (paths.Count == 0) return sizes;
+
+            string raw;
+            try
+            {
+                var script = DiskSizeBody.Replace("PATHS", ShellScript.ArrayFrom("p", paths).TrimEnd('\n'));
+                raw = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.SpiceLog.Log($"[vm] disk measure failed: {ex.Message}");
+                return sizes;
+            }
+
+            foreach (var line in raw.Split('\n'))
+            {
+                var f = line.TrimEnd('\r').Split('\t');
+                if (f.Length < 4 || f[0] != "d") continue;
+                if (!int.TryParse(f[1], out var idx)) continue;
+                var size = new DiskSize(ParseBytes(f[2]), ParseBytes(f[3]));
+                if (size.HasAny) sizes[idx] = size;
+            }
+            return sizes;
+
+            static long ParseBytes(string s) => long.TryParse(s.Trim(), out var v) && v >= 0 ? v : -1;
+        }
+
         public bool VirtSparseAvailable { get; private set; } = true;
 
         public bool CheckVirtSparseAvailable()

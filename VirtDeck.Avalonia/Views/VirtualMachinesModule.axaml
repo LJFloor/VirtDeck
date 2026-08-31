@@ -15,141 +15,147 @@
     <x:Double x:Key="ColNetState">110</x:Double>
   </UserControl.Resources>
 
-  <!-- List on the left, details sidebar on the right; the splitter is user-movable. The tab strip
-       is the top of the column, and each page carries its own commands, so a toolbar only ever
-       shows what applies to the table under it. -->
-  <Grid ColumnDefinitions="*,4,330">
+  <!-- The tab strip is the top of the module and each page carries its own commands, so a toolbar
+       only ever shows what applies to the table under it. The details pane is inside the VMs page
+       rather than beside the whole strip: it is about a VM, so the Networks page neither carries it
+       nor pays its width. -->
+  <TabControl Name="Tabs">
 
-    <TabControl Grid.Column="0" Name="Tabs">
+    <TabItem Header="Virtual machines">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <!-- Only the commands that don't need a selection live here; everything per-VM is on
+               the list's right-click menu. The filter box is the services module's, and it works
+               the same way: it narrows the listing already in hand and never asks the host
+               anything. -->
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Button Name="NewVmButton" Content="New VM" Classes="accent" />
+            </StackPanel>
+            <c:FilterBox DockPanel.Dock="Right" Name="VmSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search VMs"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name." />
+            <Panel />
+          </DockPanel>
+        </Border>
 
-      <TabItem Header="Virtual machines">
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <!-- Only the commands that don't need a selection live here; everything per-VM is on
-                 the list's right-click menu. The filter box is the services module's, and it works
-                 the same way: it narrows the listing already in hand and never asks the host
-                 anything. -->
-            <DockPanel>
-              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
-                <Button Name="NewVmButton" Content="New VM" Classes="accent" />
+        <!-- Every cell is a ColumnHeader because every column sorts. A third click drops back
+             to this table's own order, which is by name. Indent (not Margin) puts the heading
+             over the rows' state dot without widening the column. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="VmHeaderStrip">
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Name"   SortKey="name"   Indent="14" Width="{StaticResource ColName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="vCPUs"  SortKey="vcpus"  Width="{StaticResource ColCpu}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Memory" SortKey="memory" Width="{StaticResource ColMem}" />
+            <c:ColumnHeader Text="Uptime" SortKey="uptime" />
+          </DockPanel>
+        </Border>
+
+        <!-- List, splitter, details pane. A Grid rather than a third DockPanel.Dock because a
+             GridSplitter can only resize rows it is a child of. The pane's row height is restored
+             from settings in the constructor and saved back on Deactivate. -->
+        <Grid Name="VmSplit" RowDefinitions="*,4,200">
+
+        <Panel Grid.Row="0">
+        <ListBox Name="VmList" SelectionMode="Multiple" Background="Transparent"
+                 Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ContextMenu>
+            <ContextMenu Name="VmMenu">
+              <MenuItem Name="MenuConsole" Header="Open console" />
+              <Separator />
+              <MenuItem Name="MenuStart" Header="Start" />
+              <MenuItem Name="MenuStop" Header="Shut down" />
+              <MenuItem Name="MenuForceStop" Header="Force off" />
+              <MenuItem Name="MenuReboot" Header="Reboot" />
+              <Separator />
+              <MenuItem Name="MenuEdit" Header="Settings" />
+              <MenuItem Name="MenuExport" Header="Export VM" />
+              <MenuItem Name="MenuDelete" Header="Delete" />
+            </ContextMenu>
+          </ListBox.ContextMenu>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:VmRow">
+              <StackPanel Classes="cells" Orientation="Horizontal">
+                <!-- Same 9px state dot as the details pane, sharing VmRow.StateBrush. -->
+                <DockPanel Width="{StaticResource ColName}">
+                  <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                           VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}" />
+                <TextBlock Text="{Binding VCpus}"  Width="{StaticResource ColCpu}" />
+                <TextBlock Text="{Binding Memory}" Width="{StaticResource ColMem}" />
+                <TextBlock Text="{Binding Uptime}" Opacity="0.75" />
               </StackPanel>
-              <c:FilterBox DockPanel.Dock="Right" Name="VmSearch" Width="220" Margin="10,0,0,0"
-                           PlaceholderText="Search VMs"
-                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name." />
-              <Panel />
-            </DockPanel>
-          </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
 
-          <!-- Every cell is a ColumnHeader because every column sorts. A third click drops back
-               to this table's own order, which is by name. Indent (not Margin) puts the heading
-               over the rows' state dot without widening the column. -->
-          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
-                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <DockPanel Name="VmHeaderStrip">
-              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"   SortKey="name"   Indent="14" Width="{StaticResource ColName}" />
-              <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
-              <c:ColumnHeader DockPanel.Dock="Left" Text="vCPUs"  SortKey="vcpus"  Width="{StaticResource ColCpu}" />
-              <c:ColumnHeader DockPanel.Dock="Left" Text="Memory" SortKey="memory" Width="{StaticResource ColMem}" />
-              <c:ColumnHeader Text="Uptime" SortKey="uptime" />
-            </DockPanel>
-          </Border>
+        <!-- Why the list is empty, so a filtered-to-nothing table says so rather than looking
+             like a host with no VMs on it. Hidden as soon as there is a row to show. -->
+        <TextBlock Name="VmEmptyText" Opacity="0.6" IsVisible="False"
+                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
 
-          <Panel>
-          <ListBox Name="VmList" SelectionMode="Multiple" Background="Transparent"
-                   Padding="0"
-                   ItemContainerTheme="{StaticResource JbTableRow}">
-            <ListBox.ContextMenu>
-              <ContextMenu Name="VmMenu">
-                <MenuItem Name="MenuConsole" Header="Open console" />
-                <Separator />
-                <MenuItem Name="MenuStart" Header="Start" />
-                <MenuItem Name="MenuStop" Header="Shut down" />
-                <MenuItem Name="MenuForceStop" Header="Force off" />
-                <MenuItem Name="MenuReboot" Header="Reboot" />
-                <Separator />
-                <MenuItem Name="MenuEdit" Header="Settings" />
-                <MenuItem Name="MenuExport" Header="Export VM" />
-                <MenuItem Name="MenuDelete" Header="Delete" />
-              </ContextMenu>
-            </ListBox.ContextMenu>
-            <ListBox.ItemTemplate>
-              <DataTemplate DataType="vm:VmRow">
-                <StackPanel Classes="cells" Orientation="Horizontal">
-                  <!-- Same 9px state dot as the details sidebar, sharing VmRow.StateBrush. -->
-                  <DockPanel Width="{StaticResource ColName}">
-                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
-                             VerticalAlignment="Center" Fill="{Binding StateBrush}" />
-                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
-                  </DockPanel>
-                  <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}" />
-                  <TextBlock Text="{Binding VCpus}"  Width="{StaticResource ColCpu}" />
-                  <TextBlock Text="{Binding Memory}" Width="{StaticResource ColMem}" />
-                  <TextBlock Text="{Binding Uptime}" Opacity="0.75" />
-                </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+        <GridSplitter Grid.Row="1" Background="#22808080" ResizeDirection="Rows" />
 
-          <!-- Why the list is empty, so a filtered-to-nothing table says so rather than looking
-               like a host with no VMs on it. Hidden as soon as there is a row to show. -->
-          <TextBlock Name="VmEmptyText" Opacity="0.6" IsVisible="False"
-                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Panel>
-        </DockPanel>
-      </TabItem>
+        <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+          <vm:VmDetailsView Name="Details" />
+        </Border>
 
-      <!-- No toolbar on this page: every network command needs a selection and so lives on the
-           right-click menu, and there is no "new network" to offer. An empty toolbar bar would be
-           worse chrome than none, so the table starts directly under the tab strip. -->
-      <TabItem Header="Networks">
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
-                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
-            <DockPanel Name="NetHeaderStrip">
-              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"      SortKey="name"      Indent="14" Width="{StaticResource ColNetName}" />
-              <c:ColumnHeader DockPanel.Dock="Left" Text="State"     SortKey="state"     Width="{StaticResource ColNetState}" />
-              <c:ColumnHeader Text="Autostart" SortKey="autostart" />
-            </DockPanel>
-          </Border>
+        </Grid>
+      </DockPanel>
+    </TabItem>
 
-          <ListBox Name="NetworkList" SelectionMode="Multiple" Background="Transparent"
-                   Padding="0"
-                   ItemContainerTheme="{StaticResource JbTableRow}">
-            <ListBox.ContextMenu>
-              <ContextMenu Name="NetMenu">
-                <MenuItem Name="MenuNetActivate" Header="Activate" />
-                <MenuItem Name="MenuNetDeactivate" Header="Deactivate" />
-                <Separator />
-                <MenuItem Name="MenuNetAutostartOn" Header="Autostart on" />
-                <MenuItem Name="MenuNetAutostartOff" Header="Autostart off" />
-              </ContextMenu>
-            </ListBox.ContextMenu>
-            <ListBox.ItemTemplate>
-              <DataTemplate DataType="vm:NetworkRow">
-                <StackPanel Classes="cells" Orientation="Horizontal">
-                  <!-- Same 9px state dot as the VMs tab, sharing NetworkRow.StateBrush. -->
-                  <DockPanel Width="{StaticResource ColNetName}">
-                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
-                             VerticalAlignment="Center" Fill="{Binding StateBrush}" />
-                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
-                  </DockPanel>
-                  <TextBlock Text="{Binding State}"     Width="{StaticResource ColNetState}" Foreground="{Binding StateBrush}" />
-                  <TextBlock Text="{Binding Autostart}" Opacity="0.75" />
-                </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </DockPanel>
-      </TabItem>
+    <!-- No toolbar on this page: every network command needs a selection and so lives on the
+         right-click menu, and there is no "new network" to offer. An empty toolbar bar would be
+         worse chrome than none, so the table starts directly under the tab strip. -->
+    <TabItem Header="Networks">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="NetHeaderStrip">
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Name"      SortKey="name"      Indent="14" Width="{StaticResource ColNetName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="State"     SortKey="state"     Width="{StaticResource ColNetState}" />
+            <c:ColumnHeader Text="Autostart" SortKey="autostart" />
+          </DockPanel>
+        </Border>
 
-    </TabControl>
+        <ListBox Name="NetworkList" SelectionMode="Multiple" Background="Transparent"
+                 Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ContextMenu>
+            <ContextMenu Name="NetMenu">
+              <MenuItem Name="MenuNetActivate" Header="Activate" />
+              <MenuItem Name="MenuNetDeactivate" Header="Deactivate" />
+              <Separator />
+              <MenuItem Name="MenuNetAutostartOn" Header="Autostart on" />
+              <MenuItem Name="MenuNetAutostartOff" Header="Autostart off" />
+            </ContextMenu>
+          </ListBox.ContextMenu>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:NetworkRow">
+              <StackPanel Classes="cells" Orientation="Horizontal">
+                <!-- Same 9px state dot as the VMs tab, sharing NetworkRow.StateBrush. -->
+                <DockPanel Width="{StaticResource ColNetName}">
+                  <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                           VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock Text="{Binding State}"     Width="{StaticResource ColNetState}" Foreground="{Binding StateBrush}" />
+                <TextBlock Text="{Binding Autostart}" Opacity="0.75" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </TabItem>
 
-    <GridSplitter Grid.Column="1" Background="#22808080" ResizeDirection="Columns" />
-
-    <vm:VmDetailsView Grid.Column="2" Name="Details" />
-
-  </Grid>
+  </TabControl>
 </UserControl>

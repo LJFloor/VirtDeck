@@ -102,6 +102,26 @@ namespace VirtDeck.Services
         /// </summary>
         public double TerminalFontSize { get; set; } = 13;
 
+        /// <summary>
+        /// Height in pixels of the VM module's details pane, the one layout value in this file.
+        /// Read back through <see cref="VmDetailsHeightOrDefault"/>, which clamps it: a hand-edited
+        /// or corrupted number must never be able to push the VM list off the screen, which is the
+        /// same reason the enums here are written numerically.
+        /// </summary>
+        public double VmDetailsHeight { get; set; } = DefaultVmDetailsHeight;
+
+        public const double DefaultVmDetailsHeight = 200;
+        public const double MinVmDetailsHeight = 120;
+        public const double MaxVmDetailsHeight = 600;
+
+        /// <summary>The stored pane height, or the default when it is absent, unset or out of range.</summary>
+        public double VmDetailsHeightOrDefault =>
+            double.IsFinite(VmDetailsHeight)
+            && VmDetailsHeight >= MinVmDetailsHeight
+            && VmDetailsHeight <= MaxVmDetailsHeight
+                ? VmDetailsHeight
+                : DefaultVmDetailsHeight;
+
         /// <summary>Per-VM console preferences, keyed by domain UUID.</summary>
         public Dictionary<string, VmSettings> Vms { get; set; } = new();
 

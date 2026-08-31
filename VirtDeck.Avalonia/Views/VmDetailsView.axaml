@@ -1,81 +1,108 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
-             x:Class="VirtDeck.Avalonia.Views.VmDetailsView"
-             x:DataType="vm:DetailRow">
+             x:Class="VirtDeck.Avalonia.Views.VmDetailsView">
 
   <UserControl.Resources>
-    <!-- The label column of every section, so all four line up. -->
-    <x:Double x:Key="ColLabel">96</x:Double>
+    <!-- The label column of every section, so all of them line up whatever column they wrap into. -->
+    <x:Double x:Key="ColLabel">92</x:Double>
   </UserControl.Resources>
 
   <UserControl.Styles>
-    <!-- One shared shape for the four detail sections: heading, rule, then label/value rows. -->
-    <Style Selector="ItemsControl.details">
-      <Setter Property="Margin" Value="0,2,0,10" />
-    </Style>
     <Style Selector="TextBlock.section">
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Margin" Value="0,6,0,2" />
+      <Setter Property="Margin" Value="0,0,0,2" />
     </Style>
   </UserControl.Styles>
 
   <Panel>
-    <!-- Empty state -->
-    <TextBlock Name="EmptyText" Text="Select a VM to see details" Opacity="0.6"
+    <!-- Empty state: no selection, or a multi-selection, which are different answers. -->
+    <TextBlock Name="EmptyText" Opacity="0.6"
                HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-    <ScrollViewer Name="Body" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel Margin="12">
+    <DockPanel Name="Body" Margin="12,8,12,10">
 
-        <!-- Live screenshot preview. Clicking it opens the console. -->
-        <Border Name="PreviewBox" Height="150" Background="#202024" BorderBrush="#46464c"
-                BorderThickness="1" Cursor="Hand" Margin="0,0,0,10">
-          <Panel>
-            <Image Name="PreviewImage" Stretch="Uniform" Margin="1" />
-            <StackPanel Name="PreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Spacing="6">
-              <!-- A monitor outline; replaces the WinForms bitmap icon set. -->
-              <Path HorizontalAlignment="Center"
-                    Stroke="#8a8a92" StrokeThickness="1.5" Fill="Transparent"
-                    Data="M2,2 H30 V21 H2 Z M12,25 H20 M16,21 V25" />
-              <TextBlock Name="PreviewText" Foreground="#c8c8cd" HorizontalAlignment="Center" />
-            </StackPanel>
-          </Panel>
-        </Border>
+      <!-- The pane's title line, and the only coloured text in it. The name, the state dot and the
+           state word live here rather than in a General section because Hyper-V puts the VM's name
+           at the top of its pane, and because it is what keeps every value cell below free of a
+           bound foreground: a null IBrush is a real local value that suppresses the inherited one,
+           and Avalonia then draws nothing at all. That is what made every value but this one
+           invisible when the sections carried the brush. -->
+      <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+        <TextBlock DockPanel.Dock="Left" Name="TitleName" FontSize="15" FontWeight="SemiBold"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        <Ellipse DockPanel.Dock="Left" Name="TitleDot" Width="9" Height="9" Margin="12,0,5,0"
+                 VerticalAlignment="Center" />
+        <TextBlock DockPanel.Dock="Left" Name="TitleState" VerticalAlignment="Center" />
+        <TextBlock Name="TitleUptime" Opacity="0.6" Margin="10,0,0,0" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
 
-        <TextBlock Classes="section" Text="General" />
-        <Border Height="1" Background="#33808080" />
-        <ItemsControl Name="GeneralRows" Classes="details" />
+      <!-- Only shown when the domain XML could not be read. Without it the sections below sit on
+           their loading placeholders for ever, which reads as a hang rather than as a refusal. -->
+      <TextBlock DockPanel.Dock="Top" Name="ConfigError" IsVisible="False" Margin="0,0,0,8"
+                 Foreground="{DynamicResource JbErrorForeground}" TextWrapping="Wrap" />
 
-        <TextBlock Classes="section" Text="System" />
-        <Border Height="1" Background="#33808080" />
-        <ItemsControl Name="SystemRows" Classes="details" />
+      <!-- Live screenshot preview. Clicking it opens the console. It stretches with the pane, so
+           dragging the splitter is also how it is made bigger. -->
+      <Border DockPanel.Dock="Left" Name="PreviewBox" Width="260" Margin="0,0,14,0"
+              Background="#11808080" BorderBrush="#22808080" BorderThickness="1" Cursor="Hand"
+              ToolTip.Tip="Click to open the console">
+        <Panel>
+          <Image Name="PreviewImage" Stretch="Uniform" Margin="1" />
+          <StackPanel Name="PreviewPlaceholder" HorizontalAlignment="Center"
+                      VerticalAlignment="Center" Spacing="6">
+            <!-- A monitor outline; replaces the WinForms bitmap icon set. -->
+            <Path HorizontalAlignment="Center" Stroke="#88808080" StrokeThickness="1.5"
+                  Fill="Transparent" Data="M2,2 H30 V21 H2 Z M12,25 H20 M16,21 V25" />
+            <TextBlock Name="PreviewText" Opacity="0.6" HorizontalAlignment="Center" />
+          </StackPanel>
+        </Panel>
+      </Border>
 
-        <TextBlock Classes="section" Text="Storage" />
-        <Border Height="1" Background="#33808080" />
-        <ItemsControl Name="StorageRows" Classes="details" />
+      <!-- The sections flow across whatever width is left, so the pane uses the width the bottom
+           placement buys it and rewraps into fewer columns instead of clipping when the window is
+           narrow. Same idiom as the answer-file tick lists (BloatwareTab, UserEditDialog). -->
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <ItemsControl Name="Sections">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal" ItemWidth="300" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </ScrollViewer>
 
-        <TextBlock Classes="section" Text="Network" />
-        <Border Height="1" Background="#33808080" />
-        <ItemsControl Name="NetworkRows" Classes="details" />
-
-      </StackPanel>
-    </ScrollViewer>
+    </DockPanel>
   </Panel>
 
   <UserControl.DataTemplates>
-    <DataTemplate DataType="vm:DetailRow">
-      <DockPanel Margin="2,1">
+
+    <!-- One section: heading, rule, rows. -->
+    <DataTemplate DataType="vm:DetailSection" x:DataType="vm:DetailSection">
+      <StackPanel Margin="0,0,16,12">
+        <TextBlock Classes="section" Text="{Binding Title}" />
+        <Border Height="1" Background="#33808080" Margin="0,0,0,4" />
+        <ItemsControl ItemsSource="{Binding Rows}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- One label/value line. Nothing here sets Foreground: every value inherits the themed one,
+         which is the whole fix. A trimmed cell states itself on hover, because a 300px column
+         cannot hold a disk path and its geometry at once. -->
+    <DataTemplate DataType="vm:DetailRow" x:DataType="vm:DetailRow">
+      <DockPanel Margin="0,0,0,3">
         <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" Width="{StaticResource ColLabel}"
-                   Opacity="0.65" TextTrimming="CharacterEllipsis" />
-        <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
-                 VerticalAlignment="Center" Fill="{Binding ValueBrush}"
-                 IsVisible="{Binding ShowDot}" />
-        <TextBlock Text="{Binding Value}" Foreground="{Binding ValueBrush}"
-                   TextTrimming="CharacterEllipsis" />
+                   Opacity="0.65" VerticalAlignment="Top" TextTrimming="CharacterEllipsis" />
+        <StackPanel>
+          <TextBlock Text="{Binding Value}" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Tip}" />
+          <TextBlock Text="{Binding Note}" Opacity="0.55" TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding HasNote}" />
+        </StackPanel>
       </DockPanel>
     </DataTemplate>
+
   </UserControl.DataTemplates>
 
 </UserControl>

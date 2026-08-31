@@ -11,7 +11,7 @@ using VirtDeck.Unattend;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// The Virtual machines module: the VM list, the Networks tab and the details sidebar, plus every
+/// The Virtual machines module: the VM list, the Networks tab and the details pane, plus every
 /// per-VM command. Owns the consoles it opens and the host media streams they need; the shell owns
 /// the SSH connection and the status bar.
 /// </summary>
@@ -46,6 +46,13 @@ public partial class VirtualMachinesModule : UserControl, IModule
     private bool _refreshing;
     private bool _active;          // false while another module is on screen: no polling, no events
     private bool _capsProbed;      // host capabilities are a one-off, not per activation
+
+    /// <summary>
+    /// The details pane height as it was restored, so <c>Deactivate</c> can tell whether the user
+    /// actually dragged the splitter. Same guard as <c>TerminalModule</c>'s font size: a module
+    /// switch must not rewrite settings.json for nothing.
+    /// </summary>
+    private double _detailsHeightAtLoad;
 
     public VirtualMachinesModule()
     {
@@ -90,6 +97,11 @@ public partial class VirtualMachinesModule : UserControl, IModule
         // Lifecycle events arrive in bursts (a start fires several); coalesce them into one refresh.
         _eventDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _eventDebounce.Tick += async (_, _) => { _eventDebounce.Stop(); await RefreshAsync(); };
+
+        // The one layout value this app persists. Clamped on read, so a hand-edited settings file
+        // can never push the VM list off the screen.
+        _detailsHeightAtLoad = AppSettings.Current.VmDetailsHeightOrDefault;
+        VmSplit.RowDefinitions[2].Height = new GridLength(_detailsHeightAtLoad);
 
         UpdateButtons();
     }
@@ -167,6 +179,22 @@ public partial class VirtualMachinesModule : UserControl, IModule
         _tickTimer.Stop();
         _previewTimer.Stop();
         _eventDebounce.Stop();
+        SaveDetailsHeight();
+    }
+
+    /// <summary>
+    /// Writes the pane height back only when the splitter was actually moved, so stepping through
+    /// the modules does not rewrite settings.json once per visit. Out-of-range is left alone rather
+    /// than clamped and stored: what is on screen is what the user dragged to, and the clamp on the
+    /// way in is what protects the next launch.
+    /// </summary>
+    private void SaveDetailsHeight()
+    {
+        double h = VmSplit.RowDefinitions[2].ActualHeight;
+        if (h <= 0 || Math.Abs(h - _detailsHeightAtLoad) < 1) return;
+        _detailsHeightAtLoad = h;
+        AppSettings.Current.VmDetailsHeight = h;
+        AppSettings.Current.Save();
     }
 
     public void Shutdown()
@@ -371,7 +399,10 @@ public partial class VirtualMachinesModule : UserControl, IModule
         _previewTimer.Stop();
         UpdateButtons();
 
-        if (Selected is not { } row) { Details.SetVm(null); return; }
+        // Selected is null both for no selection and for a multi-selection, and the pane can only
+        // draw one VM, so it is told which of the two it is looking at rather than showing "select a
+        // VM" at somebody who has selected three.
+        if (Selected is not { } row) { Details.SetVm(null, SelectedRows.Count); return; }
         Details.SetVm(row.Info); // instant text; the preview shows "loading" while we fetch
         _previewTimer.Start();
     }
@@ -385,10 +416,24 @@ public partial class VirtualMachinesModule : UserControl, IModule
         bool running = row.IsRunning;
 
         VmConfig? cfg = null;
+        string? cfgError = null;
+        Dictionary<int, VirshService.DiskSize>? sizes = null;
         PpmImage.Bgra? shot = null;
-        await Task.Run(() =>
+        await Task.Run(async () =>
         {
-            try { cfg = Virsh.GetVmConfig(name); } catch { /* sidebar keeps its instant fields */ }
+            // A dumpxml that is refused used to be swallowed whole, which left the pane on its
+            // loading placeholders for ever. It is carried out as a value and drawn, the way every
+            // other modelled failure in this app is.
+            try { cfg = Virsh.GetVmConfig(name); }
+            catch (Exception ex) { cfgError = $"Could not read this domain's configuration: {ex.Message}"; }
+
+            if (cfg is { Disks.Count: > 0 })
+            {
+                // One round trip for every disk, not one per disk: see MeasureDisksAsync.
+                var paths = cfg.Disks.Select(d => d.Source).ToList();
+                try { sizes = await Virsh.MeasureDisksAsync(paths); } catch { /* sizes stay blank */ }
+            }
+
             if (!running) return;
             try
             {
@@ -402,6 +447,8 @@ public partial class VirtualMachinesModule : UserControl, IModule
 
         if (gen != _previewGen) return; // selection changed while fetching → drop
         if (cfg != null) Details.SetConfig(cfg);
+        else if (cfgError != null) Details.SetConfigFailed(cfgError);
+        if (sizes != null) Details.SetDiskSizes(sizes);
         Details.SetPreview(shot);       // null (off VM or capture failed) → placeholder
     }
 
