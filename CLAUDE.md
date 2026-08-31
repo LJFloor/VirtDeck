@@ -59,15 +59,15 @@ These recur across most of the app. A section below only spells out where it *de
 
 **Refresh policy.** A module gets an event tail plus a poll where the host announces changes (`virsh event --loop`, `docker events`, `journalctl --follow`), debounced 400 ms because one action prints several lines; it gets a **Refresh button instead** where nothing announces them (files, accounts). The shell's module probe is the one poll for something nothing announces, and it pays for that by being self-limiting: see "Which modules a host gets". `Deactivate` stops timers and cancels the read in flight so a hidden module costs nothing, but **leaves event tails running**: each holds its own SSH connection and rebuilding one per module switch would cost more than the events are worth. `Shutdown` stops them, because the shell disposes the shared connection (and the auth material every second client borrowed) straight after.
 
-**Rows are merged, never rebuilt.** A poll fires whether or not anybody asked, so a rebuild would drop the selection out from under the pointer. `Views/TableRows` is the one `Merge` + `Reorder`-by-`Move` all twelve tables call, taking each caller's key function, its row factory and its order. Lists merge **by id**, never by name, and the id is not always the obvious field: an image is keyed by id-plus-repository-plus-tag because one image appears once per tag it carries, and a compose project by its name because it has no id at all. `Reorder` keeps a **position index** rather than calling `IndexOf` inside the loop, which on 250 service units is tens of thousands of reference comparisons a pass and a keystroke in a search box runs a whole pass. This was eleven copies that had drifted: the reorder existed three times, once as that quadratic version, and the VM and container tables never called it at all, so a container created after the first listing was appended at the bottom whatever its name was.
+**Rows are merged, never rebuilt.** A poll fires whether or not anybody asked, so a rebuild would drop the selection out from under the pointer. `Views/TableRows` is the one `Merge` + `Reorder`-by-`Move` all thirteen tables call, taking each caller's key function, its row factory and its order. Lists merge **by id**, never by name, and the id is not always the obvious field: an image is keyed by id-plus-repository-plus-tag because one image appears once per tag it carries, and a compose project by its name because it has no id at all. `Reorder` keeps a **position index** rather than calling `IndexOf` inside the loop, which on 250 service units is tens of thousands of reference comparisons a pass and a keystroke in a search box runs a whole pass. This was eleven copies that had drifted: the reorder existed three times, once as that quadratic version, and the VM and container tables never called it at all, so a container created after the first listing was appended at the bottom whatever its name was.
 
-**Every table sorts and the long ones filter, and neither ever touches the host.** `Controls/ColumnHeader` is the one heading cell (a flat `JbColumnHeader` button carrying a label and a caret), `Controls/TableSort` is one table's sort state, and `Controls/FilterBox` is the search box with its 150 ms debounce. A header is one line of markup and a module wires one event per table, not one handler and one caret entry per column. Six rules hold across all thirteen:
+**Every table sorts and the long ones filter, and neither ever touches the host.** `Controls/ColumnHeader` is the one heading cell (a flat `JbColumnHeader` button carrying a label and a caret), `Controls/TableSort` is one table's sort state, and `Controls/FilterBox` is the search box with its 150 ms debounce. A header is one line of markup and a module wires one event per table, not one handler and one caret entry per column. Six rules hold across all fourteen:
 - **A header cycles ascending, descending, then back to the table's own order**, caret gone. That third state is what lets the default orders that are argued for elsewhere in this file (running containers first, dangling images last, docker's predefined networks last, ours before discovered stacks, security updates first) survive a table being sorted: they are what the table shows until somebody asks for something else, rather than a grouping that outranks every sort and puts the largest dangling layer down the middle of a table sorted by size. **The file explorer is the exception** and keeps its two-state pair, because directories-first is a file-manager convention rather than a nicety, so there is no natural order for a third click to return to (`TableSort(..., allowDefault: false)`).
 - **A column sorts on the value its cell was rendered from, never on the text in it.** "512 MiB" sorts above "4 GiB" as a string, "999MB" above "1.23GB", and "3 weeks ago" does not sort at all. So `VmInfo.MemoryKiB` keeps the number `FormatKiB` was already parsing and throwing away, `ImageInfo.CreatedAt` rides the images listing as one more field, `ImageRow.SizeBytes` reads docker's size phrase back (decimal units, docker's own `HumanSize`), and both uptime columns sort on elapsed seconds. The exception is a string **formatted host-side to sort correctly already**: the file explorer's `Modified`, the images table's `CreatedAt` and the history table's `When` are all fixed-width and ISO-ordered, so lexicographic order already is chronological order and there is nothing to parse.
 - **Filtering re-renders the listing in hand.** Every module has a `Populate` between its read and its merge; a keystroke never costs a round trip, the status slot gains **`· filtered`**, and a needle matching nothing draws its own empty text rather than the "nothing here" one, which would be a different and wrong claim. A table whose listing **failed** keeps saying so through both (the containers module holds a failure string per table, the updates module refuses to populate a catalog it could not read, the file explorer latches `_failed`): a sort click must never replace the reason a table is empty with an empty table.
 - **Sort and filter are session state on the module**, never in `settings.json`. Switching host builds a new shell, which is what resets them.
 - **The strip's inset is inside the cells, not around them** (`TableSort.TakeStripInset`). A heading strip is a `Border` with `Padding="12,3"`, and left there it is padding *around* the cells: the hover stops short of the strip's top, bottom and left edge, so a heading reads as a pill floating in the strip with a dead margin beside it that looks like part of the cell and is not clickable. That is what `HubAccountMenu` says a status bar cell must not be, and a heading cell is the same kind of thing, so the strip gives its padding up, every cell carries the vertical half and the two end cells carry the half they are against. **Nothing moves a pixel**: the leftmost cell is widened by exactly what it took on, so every column after it starts where it did. The strips are `DockPanel`s with the flexible column as the fill child for the same reason, so the last cell is its whole column rather than the width of its label. Which cell is against which edge is read off the panel and not off document order, because among right-docked children the *first* is the furthest right (the file explorer docks from the right, its flexible column being the leftmost one).
-- **Every column but the leftmost stands 6px off the column line to its left**, heading and cell alike, so a value does not run up against the end of the one beside it and a heading's hover does not begin exactly where its label does. The row half is the `.cells` style in `App.axaml`, said once for all thirteen tables rather than on each of the fifty cells; the heading half is `ColumnHeader.CellInset`. The two have to agree to the pixel or a heading sits off its column. It is a **floor and not an addition**: the leftmost column is against the table's own 12px margin, which already insets it by more, and stacking the two would push that column out of line with the strip above it. The file explorer's row is the one written as a `DockPanel`, and there the direct `TextBlock` children *are* the columns docked from the right, so it needs no `nth-child` rule and would be wrong with one.
+- **Every column but the leftmost stands 6px off the column line to its left**, heading and cell alike, so a value does not run up against the end of the one beside it and a heading's hover does not begin exactly where its label does. The row half is the `.cells` style in `App.axaml`, said once for all fourteen tables rather than on each of the fifty cells; the heading half is `ColumnHeader.CellInset`. The two have to agree to the pixel or a heading sits off its column. It is a **floor and not an addition**: the leftmost column is against the table's own 12px margin, which already insets it by more, and stacking the two would push that column out of line with the strip above it. The file explorer's row is the one written as a `DockPanel`, and there the direct `TextBlock` children *are* the columns docked from the right, so it needs no `nth-child` rule and would be wrong with one.
 
 A filter box goes only where lists run long: VMs, containers, images, users, updates and the two service scopes. libvirt networks, docker networks, stacks and groups are a handful of rows, and the VM module's Networks page goes on having no toolbar at all rather than growing one to hold a box for three of them. **Ctrl+F** reaches the box of the table on screen (`FilterBox.AttachFindShortcut`, registered on the top level for the reason the file explorer's command keys are), and Escape clears it.
 
@@ -133,26 +133,28 @@ A filter box goes only where lists run long: VMs, containers, images, users, upd
 - **Some brushes sit deliberately outside the theme dictionaries**: `JbGroupBoxBorder`/`JbGroupBoxHeader` are grey with an alpha channel and read on either face, and `JbIconAdd`/`JbIconRemove` must not change meaning with the theme. `JbErrorForeground` *is* themed and is the brush for inline validation text (a message about something the user must change, never an ordinary hint; those are 0.7 opacity), so no view hardcodes a red.
 - **State dots** are green usable, amber transient, grey not going anywhere, plus red `#C75450` for a **failed** systemd unit, which is the one list where grey would bury the most important row.
 - **`JbLinkForeground` is the one brush for a link out of the app**, themed like `JbErrorForeground` and for the same reason: a hardcoded blue reads as a link on one face and as disabled text on the other. It is JetBrains' own link colour rather than the accent the default button wears, because that accent is a *background* with white on it and is too dark on the light face and too weak on the dark one used as a foreground. There is no link control: Fluent's `HyperlinkButton` brings a button's padding into the middle of a sentence, so a link is a plain `TextBlock` with this brush, an underline, a hand cursor and `TextWrapping="NoWrap"` so its click box stays the width of its text. Inline in a sentence it goes in an `InlineUIContainer` with **`BaselineAlignment="Bottom"`**, which arranges it at its own desired size rather than stretching it to the line (measured) and puts it on the same baseline as the words either side. The alignment is not optional: `EmbeddedControlRun.Baseline` is the control's whole *height*, so the default drops the box's bottom edge onto the line's baseline and the link then rides a descent plus half a line gap high (read from Avalonia 12.1.1). Opening it goes through `TopLevel.Launcher` and **fails soft**: a session on a remote host may have no browser at all, and the whole URL is on screen to be read.
-- **A table is a table wherever it appears**: the heading strip (`#11808080` over a `#22808080` rule, `12,3` padding) and the transparent `JbTableRow` body are the same elements in a dialog group box and in the shell. Every cell of a module's heading strip is a `Controls/ColumnHeader`, whose `JbColumnHeader` is flat and derived from `JbToolButton`, so a table whose columns sort looks identical to one whose columns do not until the pointer is over it. It resolves that theme once from the tree it is in rather than binding it dynamically, because a `ControlTheme` is one shared object whose own setters reach the themed brushes; it fails soft, so a header that cannot find it is an ordinary button with the right label on it. **It is the one thing derived from `JbToolButton` that drops its `BorderThickness`**: that 1px border is transparent in every state (hover and pressed set `Background` alone) and exists to give a tool button's pill some air, so on a heading all it did was inset the content, and measured, every heading sat 1px right of the column it heads while the strip stood 2px taller than the ones drawn with plain `TextBlock`s. The strip is **23px** in all thirteen tables.
+- **A table is a table wherever it appears**: the heading strip (`#11808080` over a `#22808080` rule, `12,3` padding) and the transparent `JbTableRow` body are the same elements in a dialog group box and in the shell. Every cell of a module's heading strip is a `Controls/ColumnHeader`, whose `JbColumnHeader` is flat and derived from `JbToolButton`, so a table whose columns sort looks identical to one whose columns do not until the pointer is over it. It resolves that theme once from the tree it is in rather than binding it dynamically, because a `ControlTheme` is one shared object whose own setters reach the themed brushes; it fails soft, so a header that cannot find it is an ordinary button with the right label on it. **It is the one thing derived from `JbToolButton` that drops its `BorderThickness`**: that 1px border is transparent in every state (hover and pressed set `Background` alone) and exists to give a tool button's pill some air, so on a heading all it did was inset the content, and measured, every heading sat 1px right of the column it heads while the strip stood 2px taller than the ones drawn with plain `TextBlock`s. The strip is **23px** in all fourteen tables.
 - The sixteen ANSI terminal colours and the two defaults are **themed** here so the terminal reads on both faces; the other 240 are arithmetic (a 6x6x6 cube and 24 greys) and are not a matter of taste.
 
 ### Modules
 
-The main window is a **shell**, not a screen. `Views/MainWindow` owns the SSH connection, the status bar and the process lifetime; everything a user manages lives in an `IModule`, and the side menu is a `JbModuleTabControl`. Modules: **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Software updates**, **User accounts**, **File explorer** and **Terminal**. See "Shared idioms" for the tab walk and the refresh policy.
+The main window is a **shell**, not a screen. `Views/MainWindow` owns the SSH connection, the status bar and the process lifetime; everything a user manages lives in an `IModule`, and the side menu is a `JbModuleTabControl`. Modules: **Dashboard** (the host itself, and
+the module the shell lands on), **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Software updates**, **User accounts**, **File explorer** and **Terminal**. See "Shared idioms" for the tab walk and the refresh policy.
 
 - **`Attach(ssh)` rather than a constructor parameter.** A `UserControl` declared in XAML needs a parameterless constructor, and modules are built before the connection exists. The shell hands each the same `SshConnectionManager` once, before the first `ActivateAsync`, and a module builds its own service on top. The connection stays the shell's to dispose. **Once, and there is no re-attach**, which is why switching host builds a new shell rather than re-pointing this one; see "Saved hosts".
 - **The status bar is two slots and a place to hang a control, and a module owns all three while on screen.** `Status` is the left slot (row counts, "Starting win11 (1/2)..."), `HostCapabilities` the right ("KVM ready", "docker 27.3.1"), and one `StatusChanged` event covers them. The file explorer and terminal modules used to write `user@host` into the right slot, and no longer do: the host cell at the far left of the same bar names the host permanently, and saying it twice in one strip is worse than an empty slot, which is what the shell already draws for a module with nothing to report. The shell repaints from the *incoming* module's strings on every switch and ignores a raise from a module that is not active. Throughput is the strip's third element and is the **shell's**, as is the host cell at the far left: its 1 s timer never stops, because `SpiceTraffic.BytesTransferred` and `NbdServer.TotalBytesServed` keep climbing whichever module is on screen. A module has no footer, which is why a Cancel button for a long operation has to go in a transfer strip of its own.
-- **`IModule.StatusWidget` is the far-right end of that bar, and it exists for what a string cannot be: something to click.** It **defaults to null**, so the five modules with nothing to put there say nothing at all and adding a module stays a `TabItem` plus a `UserControl`. The shell reads it once per switch and **reparents the module's own instance** rather than copying anything out of it, so what the last probe wrote is still on it when the user comes back; a module that returned a fresh control per activation would blank itself. The one filler is the containers module's Docker Hub account. Two things keep the bar honest. The widget takes its separator with it, or the strip would end on a rule with nothing after it. And the **height lives on the inner panel, not in the border's padding**: a `MinHeight` of 26 inside a `10,0` border, so a hanging control can fill the strip **top to bottom** and its hover reads as a status bar cell rather than a pill floating in one, while the text beside it is centred in the same row. The bar is one height whether or not anything is hanging in it, measured 27px either way, which is what it was before there was a slot at all. **Sideways it is the other way round: the two menu cells cancel the border's 10px side padding with a negative margin and carry that same 10px as their own `Padding`**, which lands inside the `Root` border the hover paints, and the separator beside each drops its margin on that side to pay for it. Nothing moves a pixel; what changes is that the inset lights up with the cell instead of sitting beside it as a dead strip that looks like part of it and is not clickable. That is the rule for anything hung in the slot: the slot reaches the window edge and the widget owns its own inset.
+- **`IModule.StatusWidget` is the far-right end of that bar, and it exists for what a string cannot be: something to click.** It **defaults to null**, so the seven modules with nothing to put there say nothing at all and adding a module stays a `TabItem` plus a `UserControl`. The shell reads it once per switch and **reparents the module's own instance** rather than copying anything out of it, so what the last probe wrote is still on it when the user comes back; a module that returned a fresh control per activation would blank itself. The one filler is the containers module's Docker Hub account. Two things keep the bar honest. The widget takes its separator with it, or the strip would end on a rule with nothing after it. And the **height lives on the inner panel, not in the border's padding**: a `MinHeight` of 26 inside a `10,0` border, so a hanging control can fill the strip **top to bottom** and its hover reads as a status bar cell rather than a pill floating in one, while the text beside it is centred in the same row. The bar is one height whether or not anything is hanging in it, measured 27px either way, which is what it was before there was a slot at all. **Sideways it is the other way round: the two menu cells cancel the border's 10px side padding with a negative margin and carry that same 10px as their own `Padding`**, which lands inside the `Root` border the hover paints, and the separator beside each drops its margin on that side to pay for it. Nothing moves a pixel; what changes is that the inset lights up with the cell instead of sitting beside it as a dead strip that looks like part of it and is not clickable. That is the rule for anything hung in the slot: the slot reaches the window edge and the widget owns its own inset.
 - **`Shutdown` runs on every module, not just the visible one**, since a hidden module still owns the console windows and NBD streams it opened.
 
 #### Which modules a host gets
 
-Four of the seven are drawn only when the host has the tooling they are about, decided by one
+Four of the eight are drawn only when the host has the tooling they are about, decided by one
 un-elevated `command -v` round trip the shell owns (`MainWindow.SyncModuleVisibilityAsync`,
 `Core/Services/HostTools`). **Virtual machines** needs `virsh`, **Containers** needs `docker`,
 **Services** needs `systemctl`, and **Software updates** needs `PackageManagers.Detect` to answer
-something other than `NullPackageManager`. User accounts, File explorer and Terminal are
-unconditional: an SSH connection already implies a filesystem, a shell and an account database.
+something other than `NullPackageManager`. Dashboard, User accounts, File explorer and
+Terminal are unconditional: an SSH connection already implies a filesystem, a shell, an account
+database and a `/proc`.
 
 - **Hidden, and it is the app's one page-level exception to disabled-with-a-reason.** That rule
   protects a command somebody goes looking for on a page they are already on, which is why the
@@ -180,7 +182,7 @@ unconditional: an SSH connection already implies a filesystem, a shell and an ac
   running through it: one SSH hiccup must not settle the strip for the rest of the session.
 - **A module answers for itself, so the shell still never names one.** `IModule.RequiredTools` is
   the list the shell unions into the one probe and `IModule.IsRelevant(HostToolset)` is the
-  verdict, both defaulted (empty, and "every required tool present") so the three unconditional
+  verdict, both defaulted (empty, and "every required tool present") so the four unconditional
   modules carry no code and adding a module stays a `TabItem` plus a `UserControl`.
   `MainWindow.axaml` is untouched by this feature. Software updates is the only one to override
   the verdict, because its question is "any of four, weighted by os-release", which is not a
@@ -440,6 +442,104 @@ The console can redirect a physical USB device into the guest (the SPICE **usbre
 - **Device permissions (Linux):** libusb needs rw on `/dev/bus/usb/...`. `packaging/70-virtdeck-usb.rules` (`TAG+="uaccess"`) grants it to the seat user; without it `libusb_open` returns `LIBUSB_ERROR_ACCESS` and `UsbDeviceManager.DescribeOpenFailure` says to install the rule and replug.
 - **Host provisioning:** `Services/UsbProvisioning` auto-ensures the domain has a USB controller + 4 `<redirdev type='spicevmc'>` channels. redirdevs hot-plug (`attach-device --live --config`) when a controller exists (then the console reconnects to see them); adding a controller is persistent-only and needs a power-cycle.
 - **Capture backend:** Windows needs the **UsbDk** kernel driver (installed by `installer\`, Inno Setup), requested via `LIBUSB_OPTION_USE_USBDK`; Linux captures with libusb's native backend, so the option is **not** set there and `libusb_set_auto_detach_kernel_driver` kicks the in-kernel driver off the interface instead. Without the backend, channels still link but redirection is dormant and the picker says why. Reliability: bulk/HID/mass-storage solid; isochronous (webcams/audio) is a known weak spot on both platforms. Pin a known-good `libusb-1.0.dll` (virt-viewer 10.x; v11's regressed redirection).
+
+## Dashboard
+
+`DashboardModule` is the host itself: who it is, what it is made of, how full its disks are, how
+many VMs and containers it is running, whether it has updates pending, over live CPU, memory,
+network and disk IO graphs. `Views/DashboardModule`, `Views/MountRow`, `Controls/MetricGraph`,
+`Core/Services/HostMetricsService`, `Core/Models/HostSample`.
+
+It is the module the shell lands on, and **being first in the side menu is the whole of how**.
+`ApplyRelevance` settles the first selection onto the first *visible* tab, and a module naming no
+`RequiredTools` is never hidden, so the two facts compose into a default with no line in
+`MainWindow.axaml.cs` and nothing anywhere that names this module. It is also the reason the
+Dashboard must stay unconditional: a conditional module in that slot would hand the user a
+different landing page per host.
+
+- **It is a tail, not a poll, and everything else follows from that.** `RunCommand` holds `_ioLock`
+  for its whole call, so a sample every two seconds through it would serialise against the VM list,
+  the container list and every file-browser read for the life of the session. `RunCommandStreaming`
+  opens a client of its own, so one long-lived remote loop costs one connection and **no round trip
+  per sample**. That is what makes the next point proportionate rather than a standing tax.
+- **`Deactivate` deliberately does not stop the sampling.** It stops the reads and nothing else,
+  which is the same answer the refresh policy already gives for `docker events`, `virsh event
+  --loop` and `journalctl --follow`: an event tail holds its own connection and rebuilding one per
+  module switch would cost more than it saves. Here it also buys the feature, since a graph whose
+  history stopped while you looked at a VM would have a two minute hole in it exactly when you came
+  back to find out what the host was doing. `Shutdown` stops it, because the shell disposes the
+  shared connection straight after.
+- **Un-elevated.** `/proc` and `df` are world-readable, so the sampler never raises a sudo prompt
+  for somebody who only wanted to look, which is `FileExplorerModule`'s rule and `PackageService`'s.
+  The one elevated call is `ReadWorkloadAsync`, because virsh and docker are elevated everywhere
+  else in this app and there is no un-elevated way to ask them anything.
+- **A NIC and a disk count when sysfs gives them a `device` symlink, and the allow-lists are decided
+  once before the loop.** That is not a shortcut for a name blacklist, it is the only rule that does
+  not double count: a bridge, a `veth`, a `tap`/`vnet` and a `dm-*` all carry traffic that is
+  already on the interface or the disk underneath them, so summing them with the real ones would
+  count a guest's packets twice. A bond or a VLAN has no `device` link either, and loses nothing,
+  because its member NICs have one. It also drops `lo`, which on this machine carries an order of
+  magnitude more than the wire does. The devices actually counted ride the listing as the `j` and
+  `k` records and are named in each graph's tooltip, because a total over an unstated set is not an
+  answer.
+- **A `/proc/diskstats` sector is always 512 bytes**, whatever the device's `queue/hw_sector_size`
+  says, so the byte figure is fields 6 and 10 times 512 and reading the hardware sector size would
+  be wrong on every 4K-native disk.
+- **The sample carries the host's own clock** (`/proc/uptime`, the `t` record), so a rate is two
+  host timestamps apart and client/host skew never enters it. Same rule and same reason as the
+  docker listing's elapsed seconds and pacman's index age. A negative delta is a counter that
+  wrapped or a host that rebooted underneath us, and `Rates` answers null rather than drawing the
+  spike that would otherwise be the tallest thing on the graph.
+- **`e` closes a sample and nothing is published before it**, so a tick cut off by a dropped
+  connection is never half-drawn. The builder is per connection attempt, so a reconnect cannot
+  splice the tail of an old sample onto the head of a new one.
+- **The slow half rides the same loop every thirtieth tick**, which is what keeps the filesystem
+  table live without a second round trip or a timer. `timeout 5` on the `df` is load-bearing rather
+  than tidy: the loop is sequential, so one unreachable NFS or CIFS mount would otherwise stall the
+  graphs behind it. The pseudo-filesystems are excluded by type, `squashfs` because a snap host has
+  a hundred of them.
+- **`MetricGraph` has no repaint pump, on purpose.** `SpiceDisplay` and `TerminalControl` have a
+  16 ms timer because a background thread produces frames far faster than anybody can look at them,
+  so a dirty flag plus a clock is what stops the dispatcher being flooded. Here one sample every two
+  seconds is marshalled onto the UI thread, so `Push` invalidates directly; a timer would be sixty
+  wakeups a second to redraw something that changes every other second.
+- **Points are plotted against the host clock, not against their index**, so a slow tick or a tail
+  that dropped and reconnected shows as a real gap. The line **breaks** across one rather than being
+  straightened out, because a straight segment there is a claim about time nobody sampled.
+- **CPU and memory are pinned to 0-100 and the two throughput graphs autoscale**, because a host's
+  network and disk rates range over six orders of magnitude and a fixed ceiling would leave almost
+  every graph a flat line at the bottom. The peak is rounded up to one, two or five times a power of
+  ten so the figure on the left is readable and does not twitch every sample, and a 1 KiB/s floor
+  stops an idle host having its noise amplified to full height. **The figure drawn on the graph is
+  the scale, not the reading**; the reading is in the group box header, where it can be a sentence
+  and can wear its series colour, which is the whole legend the two-series graphs need.
+- **The two series colours are `JbCodeNumber` and `JbCodeString`**, the code editor's blue and
+  green. They are the app's only palette already chosen to read on both faces, so a graph needs no
+  brush key of its own, and the order is the same in all four, so receive and read are always the
+  colour transmit and write are not. Gridlines are the `JbGroupBoxBorder` alpha-grey for the same
+  reason that brush sits outside the theme dictionaries.
+- **The update tile is read once per session, and Refresh is how somebody asks again.**
+  `PackageService.ListAsync` is seconds of work holding the shared lock, and this is the page the
+  shell lands on at connect, so it runs in the background after the first paint and caches. It draws
+  **five** answers and never collapses them into a zero: no package manager (the row is not drawn at
+  all, since the Software updates module is not on this host's menu either), the listing's own
+  failure in the host's words, a query that could not run, up to date, and a count. Where the
+  manager marks security updates the count says how many; on pacman it says the tool does not mark
+  them, which is a third state and not none. A pending reboot draws only on `Needed`, because
+  telling somebody no reboot is needed after a kernel upgrade is the one wrong answer that check can
+  give.
+- **Neither status slot repeats what the page draws.** The left slot is what the module is doing
+  (`Sampling every 2s`, `Sampler reconnecting...`), the right slot is what it found on the host
+  (`Linux Mint 22.3 · 6.14.0-29-generic`), and the Host box therefore carries the machine and not
+  the distro or the kernel. This is the only module whose two setters are **guarded on being on
+  screen**: a tail feeding it every two seconds for the whole session would otherwise raise an event
+  the shell drops, forever. Only the property has to be current, and it always is, because the shell
+  repaints from both on every switch.
+- **The workload counts carry their own "is the tool even here" flag**, so zero VMs and no libvirt
+  stay different answers: the row is drawn only where the tool exists, and the dot is the app's own
+  three, green for all running, amber for some, grey for none.
+- **No filter box.** A host has a handful of filesystems, which is where the "long lists only" rule
+  already draws the line, and the graphs are not a list.
 
 ## Containers
 
