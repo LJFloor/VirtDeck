@@ -10,17 +10,17 @@ namespace VirtDeck.Avalonia.Views;
 /// <summary>
 /// The User accounts module: the host's own login accounts and groups, in the tab pair the VM
 /// module uses for its VMs and networks. Adds, edits and deletes users; adds and deletes groups;
-/// sets a password, a login shell, a home directory at creation, and supplementary group
-/// membership.
+/// sets a password, a login shell, a home directory at creation, and group membership.
 ///
 /// Modelled on Cockpit's Accounts page where that has already settled a question, because it is the
-/// reference implementation everybody administering a Linux box has seen. Two of its answers are
-/// worth naming here, since both look like omissions until you know why:
+/// reference implementation everybody administering a Linux box has seen. Two answers are worth
+/// naming here, since both look like omissions until you know why:
 ///
-/// <b>Group membership is supplementary only.</b> The primary group is shown ticked and disabled
-/// rather than hidden, so it is visible without being changeable. Changing a primary group leaves
-/// every file the user owns grouped to the old one, which is a mess with no undo, and Cockpit
-/// refuses it for the same reason.
+/// <b>A group is a group, and the account's own group is not one of them.</b> Every host VirtDeck
+/// manages gives an account a group of its own and names it on the passwd line, so it is not a
+/// membership anybody adds or removes: it is left out of the list the edit dialog ticks and out of
+/// the users table's Groups column, rather than drawn in both as a row nothing may change. What is
+/// left is one kind of group, managed with <c>gpasswd</c>, with no vocabulary to explain.
 ///
 /// <b>The home directory is set at creation and read only afterwards.</b> Moving one means
 /// <c>usermod -d -m</c>, which relocates the files and can fail part way across a filesystem
@@ -194,19 +194,19 @@ public partial class UserAccountsModule : UserControl, IModule
             .ToList();
         MergeUsers(users);
 
-        // Which accounts have each group as their primary, so the member count says who is in the
+        // Which accounts each group is the own group of, so the member count says who is in the
         // group rather than who the group file happens to list. Built over every account, not the
         // filtered view, because hiding a row must not change what a group contains.
-        var primaryOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var ownGroupOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var groupByGid = new Dictionary<int, string>();
         foreach (var g in _catalog.Groups) groupByGid.TryAdd(g.Gid, g.Name);
         foreach (var u in _catalog.Users)
         {
             if (!groupByGid.TryGetValue(u.Gid, out var name)) continue;
-            if (!primaryOf.TryGetValue(name, out var list)) primaryOf[name] = list = new List<string>();
+            if (!ownGroupOf.TryGetValue(name, out var list)) ownGroupOf[name] = list = new List<string>();
             list.Add(u.Name);
         }
-        MergeGroups(_catalog.Groups, primaryOf);
+        MergeGroups(_catalog.Groups, ownGroupOf);
 
         EmptyText.IsVisible = false;
         if (_userRows.Count == 0)
@@ -263,18 +263,18 @@ public partial class UserAccountsModule : UserControl, IModule
         _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
     };
 
-    private void MergeGroups(IReadOnlyList<UserGroup> groups, Dictionary<string, List<string>> primaryOf)
+    private void MergeGroups(IReadOnlyList<UserGroup> groups, Dictionary<string, List<string>> ownGroupOf)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var none = new List<string>();
         foreach (var group in groups)
         {
             seen.Add(group.Name);
-            var primary = primaryOf.TryGetValue(group.Name, out var list) ? list : none;
-            if (_groupByName.TryGetValue(group.Name, out var row)) row.Update(group, primary);
+            var own = ownGroupOf.TryGetValue(group.Name, out var list) ? list : none;
+            if (_groupByName.TryGetValue(group.Name, out var row)) row.Update(group, own);
             else
             {
-                row = new GroupRow(group, primary);
+                row = new GroupRow(group, own);
                 _groupByName[group.Name] = row;
                 _groupRows.Add(row);
             }
@@ -400,7 +400,7 @@ public partial class UserAccountsModule : UserControl, IModule
 
         if (!await MessageDialog.Confirm(Owner, "Delete groups",
                 $"Delete {Subject(rows.Select(r => r.Name).ToList(), "group")}\n\n" +
-                "The accounts in them are not touched. A group that is somebody's primary group " +
+                "The accounts in them are not touched. A group that is an account's own group " +
                 "cannot be deleted, and the host will say so."))
             return;
 

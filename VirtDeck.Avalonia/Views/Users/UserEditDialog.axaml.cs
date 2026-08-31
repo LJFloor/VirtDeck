@@ -104,24 +104,16 @@ public partial class UserEditDialog : Window
     }
 
     /// <summary>
-    /// Every group on the host, ticked where the account is already in it. The primary group is
-    /// ticked and disabled with its reason on hover: shown, because that is where a membership
-    /// nobody added comes from, and fixed, because changing it leaves every file the account owns
-    /// grouped to the old one.
+    /// Every group on the host, ticked where the account is already in it. One kind of row and no
+    /// exceptions: the account's own group is the gid on its passwd line rather than a membership,
+    /// so it is not in this list and there is nothing here that cannot be ticked.
     /// </summary>
     private void BuildGroups()
     {
-        var member = new HashSet<string>(_existing?.SecondaryGroups ?? new List<string>(), StringComparer.Ordinal);
-        var primary = _existing?.PrimaryGroup;
+        var member = new HashSet<string>(_existing?.Groups ?? new List<string>(), StringComparer.Ordinal);
 
         foreach (var group in _catalog.Groups)
-        {
-            var isPrimary = primary != null && string.Equals(group.Name, primary, StringComparison.Ordinal);
-            _groupRows.Add(isPrimary
-                ? new CheckRow(group.Name, group.Name, isChecked: true, isEnabled: false,
-                    hint: $"{group.Name} is this account's primary group, which VirtDeck does not change.")
-                : new CheckRow(group.Name, group.Name, member.Contains(group.Name)));
-        }
+            _groupRows.Add(new CheckRow(group.Name, group.Name, member.Contains(group.Name)));
 
         GroupItems.ItemsSource = _groupRows;
     }
@@ -268,10 +260,7 @@ public partial class UserEditDialog : Window
             Shell = (ShellBox.Text ?? "").Trim(),
             Password = password,
             Locked = LockBox.IsChecked == true,
-            SecondaryGroups = _groupRows
-                .Where(r => r.IsChecked && r.IsEnabled)   // the disabled row is the primary group
-                .Select(r => r.Id)
-                .ToList(),
+            Groups = _groupRows.Where(r => r.IsChecked).Select(r => r.Id).ToList(),
         };
 
         Close(true);

@@ -211,8 +211,8 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
-        /// Fills in the three things no single line of either file carries: which group a uid's gid
-        /// names, which groups list a user as a member, and whether the account is locked.
+        /// Fills in the two things no single line of either file carries: which groups list a user
+        /// as a member, and whether the account is locked.
         /// </summary>
         private static void Resolve(AccountCatalog catalog, Dictionary<string, PasswordState> locks)
         {
@@ -230,9 +230,13 @@ namespace VirtDeck.Services
 
             foreach (var u in catalog.Users)
             {
-                u.PrimaryGroup = byGid.TryGetValue(u.Gid, out var name) ? name : u.Gid.ToString();
-                u.SecondaryGroups = memberships.TryGetValue(u.Name, out var mine)
-                    ? mine.Where(g => !string.Equals(g, u.PrimaryGroup, StringComparison.Ordinal))
+                // The account's own group is the gid on its passwd line, and it is not a membership
+                // anybody adds or removes, so it is left out of the list rather than shown as one
+                // more tick nothing may untick. It is only ever in here at all on a host where
+                // somebody has also written the user into their own group's member list.
+                var own = byGid.TryGetValue(u.Gid, out var name) ? name : u.Gid.ToString();
+                u.Groups = memberships.TryGetValue(u.Name, out var mine)
+                    ? mine.Where(g => !string.Equals(g, own, StringComparison.Ordinal))
                           .OrderBy(g => g, StringComparer.OrdinalIgnoreCase).ToList()
                     : new List<string>();
                 u.Password = locks.TryGetValue(u.Name, out var state) ? state : PasswordState.Unknown;
@@ -404,10 +408,10 @@ namespace VirtDeck.Services
             if (spec.Home.Trim() is { Length: > 0 } home) { argv.Add("-d"); argv.Add(home); }
             if (spec.Shell.Trim() is { Length: > 0 } shell) { argv.Add("-s"); argv.Add(shell); }
 
-            if (spec.SecondaryGroups.Count > 0)
+            if (spec.Groups.Count > 0)
             {
                 argv.Add("-G");
-                argv.Add(string.Join(',', spec.SecondaryGroups));
+                argv.Add(string.Join(',', spec.Groups));
             }
 
             // Before the name, so an account called -f is still an account name.
@@ -422,7 +426,7 @@ namespace VirtDeck.Services
                 throw new ArgumentException(
                     $"'{spec.Name}' is not a valid user name: start with a letter or underscore, " +
                     "then letters, digits, underscores and hyphens.");
-            foreach (var group in spec.SecondaryGroups) RequireGroup(group);
+            foreach (var group in spec.Groups) RequireGroup(group);
 
             // The GECOS field is one line of a colon-separated file, so a line break in it would
             // corrupt the record rather than merely look odd. Colons are useradd's own to refuse.
@@ -462,10 +466,10 @@ namespace VirtDeck.Services
             var gecos = JoinGecos(spec.FullName, spec.GecosTail);
             var shell = spec.Shell.Trim();
 
-            var adds = spec.SecondaryGroups
-                .Where(g => !existing.SecondaryGroups.Contains(g, StringComparer.Ordinal)).ToList();
-            var removes = existing.SecondaryGroups
-                .Where(g => !spec.SecondaryGroups.Contains(g, StringComparer.Ordinal)).ToList();
+            var adds = spec.Groups
+                .Where(g => !existing.Groups.Contains(g, StringComparer.Ordinal)).ToList();
+            var removes = existing.Groups
+                .Where(g => !spec.Groups.Contains(g, StringComparer.Ordinal)).ToList();
             foreach (var group in adds.Concat(removes)) RequireGroup(group);
 
             await Task.Run(() =>
@@ -478,7 +482,7 @@ namespace VirtDeck.Services
 
                 // gpasswd per changed membership rather than `usermod -G`, following Cockpit: -G
                 // replaces the whole set, so it would silently drop a group added on the host since
-                // this dialog opened. The primary group is never in either list.
+                // this dialog opened. The account's own group is in neither list.
                 foreach (var group in adds) RunArgv("gpasswd", "-a", existing.Name, group);
                 foreach (var group in removes) RunArgv("gpasswd", "-d", existing.Name, group);
             }, ct);

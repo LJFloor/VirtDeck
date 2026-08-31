@@ -31,7 +31,7 @@ namespace VirtDeck.Models
 
         public int Uid { get; set; }
 
-        /// <summary>The primary group's id. <see cref="PrimaryGroup"/> is its name, resolved from the group list.</summary>
+        /// <summary>The gid on the passwd line, which on every host VirtDeck manages names the account's own group.</summary>
         public int Gid { get; set; }
 
         /// <summary>
@@ -49,14 +49,13 @@ namespace VirtDeck.Models
         /// <summary>The login shell as the passwd line spells it, an absolute path or empty.</summary>
         public string Shell { get; set; } = string.Empty;
 
-        /// <summary>The name of the group <see cref="Gid"/> names, or the number again when no group has it.</summary>
-        public string PrimaryGroup { get; set; } = string.Empty;
-
         /// <summary>
-        /// Every group listing this user as a member, primary excluded. This is the set the edit
-        /// dialog ticks and the set <c>gpasswd</c> adds to and removes from.
+        /// The groups the user is in: every group listing them as a member, with the account's own
+        /// group left out, since that one is the gid on the passwd line and is not a membership
+        /// anybody adds or removes. This is the set the edit dialog ticks and the set
+        /// <c>gpasswd</c> adds to and removes from.
         /// </summary>
-        public List<string> SecondaryGroups { get; set; } = new();
+        public List<string> Groups { get; set; } = new();
 
         public PasswordState Password { get; set; } = PasswordState.Unknown;
 
@@ -72,8 +71,8 @@ namespace VirtDeck.Models
         public int Gid { get; set; }
 
         /// <summary>
-        /// The group file's own member list, which does <b>not</b> include the users who have this
-        /// group as their primary. Those are counted in separately, because somebody reading the
+        /// The group file's own member list, which does <b>not</b> include the users whose passwd
+        /// gid names this group. Those are counted in separately, because somebody reading the
         /// table means "who is in this group" rather than "who does the file list".
         /// </summary>
         public List<string> Members { get; set; } = new();
@@ -116,8 +115,8 @@ namespace VirtDeck.Models
         /// <summary>Whether the account should end up locked (<c>usermod --lock</c>).</summary>
         public bool Locked { get; set; }
 
-        /// <summary>The supplementary groups the user should end up in. The primary group is not in here.</summary>
-        public List<string> SecondaryGroups { get; set; } = new();
+        /// <summary>The groups the user should end up in, which is what <c>gpasswd</c> manages.</summary>
+        public List<string> Groups { get; set; } = new();
     }
 
     /// <summary>

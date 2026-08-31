@@ -70,8 +70,6 @@
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
             </ItemsControl>
-            <TextBlock Classes="note" TextWrapping="Wrap"
-                       Text="The primary group is ticked and cannot be changed here: moving an account to a different primary group leaves every file it owns grouped to the old one." />
           </StackPanel>
         </HeaderedContentControl>
 

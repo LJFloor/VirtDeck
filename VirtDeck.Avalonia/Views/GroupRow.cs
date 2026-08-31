@@ -23,9 +23,9 @@ public sealed class GroupRow : INotifyPropertyChanged
     private int _memberCount;
 
     /// <summary>
-    /// How many accounts are in the group, counting the ones that have it as their primary. The
-    /// group file lists only the supplementary members, so a count taken from it alone would say
-    /// zero for a per-user group somebody is very much in.
+    /// How many accounts are in the group, counting the ones whose passwd gid names it. The group
+    /// file lists only the members somebody added to it, so a count taken from it alone would say
+    /// zero for a per-user group that account is very much in.
     /// </summary>
     public int MemberCount { get => _memberCount; private set => Set(ref _memberCount, value); }
 
@@ -33,20 +33,23 @@ public sealed class GroupRow : INotifyPropertyChanged
     // docker, libvirt and sudo are all system groups by GID and are exactly the rows people open
     // this tab to find.
 
-    public GroupRow(UserGroup group, IReadOnlyList<string> primaryOf)
+    public GroupRow(UserGroup group, IReadOnlyList<string> ownGroupOf)
     {
         Name = group.Name;
         Group = group;
-        Update(group, primaryOf);
+        Update(group, ownGroupOf);
     }
 
-    public void Update(UserGroup group, IReadOnlyList<string> primaryOf)
+    /// <param name="ownGroupOf">
+    /// The accounts whose passwd gid names this group, which the group file does not list.
+    /// </param>
+    public void Update(UserGroup group, IReadOnlyList<string> ownGroupOf)
     {
         Group = group;
         Gid = group.Gid;
 
         var all = new List<string>(group.Members);
-        foreach (var name in primaryOf)
+        foreach (var name in ownGroupOf)
             if (!all.Contains(name, StringComparer.Ordinal))
                 all.Add(name);
         all.Sort(StringComparer.OrdinalIgnoreCase);

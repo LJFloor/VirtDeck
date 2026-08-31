@@ -93,11 +93,10 @@ public sealed class UserRow : INotifyPropertyChanged
         IsSystem = account.IsSystem;
         Password = account.Password;
 
-        // The primary group leads and is marked, because it is the one membership the edit dialog
-        // will not let go of and somebody reading the column should see why it is always there.
-        var groups = new List<string> { account.PrimaryGroup + " (primary)" };
-        groups.AddRange(account.SecondaryGroups);
-        Groups = string.Join(", ", groups);
+        // The groups the account is in, and nothing else: the account's own group is the gid on its
+        // passwd line rather than a membership, and naming it in every row of the column would say
+        // the same thing about every account.
+        Groups = string.Join(", ", account.Groups);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
