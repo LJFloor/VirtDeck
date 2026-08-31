@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -38,11 +39,43 @@ public sealed class DetailRow
     public bool HasNote => !string.IsNullOrEmpty(Note);
 }
 
-/// <summary>One headed group of <see cref="DetailRow"/>s; the pane flows these across its width.</summary>
+/// <summary>
+/// A label with a tick rather than a word: a fact about the VM the pane can also change. The
+/// services module's autostart cell is the same thing one table over, and the rules come with it.
+/// The tick is driven by <c>Click</c> and never by a two-way binding, or the 30 second poll pushing
+/// a fresh value in would issue a command.
+/// </summary>
+public sealed class DetailToggleRow(string label, bool isOn, bool isEnabled, string hint)
+{
+    public string Label => label;
+
+    /// <summary>
+    /// What the host last said, and get-only on purpose. <c>ToggleButton.IsChecked</c> binds
+    /// <b>two-way</b> by default and an <c>init</c> accessor is an ordinary setter at runtime, so
+    /// with a settable property the press writes its new value into the row before the Click handler
+    /// reads it, the handler computes the state the user is leaving rather than the one they want,
+    /// and the tick issues the opposite command. Measured: enabling autostart ran
+    /// <c>virsh autostart --disable</c>. <c>ServiceRow.AutostartOn</c> is get-only for the same
+    /// reason; the binding is also pinned OneWay in the markup, because one guard for a silent
+    /// inversion is not enough.
+    /// </summary>
+    public bool IsOn => isOn;
+
+    public bool IsEnabled => isEnabled;
+
+    /// <summary>Always set, because this row is disabled more often than not and has to say why.</summary>
+    public string Hint => hint;
+}
+
+/// <summary>
+/// One headed group of rows; the pane flows these across its width. The rows are <see cref="object"/>
+/// because a section mixes <see cref="DetailRow"/> with <see cref="DetailToggleRow"/> and which
+/// template draws which is the template matcher's business, not this type's.
+/// </summary>
 public sealed class DetailSection
 {
     public string Title { get; init; } = "";
-    public IReadOnlyList<DetailRow> Rows { get; init; } = [];
+    public IReadOnlyList<object> Rows { get; init; } = [];
 }
 
 /// <summary>
@@ -67,15 +100,41 @@ public partial class VmDetailsView : UserControl
     private Dictionary<int, VirshService.DiskSize> _sizes = new();
     private bool _previewLoading;
     private bool _previewTried;   // a capture for this VM, while running, has come back
+    private bool _autostartBusy;  // a virsh autostart is in flight; the tick is not touchable
 
     /// <summary>Raised when the user clicks the preview thumbnail (used to open the console).</summary>
     public event EventHandler? PreviewClicked;
+
+    /// <summary>
+    /// Raised with the wanted state when the user presses the autostart tick. The pane has no
+    /// VirshService and is not going to grow one: it draws a VM and says what was asked of it, and
+    /// the module owns every command, exactly as with <see cref="PreviewClicked"/>.
+    /// </summary>
+    public event Action<bool>? AutostartRequested;
 
     public VmDetailsView()
     {
         InitializeComponent();
         PreviewBox.PointerPressed += (_, _) => PreviewClicked?.Invoke(this, EventArgs.Empty);
+
+        // Click, not IsCheckedChanged: the second also fires when a refresh pushes a value in,
+        // which would turn the 30 second poll into a stream of commands. Registered on the section
+        // list rather than on the box because the boxes are template output and are rebuilt
+        // whenever anything about the VM changes. Same wiring as ServicesModule's autostart tick.
+        Sections.AddHandler(Button.ClickEvent, OnToggleClicked);
+
         Render();
+    }
+
+    private void OnToggleClicked(object? sender, RoutedEventArgs e)
+    {
+        if (e.Source is not CheckBox box || box.DataContext is not DetailToggleRow row) return;
+
+        // The box flipped itself on the way in, so the row is what still knows the host's answer.
+        // Anything that refuses to act has to put the tick back rather than leave it standing for a
+        // state nobody has asked the host for.
+        if (!row.IsEnabled) { box.IsChecked = row.IsOn; return; }
+        AutostartRequested?.Invoke(!row.IsOn);
     }
 
     // ---- Public surface (call on the UI thread) ------------------------
@@ -123,6 +182,29 @@ public partial class VmDetailsView : UserControl
         _cfg = null;
         _cfgError = message;
         Render();
+    }
+
+    /// <summary>
+    /// Greys the autostart tick out while the command is in flight, with the reason on hover. It is
+    /// left saying what the host last said rather than what was asked for, which is the same rule
+    /// <c>ServiceRow.Pending</c> follows: a row may say it is busy, never what the answer will be.
+    /// </summary>
+    public void SetAutostartBusy(bool busy)
+    {
+        _autostartBusy = busy;
+        if (_vm != null) Render();
+    }
+
+    /// <summary>
+    /// Puts the tick where the host says it is. Called with what <c>virsh dominfo</c> answered after
+    /// the command, not with what the command was asked to do, and also on a refusal, where it is
+    /// what puts the tick back.
+    /// </summary>
+    public void SetAutostart(bool on)
+    {
+        if (_cfg != null) _cfg.Autostart = on;
+        _autostartBusy = false;
+        if (_vm != null) Render();
     }
 
     /// <summary>Adds the measured disk sizes, keyed by index into the config's disk list.</summary>
@@ -205,16 +287,33 @@ public partial class VmDetailsView : UserControl
         new() { Title = "Network", Rows = BuildNetwork() },
     ];
 
-    private List<DetailRow> BuildSystem()
+    private List<object> BuildSystem()
     {
-        var rows = new List<DetailRow>
+        var rows = new List<object>
         {
-            new() { Label = "Base Memory", Value = _cfg != null ? FormatMiB(_cfg.MemoryMiB) : _vm!.Memory },
-            new() { Label = "Processors", Value = (_cfg?.Vcpus ?? _vm!.VCpus).ToString() },
-            new() { Label = "CPU Mode", Value = _cfg?.CpuMode ?? Pending },
-            new() { Label = "Boot Order", Value = _cfg != null ? PrettyBoot(_cfg.BootOrder) : Pending },
-            new() { Label = "Autostart", Value = _cfg != null ? (_cfg.Autostart ? "On" : "Off") : Pending },
+            new DetailRow { Label = "Base Memory", Value = _cfg != null ? FormatMiB(_cfg.MemoryMiB) : _vm!.Memory },
+            new DetailRow { Label = "Processors", Value = (_cfg?.Vcpus ?? _vm!.VCpus).ToString() },
+            new DetailRow { Label = "CPU Mode", Value = _cfg?.CpuMode ?? Pending },
+            new DetailRow { Label = "Boot Order", Value = _cfg != null ? PrettyBoot(_cfg.BootOrder) : Pending },
         };
+
+        // Autostart is the one fact in this pane the pane can also change, so it is a tick rather
+        // than a word, the way the services module draws the same question about a unit.
+        //
+        // It stays a word until the host has answered, and that is not fussiness: an unticked box is
+        // a claim that autostart is off, and while the config is still in flight, or was refused,
+        // nobody here knows that. There is no third state a checkbox can be drawn in, so the row
+        // simply is not a checkbox yet.
+        if (_cfg == null)
+            rows.Add(new DetailRow { Label = "Autostart", Value = Pending });
+        else
+            rows.Add(new DetailToggleRow(
+                "Autostart",
+                isOn: _cfg.Autostart,
+                isEnabled: !_autostartBusy,
+                hint: _autostartBusy
+                    ? "Applying the change on the host..."
+                    : $"Start {_vm!.Name} when the host boots."));
 
         // Both are already parsed out of the domain XML and were simply never drawn. Which video
         // model a guest has is the first thing to look at when a console renders badly, and whether
@@ -234,12 +333,12 @@ public partial class VmDetailsView : UserControl
         return rows;
     }
 
-    private List<DetailRow> BuildStorage()
+    private List<object> BuildStorage()
     {
         if (_cfg == null) return [new DetailRow { Value = Pending }];
         if (_cfg.Disks.Count == 0) return [new DetailRow { Value = "(none)" }];
 
-        var rows = new List<DetailRow>();
+        var rows = new List<object>();
         for (int i = 0; i < _cfg.Disks.Count; i++)
         {
             var d = _cfg.Disks[i];
@@ -270,12 +369,12 @@ public partial class VmDetailsView : UserControl
         return rows;
     }
 
-    private List<DetailRow> BuildNetwork()
+    private List<object> BuildNetwork()
     {
         if (_cfg == null) return [new DetailRow { Value = Pending }];
         if (_cfg.Nics.Count == 0) return [new DetailRow { Value = "(none)" }];
 
-        var rows = new List<DetailRow>();
+        var rows = new List<object>();
         foreach (var n in _cfg.Nics)
         {
             // "bridge br0" and "network default" are different things wearing the same name, so the

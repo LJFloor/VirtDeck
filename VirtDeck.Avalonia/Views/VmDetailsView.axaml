@@ -87,6 +87,25 @@
       </StackPanel>
     </DataTemplate>
 
+    <!-- A label with a tick: a fact the pane can also change. The tooltip hangs off an enabled
+         parent Border because a disabled control is not hit-testable in Avalonia, so a greyed tick
+         could not otherwise state why. Same workaround as ServiceRow's autostart cell, CheckRow's
+         template and MessageDialog's alternative button. The label keeps ColLabel, so the tick sits
+         on the same column line as every value beside it, and the margin makes the row exactly as
+         tall as a text one (a 14px box against a 16px line). -->
+    <DataTemplate DataType="vm:DetailToggleRow" x:DataType="vm:DetailToggleRow">
+      <Border Background="Transparent" Margin="0,1,0,4" ToolTip.Tip="{Binding Hint}">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" Width="{StaticResource ColLabel}"
+                     Opacity="0.65" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <!-- OneWay is load-bearing: IsChecked binds two-way by default, and a write-back would
+               flip the row under the Click handler and send the host the opposite command. -->
+          <CheckBox IsChecked="{Binding IsOn, Mode=OneWay}" IsEnabled="{Binding IsEnabled}"
+                    HorizontalAlignment="Left" VerticalAlignment="Center" />
+        </DockPanel>
+      </Border>
+    </DataTemplate>
+
     <!-- One label/value line. Nothing here sets Foreground: every value inherits the themed one,
          which is the whole fix. A trimmed cell states itself on hover, because a 300px column
          cannot hold a disk path and its geometry at once. -->

@@ -361,7 +361,14 @@ namespace VirtDeck.Services
             return cfg;
         }
 
-        private bool GetAutostart(string vmName)
+        /// <summary>
+        /// Whether the domain starts with the host. Public because a command reads back only what
+        /// it touched: the details pane's autostart tick is put from this rather than from what
+        /// <see cref="SetAutostart"/> was asked to do, so the client never leads the host.
+        /// Answers false when it could not be read, which is what it answered before it had a
+        /// second caller.
+        /// </summary>
+        public bool GetAutostart(string vmName)
         {
             try
             {

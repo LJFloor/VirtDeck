@@ -78,6 +78,7 @@ public partial class VirtualMachinesModule : UserControl, IModule
         VmList.SelectionChanged += (_, _) => OnVmSelectionChanged();
         NetworkList.SelectionChanged += (_, _) => UpdateNetworkMenu();
         Details.PreviewClicked += (_, _) => OpenConsole();
+        Details.AutostartRequested += async wanted => await SetAutostartAsync(wanted);
 
         // Poll as a safety net; libvirt lifecycle events do the fast path.
         _refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
@@ -450,6 +451,37 @@ public partial class VirtualMachinesModule : UserControl, IModule
         else if (cfgError != null) Details.SetConfigFailed(cfgError);
         if (sizes != null) Details.SetDiskSizes(sizes);
         Details.SetPreview(shot);       // null (off VM or capture failed) → placeholder
+    }
+
+    /// <summary>
+    /// The details pane's autostart tick. Reads the answer back off the host rather than trusting
+    /// the command, which is what the tick is then put from: this module's rule everywhere else is
+    /// that the client never leads the host, and a tick is exactly the kind of control that would
+    /// otherwise sit there claiming a state nothing confirmed. `virsh dominfo` is one cheap round
+    /// trip, so reading back only what the command touched costs less than reloading the pane.
+    /// </summary>
+    private async Task SetAutostartAsync(bool wanted)
+    {
+        if (_virshOrNull is null || Selected is not { } row) { Details.SetAutostartBusy(false); return; }
+        string name = row.Name;
+
+        Details.SetAutostartBusy(true);
+        string? error = null;
+        bool actual = wanted;
+        await Task.Run(() =>
+        {
+            try { Virsh.SetAutostart(name, wanted); }
+            catch (Exception ex) { error = ex.Message; }
+            actual = Virsh.GetAutostart(name);
+        });
+
+        // The selection may have moved while virsh was running, in which case the pane is about a
+        // different VM and must not be told anything about this one.
+        if (Selected?.Name != name) { Details.SetAutostartBusy(false); return; }
+
+        Details.SetAutostart(actual);
+        if (error != null)
+            await MessageDialog.Info(Owner, "Autostart", $"Couldn't change autostart for {name}:\n{error}");
     }
 
     // ---- Actions ------------------------------------------------------
