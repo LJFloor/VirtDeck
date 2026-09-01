@@ -65,6 +65,7 @@ These recur across most of the app. A section below only spells out where it *de
 - **A header cycles ascending, descending, then back to the table's own order**, caret gone. That third state is what lets the default orders that are argued for elsewhere in this file (running containers first, dangling images last, docker's predefined networks last, ours before discovered stacks, security updates first) survive a table being sorted: they are what the table shows until somebody asks for something else, rather than a grouping that outranks every sort and puts the largest dangling layer down the middle of a table sorted by size. **The file explorer is the exception** and keeps its two-state pair, because directories-first is a file-manager convention rather than a nicety, so there is no natural order for a third click to return to (`TableSort(..., allowDefault: false)`).
 - **A column sorts on the value its cell was rendered from, never on the text in it.** "512 MiB" sorts above "4 GiB" as a string, "999MB" above "1.23GB", and "3 weeks ago" does not sort at all. So `VmInfo.MemoryKiB` keeps the number `FormatKiB` was already parsing and throwing away, `ImageInfo.CreatedAt` rides the images listing as one more field, `ImageRow.SizeBytes` reads docker's size phrase back (decimal units, docker's own `HumanSize`), and both uptime columns sort on elapsed seconds. The exception is a string **formatted host-side to sort correctly already**: the file explorer's `Modified`, the images table's `CreatedAt` and the history table's `When` are all fixed-width and ISO-ordered, so lexicographic order already is chronological order and there is nothing to parse.
 - **Filtering re-renders the listing in hand.** Every module has a `Populate` between its read and its merge; a keystroke never costs a round trip, the status slot gains **`· filtered`**, and a needle matching nothing draws its own empty text rather than the "nothing here" one, which would be a different and wrong claim. A table whose listing **failed** keeps saying so through both (the containers module holds a failure string per table, the updates module refuses to populate a catalog it could not read, the file explorer latches `_failed`): a sort click must never replace the reason a table is empty with an empty table.
+- **A heading cell may carry no order at all, and the layout does not depend on whether it does.** `ColumnHeader.SortKey` left empty is skipped by `TableSort` rather than cycled into a key nothing answers, which is what the storage module's Filesystem, Mounted at and Used columns use: those three describe what is stacked on a disk, a sort there reorders only the disks, and a heading that responds to a click by doing nothing is worse than one that does not offer. `TakeStripInset` therefore runs over **every** heading cell and not only the sortable ones (`TableSort._all` beside `_headers`), because where a cell sits in a strip has nothing to do with whether it has an order; insetting only the keyed ones left the unkeyed ones with no vertical padding while the strip had given its own up, so their hover sat 6px shorter than their neighbours' and the edge inset could go to the wrong cell entirely.
 - **Sort and filter are session state on the module**, never in `settings.json`. Switching host builds a new shell, which is what resets them.
 - **The strip's inset is inside the cells, not around them** (`TableSort.TakeStripInset`). A heading strip is a `Border` with `Padding="12,3"`, and left there it is padding *around* the cells: the hover stops short of the strip's top, bottom and left edge, so a heading reads as a pill floating in the strip with a dead margin beside it that looks like part of the cell and is not clickable. That is what `HubAccountMenu` says a status bar cell must not be, and a heading cell is the same kind of thing, so the strip gives its padding up, every cell carries the vertical half and the two end cells carry the half they are against. **Nothing moves a pixel**: the leftmost cell is widened by exactly what it took on, so every column after it starts where it did. The strips are `DockPanel`s with the flexible column as the fill child for the same reason, so the last cell is its whole column rather than the width of its label. Which cell is against which edge is read off the panel and not off document order, because among right-docked children the *first* is the furthest right (the file explorer docks from the right, its flexible column being the leftmost one).
 - **Every column but the leftmost stands 6px off the column line to its left**, heading and cell alike, so a value does not run up against the end of the one beside it and a heading's hover does not begin exactly where its label does. The row half is the `.cells` style in `App.axaml`, said once for all fourteen tables rather than on each of the fifty cells; the heading half is `ColumnHeader.CellInset`. The two have to agree to the pixel or a heading sits off its column. It is a **floor and not an addition**: the leftmost column is against the table's own 12px margin, which already insets it by more, and stacking the two would push that column out of line with the strip above it. The file explorer's row is the one written as a `DockPanel`, and there the direct `TextBlock` children *are* the columns docked from the right, so it needs no `nth-child` rule and would be wrong with one.
@@ -139,22 +140,29 @@ A filter box goes only where lists run long: VMs, containers, images, users, upd
 ### Modules
 
 The main window is a **shell**, not a screen. `Views/ShellView` owns the SSH connection and the status bar, and the `Views/MainWindow` it sits in owns the process lifetime; everything a user manages lives in an `IModule`, and the side menu is a `JbModuleTabControl`. Modules: **Dashboard** (the host itself, and
-the module the shell lands on), **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Software updates**, **User accounts**, **File explorer** and **Terminal**. See "Shared idioms" for the tab walk and the refresh policy.
+the module the shell lands on), **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Software updates**, **User accounts**, **Storage** (the host's block devices and disk health), **File explorer** and **Terminal**. See "Shared idioms" for the tab walk and the refresh policy.
 
 - **`Attach(ssh)` rather than a constructor parameter.** A `UserControl` declared in XAML needs a parameterless constructor, and modules are built before the connection exists. The shell hands each the same `SshConnectionManager` once, before the first `ActivateAsync`, and a module builds its own service on top. **A service two modules share is built off the connection rather than by either of them**: `PackageService.For(ssh)` is one instance per connection, held in a weak table keyed on it, which is how the Dashboard and Software updates are two views of one listing without the shell knowing either exists. See "One listing, two pages". The connection stays the shell's to dispose. **Once, and there is no re-attach**, which is why switching host builds a new shell rather than re-pointing this one. That is a statement about the module set and not about the window: the shell is a `UserControl` (`Views/ShellView`) and the window swaps one for another, so a switch costs a new module set and keeps everything the window owns. See "Saved hosts".
 - **The status bar is two slots and a place to hang a control, and a module owns all three while on screen.** `Status` is the left slot (row counts, "Starting win11 (1/2)..."), `HostCapabilities` the right ("KVM ready", "docker 27.3.1"), and one `StatusChanged` event covers them. The file explorer and terminal modules used to write `user@host` into the right slot, and no longer do: the host cell at the far left of the same bar names the host permanently, and saying it twice in one strip is worse than an empty slot, which is what the shell already draws for a module with nothing to report. The shell repaints from the *incoming* module's strings on every switch and ignores a raise from a module that is not active. Throughput is the strip's third element and is the **shell's**, as is the host cell at the far left: its 1 s timer never stops, because `SpiceTraffic.BytesTransferred` and `NbdServer.TotalBytesServed` keep climbing whichever module is on screen. A module has no footer, which is why a Cancel button for a long operation has to go in a transfer strip of its own.
-- **`IModule.StatusWidget` is the far-right end of that bar, and it exists for what a string cannot be: something to click.** It **defaults to null**, so the seven modules with nothing to put there say nothing at all and adding a module stays a `TabItem` plus a `UserControl`. The shell reads it once per switch and **reparents the module's own instance** rather than copying anything out of it, so what the last probe wrote is still on it when the user comes back; a module that returned a fresh control per activation would blank itself. The one filler is the containers module's Docker Hub account. Two things keep the bar honest. The widget takes its separator with it, or the strip would end on a rule with nothing after it. And the **height lives on the inner panel, not in the border's padding**: a `MinHeight` of 26 inside a `10,0` border, so a hanging control can fill the strip **top to bottom** and its hover reads as a status bar cell rather than a pill floating in one, while the text beside it is centred in the same row. The bar is one height whether or not anything is hanging in it, measured 27px either way, which is what it was before there was a slot at all. **Sideways it is the other way round: the two menu cells cancel the border's 10px side padding with a negative margin and carry that same 10px as their own `Padding`**, which lands inside the `Root` border the hover paints, and the separator beside each drops its margin on that side to pay for it. Nothing moves a pixel; what changes is that the inset lights up with the cell instead of sitting beside it as a dead strip that looks like part of it and is not clickable. That is the rule for anything hung in the slot: the slot reaches the window edge and the widget owns its own inset.
+- **`IModule.StatusWidget` is the far-right end of that bar, and it exists for what a string cannot be: something to click.** It **defaults to null**, so the eight modules with nothing to put there say nothing at all and adding a module stays a `TabItem` plus a `UserControl`. The shell reads it once per switch and **reparents the module's own instance** rather than copying anything out of it, so what the last probe wrote is still on it when the user comes back; a module that returned a fresh control per activation would blank itself. The one filler is the containers module's Docker Hub account. Two things keep the bar honest. The widget takes its separator with it, or the strip would end on a rule with nothing after it. And the **height lives on the inner panel, not in the border's padding**: a `MinHeight` of 26 inside a `10,0` border, so a hanging control can fill the strip **top to bottom** and its hover reads as a status bar cell rather than a pill floating in one, while the text beside it is centred in the same row. The bar is one height whether or not anything is hanging in it, measured 27px either way, which is what it was before there was a slot at all. **Sideways it is the other way round: the two menu cells cancel the border's 10px side padding with a negative margin and carry that same 10px as their own `Padding`**, which lands inside the `Root` border the hover paints, and the separator beside each drops its margin on that side to pay for it. Nothing moves a pixel; what changes is that the inset lights up with the cell instead of sitting beside it as a dead strip that looks like part of it and is not clickable. That is the rule for anything hung in the slot: the slot reaches the window edge and the widget owns its own inset.
 - **`Shutdown` runs on every module, not just the visible one**, since a hidden module still owns the console windows and NBD streams it opened.
 
 #### Which modules a host gets
 
-Four of the eight are drawn only when the host has the tooling they are about, decided by one
+Five of the nine are drawn only when the host has the tooling they are about, decided by one
 un-elevated `command -v` round trip the shell owns (`ShellView.SyncModuleVisibilityAsync`,
 `Core/Services/HostTools`). **Virtual machines** needs `virsh`, **Containers** needs `docker`,
-**Services** needs `systemctl`, and **Software updates** needs `PackageManagers.Detect` to answer
-something other than `NullPackageManager`. Dashboard, User accounts, File explorer and
-Terminal are unconditional: an SSH connection already implies a filesystem, a shell, an account
-database and a `/proc`.
+**Services** needs `systemctl`, **Storage** needs `lsblk`, and **Software updates** needs
+`PackageManagers.Detect` to answer something other than `NullPackageManager`. Dashboard, User
+accounts, File explorer and Terminal are unconditional: an SSH connection already implies a
+filesystem, a shell, an account database and a `/proc`.
+
+`lsblk` is on every host with util-linux, which is every host worth calling Linux, so that one
+looks like a probe for nothing and is not: it is the tool the module cannot draw a single row
+without, and naming it is what makes the module answer for itself rather than the shell assuming
+on its behalf. **`smartctl` is deliberately not named beside it**, which is the more interesting
+half: it would take the whole page away over one column, when everything else on that page is
+exactly as useful without it. See "Storage".
 
 - **Hidden, and it is the app's one page-level exception to disabled-with-a-reason.** That rule
   protects a command somebody goes looking for on a page they are already on, which is why the
@@ -882,7 +890,7 @@ free to disagree about the same sentence.
   ever installed because somebody arrived on a page.
 - **`IModuleNavigator` is a second interface rather than another defaulted `IModule` member**, because
   an event is the one thing that cannot be defaulted on an interface (it has nowhere to keep its
-  handlers), and seven of the eight modules never hand the user anywhere. The shell subscribes to
+  handlers), and eight of the nine modules never hand the user anywhere. The shell subscribes to
   whichever modules implement it, so adding a module stays a `TabItem` plus a `UserControl`, and it
   selects the tab whose content is of the type it was handed, so **the shell still names no module**.
   A type with no visible tab is ignored, which is the right answer for a module this host has no
@@ -928,6 +936,183 @@ Password quality is the host's business. The dialog checks only that the two box
 `MessageDialog.Choose` rather than `Confirm`, because a delete has a second question and asking it in a follow-up dialog would put it after the point of no return. **Keeping the home directories is the primary**, which is what Enter presses, because the more destructive of two irreversible options must not be the one a reflex chooses (Cockpit defaults its "delete files" box to unticked for the same reason). Both buttons say "Delete" out loud. The prompt names up to five accounts and falls back to a count past that, because `MessageDialog` is a fixed 420 wide and sizes to its content, and it says that files owned elsewhere stay where they are, still owned by a UID with no name.
 
 A group that is an account's own group cannot be deleted; that refusal is `groupdel`'s to make and is reported in its own words rather than pre-empted.
+
+## Storage
+
+`StorageModule` is what the host is made of: its disks, everything layered on them, what is mounted
+where, and what SMART says about the drives underneath it all. `Views/StorageModule`,
+`Views/StorageRow`, `Views/StorageDetailsView`, `Core/Services/StorageService`,
+`Core/Models/StorageDevice`.
+
+**Modelled on Cockpit's Storage page, and on the read-only half of it.** Cockpit is also where a
+disk is partitioned, formatted, grown, encrypted and put into a volume group; none of that is here.
+What is here is the half that answers "what is this machine, and is any of it about to fail", which
+is the half a libvirt host's operator needs before the guests find out for them. Nothing forecloses
+the rest: the listing a format dialog would need is the listing this module already builds. It is
+also **one table where Cockpit is now one table**, which is the shape Cockpit itself arrived at in
+307 after years of panels: a disk used to appear in three of them and none of them showed the stack.
+
+- **`lsblk -J` is the whole listing, and that is the decision the module hangs off.** One
+  un-elevated round trip returns the entire tree correctly nested: disk, partition, LUKS container,
+  LVM logical volume, MD array, loop device, and the filesystem and mount point on each. Measured at
+  **8 ms** on a three-disk host, 25 ms with the fstab and swap reads beside it. So partitions, LUKS
+  and LVM cost nothing extra and there is no per-device round trip anywhere, which was the VM list's
+  original latency problem.
+- **Un-elevated, and `df` is not used.** `lsblk`, `/etc/fstab` and `/proc/swaps` are all
+  world-readable, so a read never puts a sudo prompt in front of somebody who only wanted to look,
+  which is `FileExplorerModule`'s rule and the sampler's. `lsblk` carries `FSSIZE`/`FSUSED`/`FSAVAIL`
+  itself, so the usage figures arrive on the same record as the device they are about and the two
+  **cannot disagree**, which a second `df` pass would eventually make them.
+- **The JSON rides back base64'd, and the column set has a fallback.** A filesystem `LABEL` is host
+  data and nothing here should have to reason about which control characters util-linux escapes, so
+  base64 makes the question not arise, exactly as it does for a compose file. The fallback is the
+  one fragile thing: **lsblk fails the whole invocation on a column it does not know**, and the rich
+  set is not old (`MOUNTPOINTS` is util-linux 2.37, `FSSIZE`/`FSUSED`/`FSAVAIL` are 2.33), so a
+  host older than either would draw no table at all rather than a table with two columns blank. The
+  script tries the rich set and falls back to one valid for a decade; the parser reads `MOUNTPOINTS`
+  and `MOUNTPOINT` both, so the fallback loses only the usage columns. Verified both ways.
+- **Parsed with `System.Text.Json`, not as tagged records.** The tagged-record idiom is for text this
+  app has to invent a format for; lsblk emits JSON natively, and `DockerService.InspectAsync` is the
+  precedent. The envelope around it is still tagged records, because the version, the fstab lines and
+  the swap devices are three more answers in the same round trip. **Every reader takes a number or a
+  bool as either a JSON scalar or a string**, because lsblk before 2.33 quoted all of them, and that
+  is three lines against an exception on an older host.
+- **A row is keyed by its place in the tree, not by its device**, and that is not defensive: lsblk
+  prints a logical volume under **every** physical volume its group spans, an MD array under every
+  member disk, and a multipath device under every path. On any host with a two-disk volume group the
+  same `dm-1` is two rows, so a kname-keyed merge would collapse them and then hand `Reorder` one row
+  twice. The key is the chain of kernel names down to the row (`nvme0n1/nvme0n1p3/dm-0/dm-1`).
+  Within the chain each segment is the **kernel's** name rather than lsblk's `NAME`, because a
+  device-mapper node is called `vgmint-root` and that moves when somebody renames the volume group,
+  where `dm-1` does not; a merge key that moves rebuilds the row under whoever is reading it.
+- **A flat list drawn as a tree, because there is no `TreeView` in this app and none was added.** One
+  would need a `ControlTheme` `JetBrainsClassic.axaml` does not have, and it would give up
+  `TableSort`, `TableRows.Merge` and `JbTableRow` to gain an indent. So a row carries its own depth
+  and the module flattens the tree into the rows, which keeps every table affordance working
+  unchanged. The indent and the chevron's empty slot are `Border`s with a width rather than margins,
+  so the row's hover paints them instead of leaving a dead strip down the left, which is the rule the
+  status bar's cells and the heading strip's inset both already follow. The chevron is a `Button` in
+  the row and the module listens with one `AddHandler(Button.ClickEvent, ...)`, the idiom the services
+  module uses for its in-row autostart tick. Folding is **collapsed**-keyed rather than expanded, so
+  the default is open with an empty set and no pass over the listing to fill one in; and it keys on
+  the tree path, so folding a volume group shut under one disk says nothing about the other.
+- **A sort reorders the disks and never what is stacked on them.** A partition table's order is a
+  fact about the disk, and floating a LUKS mapping above the EFI partition by size turns a stack into
+  a pile. So four of the seven columns carry a `SortKey` and three do not: Filesystem, Mounted at and
+  Used only ever describe a child, and a heading that answers a click by doing nothing is worse than
+  one that does not offer. That made this the first table in the app to mix sortable and unsortable
+  heading cells, which is what `TableSort._all` is for; see "Shared idioms". Sorting by Health puts
+  the **worst first**, because being shown the healthy disks first is not a thing anybody clicks for,
+  which is the argument that already puts security updates at the top of their table.
+- **No filter box.** The rule draws that line at lists that run long, and even a well-stocked host is
+  tens of rows; more to the point a needle over a tree either hides the parent that gives a row its
+  meaning or drags it along as a non-match, and neither is a table.
+- **A Refresh button, no poll and no event tail.** Nothing on a host announces a disk being plugged
+  in that VirtDeck can hear without root and a `udevadm monitor` tail, and a device layout changes
+  about as often as an account does, so this is the User accounts answer rather than the services one.
+  Live capacity is the **Dashboard's** job and stays there: its filesystem table rides the metrics
+  sampler at no round trip of its own, so the two are not one fact read twice. `Deactivate` cancels
+  the read and saves the splitter and does nothing else, because there is no timer, no tail, no second
+  connection and no window here.
+- **Three empty tables that are three different answers**: no `lsblk` on the host, a listing that
+  failed with the host's own reason on it, and a host that genuinely reports no block devices.
+
+### Disk health
+
+One elevated round trip over the whole disks, never one per row, reading `smartctl -j`. It is a
+second pass rather than part of the listing, and the order is the point: the layout answers in about
+25 ms un-elevated, so the table is on screen before the SMART pass is even sent, and that pass can
+take most of a second on a host with eight spinning disks.
+
+**It is a summary and not an attribute table.** The Health cell says the state and the temperature,
+the details pane adds the power-on time and the endurance, and the tooltip says why. Cockpit shows
+almost exactly this and no more (issue #15010, "detailed SMART info", has been open for years);
+what it shows comes from udisks2 over D-Bus, which is why none of its implementation transfers here.
+
+- **Nothing carries `|| exit $?`, and this is not the usual best-effort fence.** smartctl's exit
+  status is a **bitmask**: bit 0 a command-line error, bit 1 the device could not be opened, bit 2 a
+  SMART command failed, and **bit 3 the disk is failing**. A non-zero exit is a reading and not an
+  error, and the most important reading this module can produce sets it. Bits 4 to 7 are noisier
+  still: a five-year-old but perfectly good disk with one past-threshold usage attribute and a couple
+  of logged errors exits **96**, so treating non-zero as failure would paint most of a home lab red.
+  Only bit 3 is a verdict, and it is read from the JSON's own `smartctl.exit_status` rather than from
+  the process, which also keeps the runner from throwing.
+- **`-n standby,3`, and the `,3` is load-bearing.** Reading SMART **spins the platters up** (smartctl
+  says so in its own source), which is 5 to 15 seconds and defeats whatever power management the user
+  configured; on a NAS with eight parked drives an unguarded page would wake the whole array every
+  time somebody glanced at it. `-n standby` skips a sleeping disk, but its **default skip status is
+  2, which is the same bit as "device open failed"**, so without the override "asleep" and "could not
+  be opened" arrive as one answer. 3 is a value nothing else produces, which keeps them two, and
+  asleep is drawn as its own state saying it was deliberately not woken.
+- **`-d` is passed explicitly wherever `smartctl --scan` knows a type**, because `-n` alone leaks:
+  the commands smartctl issues to *autodetect* a type will themselves spin the disk up, which the man
+  page says out loud. The scan is a glob over `/dev` that opens nothing, so it is free. It lists an
+  NVMe **controller** (`/dev/nvme0`) where lsblk lists a **namespace** (`/dev/nvme0n1`), which is why
+  the namespace has a case of its own rather than being expected to match; anything the scan does not
+  know at all falls through to autodetection, which is the honest last resort.
+- **`-A` is fetched although no attribute table is drawn.** On ATA the temperature, the power-on
+  hours and the reallocated sector count are not in `-H -i` at all: all three are SMART attributes.
+  `-A` is what makes the summary *exist*. The client keeps the numbers it draws and discards the rest
+  of the array, so nothing is held that is not shown.
+- **Six states, and the sixth is the one the column is for.** Green PASSED, **amber PASSED-but**,
+  red FAILING, plus asleep, no-SMART and unknown in grey. The amber is a pass with a non-zero
+  reallocated or pending sector count, a failing pre-fail attribute, an NVMe critical warning, media
+  errors, or spare capacity at its threshold: **a disk with four hundred reallocated sectors still
+  reports PASSED**, and drawing that green is the one wrong answer this reading can give. The red is
+  `JbErrorForeground`'s `#C75450`, this being the second list after the services one where grey would
+  bury the most important row. "Failing pre-fail attribute" counts only entries marked
+  `when_failed: "now"` that are pre-fail rather than usage, which is udisks2's own definition and what
+  keeps an old disk with a worn usage counter from being drawn as a sick one.
+- **Only a disk gets a dot.** A partition or a logical volume is a fact; a disk is a thing that can
+  be dying. Same rule that gives a container a dot and an image none.
+- **"Installed" and "can be answered" are two questions.** `-j` arrived in smartmontools **7.0**
+  (December 2018) and Debian 10 still ships 6.6, so an older one is a **stated answer** rather than a
+  column of blanks: it is here, it just cannot be asked this way, and the status bar says which
+  version and why. A host with no smartmontools at all says that instead.
+- **`smartctl` is deliberately not in `RequiredTools`.** Naming it would take the whole page away
+  over one column, when the rest of the page is exactly as useful without it. Instead the module is on
+  screen, the Health column reads "not available" with the reason on hover, and **every activation
+  re-probes**, so installing the package mid-session is not a dead end. That is the absent-tooling
+  rule as it applies to a command somebody may go looking for; hiding a whole page is reserved for a
+  module whose entire content would be a sentence saying the tooling is missing.
+- **A device that cannot answer is not a device nobody asked.** virtio-blk has no ATA or SCSI
+  passthrough at all, so `/dev/vda` is never going to have SMART and `smartctl --scan` does not even
+  list it; that reads "No SMART" rather than "Unknown", because the second suggests it might. This is
+  the ordinary case inside a VM.
+
+### The details pane
+
+`StorageDetailsView`, in the bottom pane with a `GridSplitter`, exactly as `VmDetailsView` sits in
+the VM module, with its own height in `AppSettings` (a second key rather than a shared one: the VM
+pane carries a screenshot preview and wants to be tall, this one is two columns of short facts, and
+somebody who drags one has said nothing about the other).
+
+It is built from the Dashboard's `.factlabel`/`.factvalue` pair rather than `VmDetailsView`'s
+`DetailSection`/`DetailRow` templates, which are declared inside that view and would have to be
+lifted out for one caller. Two columns split **by meaning and not by count**: what the device is on
+the left, what is on it and how full it is on the right.
+
+- **A disk** names the hardware, because the model and the serial identify a physical thing somebody
+  may have to walk over and pull out of a bay: model, serial, firmware, bus, media, capacity, sector
+  sizes, partition table, and one health line. **Both sector sizes are shown when they differ**,
+  because that pair is what explains an alignment warning somebody may be chasing.
+- **A partition, logical volume or LUKS container** says where it sits and what is on it, and adds
+  the one fact that cannot be read off the device: **whether `/etc/fstab` names it**, so "formatted,
+  not mounted, and not meant to be" is a readable state. The match tries `UUID=`, `PARTUUID=`,
+  `LABEL=`, `PARTLABEL=` and a device path including the `/dev/mapper/` form, because matching only
+  one of them would report a configured filesystem as unconfigured on most hosts. A swap volume is
+  answered from `/proc/swaps` rather than left reading "not mounted", since it is mounted in every
+  sense that matters and in none that `statvfs` understands.
+- **Two empty states**, because nothing selected and several selected are different answers.
+- The only bound `Foreground` in the pane is the one title line, for `VmDetailsView`'s reason: a null
+  `IBrush` is a real local value that suppresses the inherited one rather than falling back to it, so
+  Avalonia draws nothing at all. `StorageRow.HealthBrush` never returns null for the same reason,
+  which is what keeps the words "not available" visible on exactly the host that needs to read them.
+
+**Not here yet:** the SMART attribute table and self-tests; mounting and unmounting; formatting and
+partitioning; LVM, MD RAID and LUKS management; NFS and iSCSI; per-disk IO graphs (the sampler
+already reads `/proc/diskstats` but sums it); and network filesystems, which have no block device and
+are already in the Dashboard's table.
 
 ## File explorer
 

@@ -24,6 +24,14 @@
          and a gear is filled art: drawn as a stroke at this size its teeth close up into a blob, so
          the idea of a setting is carried by the sliders instead. -->
     <StreamGeometry x:Key="IconServices">M1,5 H15 M1,11 H15 M4,3.5 H6 V6.5 H4 Z M10,9.5 H12 V12.5 H10 Z</StreamGeometry>
+    <!-- A stack of three platters, seen edge on: an ellipse for the top one and two arcs for the
+         rims below it. The obvious art for storage is a hard disk, and at 16x16 stroked a disk is a
+         rounded rectangle with a dot in it, which reads as nothing at all; a stack reads as a stack
+         at any size. The rims are half-ellipses drawn as two quarter sweeps for the reason
+         IconDashboard and IconUserAccounts give: one 180 degree arc leaves the renderer no way to
+         tell which of the two halves was meant. -->
+    <StreamGeometry x:Key="IconStorage">M8,1.5 A6,6 0 0 1 14,4 A6,6 0 0 1 8,6.5 A6,6 0 0 1 2,4 A6,6 0 0 1 8,1.5 Z M2,4 V8 A6,6 0 0 0 8,10.5 A6,6 0 0 0 14,8 V4 M2,8 V12 A6,6 0 0 0 8,14.5 A6,6 0 0 0 14,12 V8</StreamGeometry>
+
     <!-- An arrow coming down into a tray. The arrow alone is a download and the tray alone is an
          inbox; together they read as something arriving on the machine, which is what this module is
          for. Same 16x16 stroked box as the five above, so it sits at their weight. -->
@@ -148,6 +156,21 @@
           </StackPanel>
         </TabItem.Header>
         <vm:UserAccountsModule />
+      </TabItem>
+
+      <!-- Between the accounts and the explorer: the explorer browses what these devices hold, so
+           the two read as a pair, and nothing is inserted above Virtual machines, which is the app's
+           headline subject. -->
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconStorage}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Storage" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:StorageModule />
       </TabItem>
 
       <TabItem>

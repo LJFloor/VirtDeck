@@ -1,0 +1,169 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.StorageModule"
+             x:DataType="vm:StorageRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by the heading strip and every row, so they stay aligned. -->
+    <x:Double x:Key="ColDevice">280</x:Double>
+    <x:Double x:Key="ColKind">110</x:Double>
+    <x:Double x:Key="ColSize">100</x:Double>
+    <x:Double x:Key="ColFs">130</x:Double>
+    <x:Double x:Key="ColMount">170</x:Double>
+    <x:Double x:Key="ColUsed">140</x:Double>
+
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- A Refresh button and nothing else. Nothing on a host announces a disk being plugged in that
+         VirtDeck can hear without root and a udev tail, and a device layout changes about as often
+         as an account does, so this is the User accounts answer rather than the services one. No
+         command here creates anything, so nothing carries Classes="accent". -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+          <!-- A disabled control is not hit-testable, so the tooltip hangs off an enabled parent
+               and reads the reason the code-behind wrote into the button's Tag. -->
+          <Border Background="Transparent" ToolTip.Tip="{Binding #RefreshButton.Tag}">
+            <Button Name="RefreshButton" Theme="{StaticResource JbIconButton}">
+              <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                    Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+            </Button>
+          </Border>
+        </StackPanel>
+        <Panel />
+      </DockPanel>
+    </Border>
+
+    <!-- Four of the seven columns sort and three deliberately do not, and that is not an oversight.
+         A sort here reorders the **disks** and never what is stacked on them: a partition table's
+         order is a fact about the disk, and floating a LUKS mapping above the EFI partition by size
+         turns a stack into a pile. So the columns that carry an order are the ones that mean
+         something about a whole disk, and Filesystem, Mounted at and Used, which only ever describe
+         a child, carry no SortKey at all. TableSort skips a cell with an empty key rather than
+         cycling into one nothing answers, which is exactly what that affordance is for.
+
+         Indent clears the chevron slot (16) plus the state dot's own (14) so the heading sits over
+         the name rather than over the art in front of it. -->
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel Name="DeviceHeaderStrip">
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Device" SortKey="device" Indent="30"
+                        Width="{StaticResource ColDevice}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Kind" SortKey="kind"
+                        Width="{StaticResource ColKind}"
+                        Tip="What the device is. A disk reads SSD or HDD, because that it is a disk is already said by its place in the tree." />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
+                        Width="{StaticResource ColSize}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Filesystem"
+                        Width="{StaticResource ColFs}"
+                        Tip="The filesystem on it, or the partition type where there is none. A whole disk holds a partition table rather than a filesystem, so it says nothing here." />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Mounted at"
+                        Width="{StaticResource ColMount}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Used"
+                        Width="{StaticResource ColUsed}" />
+        <c:ColumnHeader Text="Health" SortKey="health"
+                        Tip="What the drive's own SMART reports. Sorting puts the disks worth looking at first." />
+      </DockPanel>
+    </Border>
+
+    <!-- List, splitter, details pane. A Grid rather than a third DockPanel.Dock because a
+         GridSplitter can only resize rows it is a child of. The pane's row height is restored from
+         settings in the constructor and saved back on Deactivate, as in the VM module. -->
+    <Grid Name="StorageSplit" RowDefinitions="*,4,200">
+
+      <Panel Grid.Row="0">
+        <!-- Multiple, so Copy device path can take several at once and so the details pane has a
+             "several selected" state to draw rather than showing one of them as if it were the
+             selection. The VM list is the same. -->
+        <ListBox Name="DeviceList" SelectionMode="Multiple" Background="Transparent" Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ContextMenu>
+            <ContextMenu Name="DeviceMenu">
+              <MenuItem Name="MenuCopyPath" Header="Copy device path" />
+              <MenuItem Name="MenuExpandAll" Header="Expand all" />
+              <MenuItem Name="MenuCollapseAll" Header="Collapse all" />
+            </ContextMenu>
+          </ListBox.ContextMenu>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:StorageRow">
+              <StackPanel Classes="cells" Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+
+                <!-- The tree lives in this one cell: a spacer as wide as the row is deep, a
+                     chevron where there is something under it, and the state dot. Both the spacer
+                     and the chevron's empty slot are Borders with a width rather than margins, so
+                     the row's hover paints them along with everything else instead of leaving a
+                     dead strip down the left. -->
+                <DockPanel Width="{StaticResource ColDevice}">
+                  <Border DockPanel.Dock="Left" Width="{Binding IndentPixels}" />
+
+                  <Button DockPanel.Dock="Left" Theme="{StaticResource JbToolButton}"
+                          IsVisible="{Binding HasChildren}" Padding="0" Width="16" Height="16"
+                          MinHeight="0" VerticalAlignment="Center">
+                    <Path Data="{Binding ChevronData}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                  <Border DockPanel.Dock="Left" Width="16" IsVisible="{Binding !HasChildren}" />
+
+                  <!-- Only a disk gets a dot: a partition is a fact, a disk is a thing that can be
+                       dying. The slot is kept at its width either way so every name in the column
+                       starts at the same place. -->
+                  <Panel DockPanel.Dock="Left" Width="14">
+                    <Ellipse Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center"
+                             Fill="{Binding StateBrush}" IsVisible="{Binding IsDisk}"
+                             ToolTip.Tip="{Binding HealthTip}" />
+                  </Panel>
+
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <TextBlock Text="{Binding TypeText}" Width="{StaticResource ColKind}"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding SizeText}" Width="{StaticResource ColSize}"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding FsText}" Width="{StaticResource ColFs}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding MountText}" Width="{StaticResource ColMount}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+
+                <!-- A Border and not a bare StackPanel: the .cells gutter style in App.axaml reaches
+                     direct TextBlock and Border children only, so a panel put here would sit 6px
+                     left of the column it belongs to. -->
+                <Border Width="{StaticResource ColUsed}">
+                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding UsedText}" Width="34" VerticalAlignment="Center" />
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}"
+                                 Width="90" Height="6" VerticalAlignment="Center"
+                                 IsVisible="{Binding HasUsage}" />
+                  </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding HealthText}" Foreground="{Binding HealthBrush}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding HealthTip}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Why the table is empty, so a host with no lsblk, a listing that failed and a host with
+             genuinely nothing on it never look the same. -->
+        <TextBlock Name="DeviceEmpty" Opacity="0.6" IsVisible="False"
+                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Panel>
+
+      <GridSplitter Grid.Row="1" Background="#22808080" ResizeDirection="Rows" />
+
+      <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+        <vm:StorageDetailsView Name="Details" />
+      </Border>
+
+    </Grid>
+  </DockPanel>
+</UserControl>

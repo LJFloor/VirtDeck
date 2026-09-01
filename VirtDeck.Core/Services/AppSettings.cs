@@ -122,6 +122,26 @@ namespace VirtDeck.Services
                 ? VmDetailsHeight
                 : DefaultVmDetailsHeight;
 
+        /// <summary>
+        /// Height in pixels of the storage module's details pane, the sibling of
+        /// <see cref="VmDetailsHeight"/> and clamped through the same kind of accessor for the same
+        /// reason: a hand-edited or corrupted number must never push a table off the screen.
+        ///
+        /// <para>It is a second key rather than one shared "details pane height", because the two
+        /// panes hold different things: the VM pane carries a screenshot preview and wants to be
+        /// tall, the storage pane is two columns of short facts and does not. Somebody who drags one
+        /// has not said anything about the other.</para>
+        /// </summary>
+        public double StorageDetailsHeight { get; set; } = DefaultVmDetailsHeight;
+
+        /// <summary>The stored pane height, or the default when it is absent, unset or out of range.</summary>
+        public double StorageDetailsHeightOrDefault =>
+            double.IsFinite(StorageDetailsHeight)
+            && StorageDetailsHeight >= MinVmDetailsHeight
+            && StorageDetailsHeight <= MaxVmDetailsHeight
+                ? StorageDetailsHeight
+                : DefaultVmDetailsHeight;
+
         /// <summary>Per-VM console preferences, keyed by domain UUID.</summary>
         public Dictionary<string, VmSettings> Vms { get; set; } = new();
 

@@ -28,7 +28,17 @@ namespace VirtDeck.Avalonia.Controls;
 /// </summary>
 public sealed class TableSort
 {
+    /// <summary>The columns that carry an order, which are the ones that click and wear a caret.</summary>
     private readonly List<ColumnHeader> _headers = new();
+
+    /// <summary>
+    /// <b>Every</b> heading cell in the strip, sortable or not, which is what the strip's inset is
+    /// handed to. Kept apart from <see cref="_headers"/> because the two answer different questions:
+    /// whether a column has an order of its own, and where a cell sits in a row of them. Only the
+    /// first is about sorting, and a table that mixes the two would otherwise draw its unsortable
+    /// headings 6px shorter than the rest. See <see cref="TakeStripInset"/>.
+    /// </summary>
+    private readonly List<ColumnHeader> _all = new();
 
     /// <param name="strip">The heading strip. Every ColumnHeader below it is claimed.</param>
     /// <param name="initialKey">The column sorted on arrival, or null for the table's own order.</param>
@@ -40,6 +50,7 @@ public sealed class TableSort
 
         foreach (var header in strip.GetLogicalDescendants().OfType<ColumnHeader>())
         {
+            _all.Add(header);
             if (header.SortKey.Length == 0) continue; // a column with no order of its own
             _headers.Add(header);
             header.Clicked += OnHeaderClicked;
@@ -72,10 +83,18 @@ public sealed class TableSort
     /// columns from the left and let the last one fill, while the file explorer docks from the right
     /// because its flexible column is the leftmost one. Among right-docked children the <b>first</b>
     /// is the furthest right, which is the whole of the difference.</para>
+    ///
+    /// <para><b>This runs over every heading cell and not only the sortable ones</b>, because where
+    /// a cell sits in a strip has nothing to do with whether it carries an order. The storage
+    /// module is the first table to mix the two: three of its seven columns describe what is stacked
+    /// on a disk rather than the disk itself, and a sort there would be a dead click, so they carry
+    /// no key. Insetting only the keyed cells would leave those three with no vertical padding while
+    /// the strip has given its own up, so their hover would sit 6px shorter than their neighbours'
+    /// and the edges could be handed to the wrong cell entirely.</para>
     /// </summary>
     private void TakeStripInset(ILogical strip)
     {
-        if (_headers.Count == 0) return;
+        if (_all.Count == 0) return;
         if (strip is not Control panel || panel.Parent is not Border border) return;
 
         var inset = border.Padding;
@@ -83,13 +102,13 @@ public sealed class TableSort
 
         border.Padding = new Thickness(0);
 
-        var rightDocked = _headers.Where(h => DockPanel.GetDock(h) == Dock.Right).ToList();
-        var rightmost = rightDocked.Count > 0 ? rightDocked[0] : _headers[^1];
+        var rightDocked = _all.Where(h => DockPanel.GetDock(h) == Dock.Right).ToList();
+        var rightmost = rightDocked.Count > 0 ? rightDocked[0] : _all[^1];
         var leftmost = rightDocked.Count > 0
-            ? _headers.First(h => DockPanel.GetDock(h) != Dock.Right)
-            : _headers[0];
+            ? _all.First(h => DockPanel.GetDock(h) != Dock.Right)
+            : _all[0];
 
-        foreach (var header in _headers)
+        foreach (var header in _all)
             header.TakeStripInset(new Thickness(
                 header == leftmost ? inset.Left : 0,
                 inset.Top,
