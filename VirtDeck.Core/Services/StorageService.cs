@@ -595,5 +595,416 @@ namespace VirtDeck.Services
                 .Where(m => m.Length > 0)
                 .ToList();
         }
+
+        // ---- one disk, in full ------------------------------------------------
+
+        // The disk details window's own read, and it is a **second** read rather than a richer
+        // version of the pass above. That one runs over every disk on the host to fill four summary
+        // columns and has to stay cheap; this one runs for the single disk a window was opened on,
+        // so it can afford `-x` and everything that comes with it: the whole attribute table, the
+        // self-test log, the error log counts and the identity block.
+        //
+        // Everything the pass above argues for is kept here and none of it is optional:
+        // `smartctl --scan` to resolve `-d` explicitly, because the commands smartctl issues to
+        // *autodetect* a type will themselves spin the disk up; `-n standby,3` so a parked drive is
+        // not woken to be asked, with the `,3` that keeps "asleep" and "could not be opened" two
+        // different answers; and **no `|| exit $?`**, because smartctl's exit status is a bitmask in
+        // which only bit 3 is a verdict.
+        //
+        // **The cap is not tidiness.** `-x` is 20-80 KB on an ordinary drive, but the payload comes
+        // off a host and rides back through the command channel, so a device whose error log is
+        // pathological must not be able to pull megabytes through it. Oversized is reported as a
+        // value (the `z` tag) rather than truncated, because half a JSON document is not a smaller
+        // answer, it is an unparseable one.
+        private const string DetailScript = """
+            export LC_ALL=C
+            command -v smartctl >/dev/null 2>&1 || exit 0
+            printf 'v\t%s\n' "$(smartctl --version 2>/dev/null | head -n 1)"
+
+            scan=$(smartctl --scan 2>/dev/null)
+
+            DEVICE
+            dev="${d[0]}"
+            t=$(printf '%s\n' "$scan" | awk -v want="$dev" '$1 == want { print $3; exit }')
+            if [ -z "$t" ]; then
+              case "$dev" in
+                /dev/nvme*) t=nvme ;;
+              esac
+            fi
+            if [ -n "$t" ]; then
+              out=$(smartctl -j STANDBY -d "$t" -x -- "$dev" 2>/dev/null)
+            else
+              out=$(smartctl -j STANDBY -x -- "$dev" 2>/dev/null)
+            fi
+            [ -n "$out" ] || exit 0
+
+            size=$(printf '%s' "$out" | wc -c)
+            if [ "$size" -gt CAP ]; then
+              printf 'z\t%s\n' "$size"
+              exit 0
+            fi
+
+            printf 'h\t%s\t%s\n' "$dev" "$(printf '%s' "$out" | base64 | tr -d '\n')"
+            exit 0
+            """;
+
+        /// <summary>How much of a <c>-x</c> answer will be carried back. See the note above.</summary>
+        private const int DetailCapBytes = 4 * 1024 * 1024;
+
+        /// <summary>
+        /// Everything SMART says about one disk, in one elevated round trip.
+        ///
+        /// <para><paramref name="wake"/> drops the <c>-n standby,3</c> guard, and is what the Health
+        /// tab's "Read anyway" asks for. It is a parameter rather than the default because reading
+        /// SMART spins the platters up, which is 5 to 15 seconds and defeats whatever power
+        /// management the user configured; that is a cost the person looking at the window should be
+        /// the one to accept.</para>
+        /// </summary>
+        public async Task<DiskDetail> ReadDiskDetailAsync(
+            string device, bool wake = false, CancellationToken ct = default)
+        {
+            if (device.Length == 0) return DiskDetail.NotProbed;
+
+            var script = DetailScript
+                .Replace("DEVICE", ShellScript.ArrayFrom("d", [device]).TrimEnd())
+                .Replace("STANDBY", wake ? "" : "-n standby,3")
+                .Replace("CAP", DetailCapBytes.ToString());
+
+            var raw = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+            return ParseDetail(device, raw);
+        }
+
+        internal static DiskDetail ParseDetail(string device, string raw)
+        {
+            var version = "";
+            var json = "";
+            var oversized = "";
+
+            foreach (var (tag, text) in PackageScripts.Records(raw))
+            {
+                switch (tag)
+                {
+                    case "v":
+                        version = text.Trim();
+                        break;
+
+                    case "z":
+                        oversized = text.Trim();
+                        break;
+
+                    case "h":
+                    {
+                        var f = text.Split('\t', 2);
+                        if (f.Length == 2) json = PackageScripts.Decode(f[1].Trim());
+                        break;
+                    }
+                }
+            }
+
+            if (version.Length == 0) return DiskDetail.NotProbed;
+
+            // The same gate the summary pass applies, for the same reason: `-j` arrived in
+            // smartmontools 7.0 and Debian 10 still ships 6.6, so "installed" and "can be asked this
+            // way" are two questions and the tab draws the difference.
+            if (MajorVersion(version) is { } major && major < 7)
+                return new DiskDetail
+                {
+                    Device = device,
+                    Probed = true,
+                    Version = version,
+                    Failure = $"smartmontools {major}.x has no JSON output; 7.0 or newer is needed.",
+                };
+
+            if (oversized.Length > 0)
+                return new DiskDetail
+                {
+                    Device = device,
+                    Probed = true,
+                    Version = version,
+                    Failure = $"smartctl answered with {oversized} bytes, past the " +
+                              $"{DetailCapBytes / (1024 * 1024)} MB this window will carry back.",
+                };
+
+            if (json.Length == 0)
+                return new DiskDetail
+                {
+                    Device = device,
+                    Probed = true,
+                    Version = version,
+                    Failure = $"smartctl produced no answer for {device}.",
+                };
+
+            return ReadDetailJson(device, version, json);
+        }
+
+        private static DiskDetail ReadDetailJson(string device, string version, string json)
+        {
+            JsonDocument document;
+            try { document = JsonDocument.Parse(json); }
+            catch
+            {
+                return new DiskDetail
+                {
+                    Device = device,
+                    Probed = true,
+                    Version = version,
+                    State = SmartState.Unknown,
+                    Detail = "smartctl produced no readable answer.",
+                };
+            }
+
+            using (document)
+            {
+                var root = document.RootElement;
+
+                // The verdict is reached by the very same helpers the summary pass uses, so the
+                // table's colour and this window's cannot disagree about one disk. What is new here
+                // is only the data those helpers walk past.
+                var (reallocated, pending, failingAttributes) = Attributes(root);
+                var nvme = NvmeLog(root);
+
+                var exit = root.TryGetProperty("smartctl", out var meta) ? Num(meta, "exit_status") ?? 0 : 0;
+                var messages = Messages(root);
+
+                var state = Assess(root, exit, messages, reallocated, pending, failingAttributes,
+                    nvme?.CriticalWarning, nvme?.AvailableSpare, nvme?.AvailableSpareThreshold,
+                    nvme?.MediaErrors);
+
+                var model = Str(root, "model_name");
+                if (model.Length == 0) model = Str(root, "model_family");
+
+                double? temperature = null;
+                if (root.TryGetProperty("temperature", out var t)) temperature = Num(t, "current");
+                temperature ??= nvme?.TemperatureC;
+
+                long? hours = null;
+                if (root.TryGetProperty("power_on_time", out var p)) hours = Num(p, "hours");
+                hours = nvme?.PowerOnHours ?? hours;
+
+                var cycles = Num(root, "power_cycle_count") ?? nvme?.PowerCycles;
+
+                return new DiskDetail
+                {
+                    Device = device,
+                    State = state,
+                    Detail = Detail(state, messages, reallocated, pending, failingAttributes,
+                        nvme?.CriticalWarning, nvme?.AvailableSpare, nvme?.AvailableSpareThreshold,
+                        nvme?.MediaErrors),
+
+                    Model = model,
+                    Serial = Str(root, "serial_number"),
+                    Firmware = Str(root, "firmware_version"),
+                    Wwn = Wwn(root),
+                    CapacityBytes = root.TryGetProperty("user_capacity", out var cap) ? Num(cap, "bytes") : null,
+                    RotationRate = (int?)Num(root, "rotation_rate"),
+                    FormFactor = root.TryGetProperty("form_factor", out var ff) ? Str(ff, "name") : "",
+                    SataVersion = root.TryGetProperty("sata_version", out var sv) ? Str(sv, "string") : "",
+                    InterfaceSpeed = InterfaceSpeed(root),
+                    Protocol = root.TryGetProperty("device", out var dev) ? Str(dev, "protocol") : "",
+                    SmartEnabled = root.TryGetProperty("smart_support", out var ss) ? Bool(ss, "enabled") : null,
+                    TrimSupported = root.TryGetProperty("trim", out var trim) ? Bool(trim, "supported") : null,
+
+                    TemperatureC = temperature,
+                    PowerOnHours = hours,
+                    PowerCycles = cycles,
+
+                    Attributes = AttributeTable(root),
+                    Nvme = nvme,
+                    SelfTests = SelfTestLog(root),
+                    ErrorLogCount = ErrorLogCount(root, nvme),
+
+                    Probed = true,
+                    Version = version,
+                };
+            }
+        }
+
+        /// <summary>
+        /// The ATA attribute table whole, in the drive's own order, which is the order smartctl
+        /// printed it and the one the Health tab's third click returns to.
+        ///
+        /// <para>Empty on NVMe, which has no attribute table in the protocol at all.</para>
+        /// </summary>
+        private static IReadOnlyList<SmartAttribute> AttributeTable(JsonElement root)
+        {
+            if (!root.TryGetProperty("ata_smart_attributes", out var block) ||
+                !block.TryGetProperty("table", out var table) ||
+                table.ValueKind != JsonValueKind.Array)
+                return [];
+
+            var rows = new List<SmartAttribute>();
+
+            foreach (var entry in table.EnumerateArray())
+            {
+                var id = (int?)Num(entry, "id");
+                if (id is null) continue;
+
+                var prefail = false;
+                var online = false;
+                if (entry.TryGetProperty("flags", out var flags))
+                {
+                    prefail = Bool(flags, "prefailure") == true;
+                    online = Bool(flags, "updated_online") == true;
+                }
+
+                long? rawValue = null;
+                var rawString = "";
+                if (entry.TryGetProperty("raw", out var raw))
+                {
+                    rawValue = Num(raw, "value");
+                    rawString = Str(raw, "string");
+                }
+
+                rows.Add(new SmartAttribute(
+                    id.Value,
+                    Str(entry, "name"),
+                    (int?)Num(entry, "value"),
+                    (int?)Num(entry, "worst"),
+                    (int?)Num(entry, "thresh"),
+                    rawValue,
+                    rawString,
+                    prefail,
+                    online,
+                    Str(entry, "when_failed")));
+            }
+
+            return rows;
+        }
+
+        /// <summary>
+        /// The NVMe health log whole, or null on a drive that has none. Five of these fields already
+        /// feed the verdict; the rest exist for the Health tab, which draws this where an ATA drive
+        /// gets an attribute table.
+        /// </summary>
+        private static NvmeHealth? NvmeLog(JsonElement root)
+        {
+            if (!root.TryGetProperty("nvme_smart_health_information_log", out var log)) return null;
+
+            return new NvmeHealth
+            {
+                CriticalWarning = Num(log, "critical_warning"),
+                TemperatureC = Num(log, "temperature"),
+                AvailableSpare = (int?)Num(log, "available_spare"),
+                AvailableSpareThreshold = (int?)Num(log, "available_spare_threshold"),
+                PercentageUsed = (int?)Num(log, "percentage_used"),
+                DataUnitsRead = Num(log, "data_units_read"),
+                DataUnitsWritten = Num(log, "data_units_written"),
+                HostReadCommands = Num(log, "host_reads"),
+                HostWriteCommands = Num(log, "host_writes"),
+                ControllerBusyTimeMinutes = Num(log, "controller_busy_time"),
+                PowerCycles = Num(log, "power_cycles"),
+                PowerOnHours = Num(log, "power_on_hours"),
+                UnsafeShutdowns = Num(log, "unsafe_shutdowns"),
+                MediaErrors = Num(log, "media_errors"),
+                ErrorLogEntries = Num(log, "num_err_log_entries"),
+                WarningTempTimeMinutes = Num(log, "warning_temp_time"),
+                CriticalTempTimeMinutes = Num(log, "critical_comp_time"),
+            };
+        }
+
+        /// <summary>
+        /// The self-test log, newest first, from whichever of the three shapes the drive speaks.
+        /// smartctl puts an ATA drive's under <c>extended</c> when the drive keeps an extended log
+        /// and <c>standard</c> otherwise, and NVMe has a table of its own with different field names.
+        /// </summary>
+        private static IReadOnlyList<SelfTestEntry> SelfTestLog(JsonElement root)
+        {
+            if (root.TryGetProperty("ata_smart_self_test_log", out var ata))
+            {
+                foreach (var half in (ReadOnlySpan<string>)["extended", "standard"])
+                    if (ata.TryGetProperty(half, out var block) &&
+                        block.TryGetProperty("table", out var table) &&
+                        table.ValueKind == JsonValueKind.Array)
+                        return AtaSelfTests(table);
+            }
+
+            if (root.TryGetProperty("nvme_self_test_log", out var log) &&
+                log.TryGetProperty("table", out var nvmeTable) &&
+                nvmeTable.ValueKind == JsonValueKind.Array)
+                return NvmeSelfTests(nvmeTable);
+
+            return [];
+        }
+
+        private static IReadOnlyList<SelfTestEntry> AtaSelfTests(JsonElement table)
+        {
+            var rows = new List<SelfTestEntry>();
+            var n = 1;
+
+            foreach (var entry in table.EnumerateArray())
+            {
+                var type = entry.TryGetProperty("type", out var kind) ? Str(kind, "string") : "";
+                var status = entry.TryGetProperty("status", out var st) ? Str(st, "string") : "";
+
+                rows.Add(new SelfTestEntry(
+                    n++,
+                    type,
+                    status,
+                    Num(entry, "lifetime_hours"),
+                    Num(entry, "lba_first_error")));
+            }
+
+            return rows;
+        }
+
+        private static IReadOnlyList<SelfTestEntry> NvmeSelfTests(JsonElement table)
+        {
+            var rows = new List<SelfTestEntry>();
+            var n = 1;
+
+            foreach (var entry in table.EnumerateArray())
+            {
+                var type = entry.TryGetProperty("self_test_code", out var code) ? Str(code, "string") : "";
+                var status = entry.TryGetProperty("self_test_result", out var res) ? Str(res, "string") : "";
+
+                rows.Add(new SelfTestEntry(n++, type, status, Num(entry, "power_on_hours")));
+            }
+
+            return rows;
+        }
+
+        /// <summary>
+        /// How many entries the drive's error log holds. The extended log is preferred where the
+        /// drive keeps one, because the summary log holds only the last five.
+        /// </summary>
+        private static int? ErrorLogCount(JsonElement root, NvmeHealth? nvme)
+        {
+            if (root.TryGetProperty("ata_smart_error_log", out var log))
+            {
+                foreach (var half in (ReadOnlySpan<string>)["extended", "summary"])
+                    if (log.TryGetProperty(half, out var block) && Num(block, "count") is { } count)
+                        return (int)count;
+            }
+
+            return (int?)nvme?.ErrorLogEntries;
+        }
+
+        /// <summary>
+        /// The drive's World Wide Name as the sixteen hex digits everything else writes it in.
+        /// smartctl reports the three fields it is built from rather than the string.
+        /// </summary>
+        private static string Wwn(JsonElement root)
+        {
+            if (!root.TryGetProperty("wwn", out var wwn)) return "";
+
+            var naa = Num(wwn, "naa");
+            var oui = Num(wwn, "oui");
+            var id = Num(wwn, "id");
+            if (naa is null || oui is null || id is null) return "";
+
+            return $"0x{naa.Value:x}{oui.Value:x6}{id.Value:x9}";
+        }
+
+        /// <summary>What the link is actually running at, falling back to what it is rated for.</summary>
+        private static string InterfaceSpeed(JsonElement root)
+        {
+            if (!root.TryGetProperty("interface_speed", out var speed)) return "";
+
+            foreach (var half in (ReadOnlySpan<string>)["current", "max"])
+                if (speed.TryGetProperty(half, out var block) && Str(block, "string") is { Length: > 0 } text)
+                    return text;
+
+            return "";
+        }
     }
 }

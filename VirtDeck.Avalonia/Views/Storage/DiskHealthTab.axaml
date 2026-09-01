@@ -1,0 +1,186 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.Storage.DiskHealthTab">
+
+  <UserControl.Resources>
+    <x:Double x:Key="ColAttrId">62</x:Double>
+    <x:Double x:Key="ColAttrName">200</x:Double>
+    <x:Double x:Key="ColAttrCur">60</x:Double>
+    <x:Double x:Key="ColAttrWorst">60</x:Double>
+    <x:Double x:Key="ColAttrThresh">72</x:Double>
+    <x:Double x:Key="ColAttrRaw">140</x:Double>
+
+    <x:Double x:Key="ColNvmeName">280</x:Double>
+
+    <x:Double x:Key="ColTestNum">40</x:Double>
+    <x:Double x:Key="ColTestType">180</x:Double>
+    <x:Double x:Key="ColTestWhen">110</x:Double>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- The two exceptional states are classes on the row rather than a brush off the row model.
+         A brush would have to be non-null on every row, since a null one bound to Foreground
+         suppresses the inherited value rather than falling back to it, and the only honest non-null
+         answer for an ordinary attribute is whatever the theme was already going to use. The red is
+         the app's failed-unit red and the amber its transient amber, both literal for the reason the
+         state dots are literal: they must not change meaning with the theme. -->
+    <Style Selector="DockPanel.attr.failing TextBlock">
+      <Setter Property="Foreground" Value="#c75450" />
+    </Style>
+    <Style Selector="DockPanel.attr.warning TextBlock">
+      <Setter Property="Foreground" Value="#d68f00" />
+    </Style>
+    <Style Selector="DockPanel.test.failed TextBlock">
+      <Setter Property="Foreground" Value="#c75450" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel Margin="16,14,16,14">
+
+    <!-- The verdict and the sentence behind it. TitleState is the only bound Foreground here, for
+         the reason the General tab's is. -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+      <Ellipse Name="TitleDot" DockPanel.Dock="Left" Width="9" Height="9"
+               Margin="0,0,7,0" VerticalAlignment="Center" />
+      <TextBlock Name="TitleState" DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                 VerticalAlignment="Center" />
+      <Panel />
+    </DockPanel>
+
+    <TextBlock Name="ReasonText" DockPanel.Dock="Top" Opacity="0.75" TextWrapping="Wrap"
+               Margin="0,0,0,12" />
+
+    <!-- The health summary, in two columns filled in order so neither is ever left empty: which
+         figures a drive reports is a fact about its technology (wear and spare capacity are NVMe's,
+         reallocated and pending sectors are ATA's), so a fixed left/right split would blank one
+         side on every drive. -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,24,*" Margin="0,0,0,14">
+      <ItemsControl Name="LeftFacts" Grid.Column="0" />
+      <ItemsControl Name="RightFacts" Grid.Column="2" />
+    </Grid>
+
+    <!-- The self-test log, when the drive has one. Read and never started: running a test is a
+         write to the drive and is outside what this window does. -->
+    <DockPanel Name="TestPanel" DockPanel.Dock="Bottom" Margin="0,12,0,0" IsVisible="False">
+      <TextBlock DockPanel.Dock="Top" Text="Self-tests" FontWeight="SemiBold" Margin="0,0,0,4" />
+      <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+              BorderThickness="0,0,0,1" BorderBrush="#22808080">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Left" Text="#" Width="{StaticResource ColTestNum}" />
+          <TextBlock DockPanel.Dock="Left" Text="Test" Width="{StaticResource ColTestType}" />
+          <TextBlock DockPanel.Dock="Left" Text="At" Width="{StaticResource ColTestWhen}" />
+          <TextBlock Text="Result" />
+        </DockPanel>
+      </Border>
+      <ListBox Name="TestList" MaxHeight="132" Background="Transparent" Padding="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="s:SelfTestRow">
+            <DockPanel Classes="test" Classes.failed="{Binding Failed}">
+              <TextBlock DockPanel.Dock="Left" Text="{Binding NumText}"
+                         Width="{StaticResource ColTestNum}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding TypeText}"
+                         Width="{StaticResource ColTestType}" TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding WhenText}"
+                         Width="{StaticResource ColTestWhen}" ToolTip.Tip="{Binding WhenTip}" />
+              <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </DockPanel>
+
+    <!-- Exactly one of these three is on screen: an ATA drive's attribute table, an NVMe drive's
+         health log, or a sentence saying why there is neither. -->
+    <Panel>
+
+      <DockPanel Name="AtaPanel" IsVisible="False">
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="AttrHeaderStrip">
+            <c:ColumnHeader DockPanel.Dock="Left" Text="ID" SortKey="id"
+                            Width="{StaticResource ColAttrId}"
+                            Tip="The attribute number, in decimal and in the hex every drive datasheet prints it in." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Attribute" SortKey="name"
+                            Width="{StaticResource ColAttrName}"
+                            Tip="smartctl's own name for it, kept exactly as the tool wrote it." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Current" SortKey="current"
+                            Width="{StaticResource ColAttrCur}"
+                            Tip="The drive's normalised value now. Higher is better, and it is a vendor's own scaling rather than anything comparable across two makes of disk." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Worst" SortKey="worst"
+                            Width="{StaticResource ColAttrWorst}"
+                            Tip="The lowest that normalised value has ever been." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Threshold" SortKey="thresh"
+                            Width="{StaticResource ColAttrThresh}"
+                            Tip="What the drive says it will call a failure. Zero means it states none." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Raw" SortKey="raw"
+                            Width="{StaticResource ColAttrRaw}"
+                            Tip="The count the drive actually keeps, in smartctl's own rendering of it. This is the half that means something: sectors, hours, degrees." />
+            <c:ColumnHeader Text="Status" SortKey="status"
+                            Tip="Whether the drive says this attribute has failed. Sorting puts the ones worth reading first." />
+          </DockPanel>
+        </Border>
+        <ListBox Name="AttrList" Background="Transparent" Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="s:SmartAttributeRow">
+              <DockPanel Classes="attr" Classes.failing="{Binding IsFailing}"
+                         Classes.warning="{Binding IsWarning}" ToolTip.Tip="{Binding Tip}">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding IdText}"
+                           Width="{StaticResource ColAttrId}" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Name}"
+                           Width="{StaticResource ColAttrName}" TextTrimming="CharacterEllipsis" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding CurrentText}"
+                           Width="{StaticResource ColAttrCur}" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding WorstText}"
+                           Width="{StaticResource ColAttrWorst}" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding ThresholdText}"
+                           Width="{StaticResource ColAttrThresh}" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding RawText}"
+                           Width="{StaticResource ColAttrRaw}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <DockPanel Name="NvmePanel" IsVisible="False">
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Left" Text="Reading" Width="{StaticResource ColNvmeName}" />
+            <TextBlock Text="Value" />
+          </DockPanel>
+        </Border>
+        <ListBox Name="NvmeList" Background="Transparent" Padding="0"
+                 ItemContainerTheme="{StaticResource JbTableRow}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="s:NvmeRow">
+              <DockPanel ToolTip.Tip="{Binding Tip}">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Name}"
+                           Width="{StaticResource ColNvmeName}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Value}" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <StackPanel Name="EmptyPanel" Spacing="12" MaxWidth="460"
+                  HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Name="EmptyText" Opacity="0.7" TextAlignment="Center" TextWrapping="Wrap" />
+        <!-- Only ever drawn for a parked drive, and it says what it costs before it is pressed:
+             reading SMART spins the platters up, which is 5 to 15 seconds and undoes whatever
+             power management the user configured. That is a cost the person looking at this window
+             should be the one to accept, which is why nothing here does it on its own. -->
+        <Button Name="WakeButton" Content="Read anyway" HorizontalAlignment="Center"
+                IsVisible="False" />
+      </StackPanel>
+
+    </Panel>
+
+  </DockPanel>
+</UserControl>

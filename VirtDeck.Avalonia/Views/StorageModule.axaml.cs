@@ -3,17 +3,16 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
-using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using VirtDeck.Avalonia.Controls;
+using VirtDeck.Avalonia.Views.Storage;
 using VirtDeck.Models;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// What the host is made of: its disks, everything layered on them, what is mounted where, and what
-/// SMART says about the drives underneath it all.
+/// What the host is made of: the disks in it, and what SMART says about each one.
 ///
 /// <para><b>Read-only, on purpose.</b> Cockpit's storage page is also where a disk is partitioned,
 /// formatted, grown, encrypted and put into a volume group; none of that is here. What is here is
@@ -21,17 +20,24 @@ namespace VirtDeck.Avalonia.Views;
 /// libvirt host's operator needs before the guests find out for them. Nothing forecloses the rest:
 /// the listing a format dialog would need is the listing this module already builds.</para>
 ///
-/// <para><b>A flat list drawn as a tree.</b> There is no <c>TreeView</c> in this app and none was
-/// added: one needs a <c>ControlTheme</c> <c>JetBrainsClassic.axaml</c> does not have, and it would
-/// give up <c>TableSort</c>, <c>TableRows.Merge</c> and <c>JbTableRow</c> to gain an indent. So the
-/// rows carry their own depth and the module flattens the tree into them, which keeps every table
-/// affordance in the app working unchanged.</para>
+/// <para><b>One row per disk, and everything else is in a window.</b> This table used to be the
+/// whole block-device tree flattened with an indent and a chevron, over a details pane in a
+/// splitter. Both are gone: a disk's partitions, LUKS containers and logical volumes are the
+/// Partitions tab of <see cref="DiskDetailsWindow"/>, and everything the pane said about a disk is
+/// that window's General and Health tabs, where an attribute table finally has somewhere to go. What
+/// is left here is a list of the machine's drives, which is what somebody opens this page to see,
+/// and every column in it is about a whole disk and therefore sorts.</para>
+///
+/// <para><b>Loop devices and optical drives are not listed, and that is a decision rather than a
+/// filter that fell out.</b> The table is about the hardware, so what it draws is what lsblk called
+/// a <c>disk</c>. The cost is real and is stated in the empty state: a mounted ISO and a snap host's
+/// dozens of loop devices are no longer visible anywhere in VirtDeck.</para>
 /// </summary>
 public partial class StorageModule : UserControl, IModule
 {
     private StorageService? _storage;
 
-    /// <summary>Cancels the read in flight, and that is the whole of what this module owns.</summary>
+    /// <summary>Cancels the read in flight.</summary>
     private CancellationTokenSource _cts = new();
 
     private bool _busy;
@@ -40,27 +46,32 @@ public partial class StorageModule : UserControl, IModule
     private readonly Dictionary<string, StorageRow> _byKey = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Which parents are folded shut, by <see cref="StorageRow.Key"/> and so by their place in the
-    /// tree rather than by device: a volume group spanning two disks is drawn under both, and
-    /// folding one of them shut is not a statement about the other.
+    /// Open disk details windows, keyed by the disk's kname, which outlive a module switch exactly
+    /// as the containers module's log and console windows do.
     ///
-    /// <para><b>Collapsed</b> rather than expanded, because the default has to be open: a disk with
-    /// its partitions hidden is the one view nobody came for, and a set of what is closed says that
-    /// with an empty set rather than with a pass over the listing to fill it in. Session state on
-    /// the module, exactly as the sort state is.</para>
+    /// <para>Keyed by the <b>kname</b> and not by the device path, although the path is what the
+    /// window runs smartctl against: the kname is what the row is already merged on, and it is
+    /// guaranteed non-empty where a path is not (a listing too old to carry <c>PATH</c> leaves it
+    /// blank, and two such disks would then share the empty-string key).</para>
     /// </summary>
-    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DiskDetailsWindow> _details = new(StringComparer.Ordinal);
 
     private StorageLayout _layout = new();
     private HealthReading _health = HealthReading.NotProbed;
+
+    /// <summary>
+    /// Which of the four SMART columns this host earns, recomputed from the health pass on every
+    /// <see cref="Populate"/> and put on both the heading strip and every row from there, so the two
+    /// can never disagree about how many columns there are. <see cref="SmartColumns"/> has the
+    /// argument for drawing them conditionally at all.
+    /// </summary>
+    private SmartColumns _columns = SmartColumns.None;
 
     /// <summary>A listing is in hand, so an empty table means "nothing here" and not "not yet".</summary>
     private bool _read;
 
     private TableSort? _sortOrNull;
     private TableSort Sort => _sortOrNull!;
-
-    private double _detailsHeightAtLoad;
 
     public StorageModule()
     {
@@ -71,23 +82,14 @@ public partial class StorageModule : UserControl, IModule
         _sortOrNull = new TableSort(DeviceHeaderStrip);
         _sortOrNull.Changed += Populate;
 
-        _detailsHeightAtLoad = AppSettings.Current.StorageDetailsHeightOrDefault;
-        StorageSplit.RowDefinitions[2].Height = new GridLength(_detailsHeightAtLoad);
-
-        RefreshButton.Tag = "Read the host's block devices and disk health again";
+        RefreshButton.Tag = "Read the host's disks and their health again";
         RefreshButton.Click += async (_, _) => await RefreshAsync();
 
-        DeviceList.SelectionChanged += (_, _) => PaintDetails();
-
-        // The chevron is a Button inside the row, so the click is caught here rather than wired per
-        // row: the same idiom the services module uses for its in-row autostart tick. There is only
-        // one button in a storage row, so nothing has to work out which.
-        DeviceList.AddHandler(Button.ClickEvent, OnRowButtonClicked);
         DeviceList.DoubleTapped += OnRowDoubleTapped;
+        DeviceList.SelectionChanged += (_, _) => UpdateMenu();
 
+        MenuDetails.Click += (_, _) => OpenDetailsForSelected();
         MenuCopyPath.Click += async (_, _) => await CopyPathAsync();
-        MenuExpandAll.Click += (_, _) => SetAllFolded(false);
-        MenuCollapseAll.Click += (_, _) => SetAllFolded(true);
 
         DeviceList.ContextRequested += (_, _) => UpdateMenu();
         UpdateMenu();
@@ -146,31 +148,29 @@ public partial class StorageModule : UserControl, IModule
     }
 
     /// <summary>
-    /// Cancels the read and saves the splitter. There is no timer here, no event tail, no second
-    /// SSH connection and no window, which is what makes this the shortest teardown in the app after
-    /// the user accounts module's.
+    /// Cancels the read, and nothing else. There is no timer here, no event tail and no second SSH
+    /// connection; the windows this module owns are deliberately left open, which is the same answer
+    /// the refresh policy already gives for a console window and a log window.
     /// </summary>
     public void Deactivate()
     {
         _cts.Cancel();
         _cts.Dispose();
         _cts = new CancellationTokenSource();
-        SaveDetailsHeight();
     }
 
-    public void Shutdown() => Deactivate();
-
     /// <summary>
-    /// Writes the pane height back only when the splitter was actually moved, so stepping through
-    /// the modules does not rewrite settings.json once per visit. The VM module's rule and its code.
+    /// Closes the disk details windows. A hidden module still owns the windows it opened, and the
+    /// shell disposes the shared SSH connection straight after this, so they cannot be left to the
+    /// process exit. Iterated over a copy, because <c>Close</c> fires <c>Closed</c> synchronously
+    /// and that handler mutates the dictionary being walked.
     /// </summary>
-    private void SaveDetailsHeight()
+    public void Shutdown()
     {
-        double h = StorageSplit.RowDefinitions[2].ActualHeight;
-        if (h <= 0 || Math.Abs(h - _detailsHeightAtLoad) < 1) return;
-        _detailsHeightAtLoad = h;
-        AppSettings.Current.StorageDetailsHeight = h;
-        AppSettings.Current.Save();
+        Deactivate();
+
+        foreach (var window in _details.Values.ToList()) window.Close();
+        _details.Clear();
     }
 
     // ---- reading -----------------------------------------------------------
@@ -202,14 +202,10 @@ public partial class StorageModule : UserControl, IModule
             Populate();
             PaintStatus();
 
-            // Only whole disks, because they are the only thing SMART can be asked about: a
-            // partition, a logical volume and a loop device all live on something else, and a
-            // CD-ROM has nothing to report.
-            var disks = layout.Roots
-                .Where(r => r.IsDisk && r.Path.Length > 0)
-                .Select(r => r.Path)
-                .ToList();
-
+            // The disks this table draws are exactly the devices SMART can be asked about, which is
+            // what makes the two lists one list: a partition, a logical volume and a loop device all
+            // live on something else, and a CD-ROM has nothing to report.
+            var disks = Disks().Where(d => d.Path.Length > 0).Select(d => d.Path).ToList();
             if (disks.Count == 0) return;
 
             // The health pass answers for itself and never for the listing. It is the elevated half,
@@ -249,56 +245,63 @@ public partial class StorageModule : UserControl, IModule
         }
     }
 
-    // ---- the tree ----------------------------------------------------------
+    // ---- the rows ----------------------------------------------------------
 
     /// <summary>
-    /// The rows to draw, in order: the roots as the sort put them, then everything under each one in
-    /// the host's own order, skipping whatever is folded shut.
-    ///
-    /// <para><b>A sort reorders disks and never their children.</b> A partition table's order is a
-    /// fact about the disk, and floating a LUKS mapping above the EFI partition by size would turn a
-    /// stack into a pile. That is the same shape as the file explorer keeping directories first
-    /// through every sort, and it is why three of the seven columns carry no sort key at all.</para>
+    /// The disks, in the order the sort asks for. Whole disks only: see the note on the class about
+    /// what that leaves out and why.
     /// </summary>
-    private List<(string Key, BlockDevice Device, int Depth)> Visible()
-    {
-        var visible = new List<(string, BlockDevice, int)>();
-        Walk(OrderRoots(_layout.Roots), "", 0, visible);
-        return visible;
-    }
+    private IEnumerable<BlockDevice> Disks() => OrderDisks(_layout.Roots.Where(r => r.IsDisk).ToList());
 
-    private void Walk(
-        IEnumerable<BlockDevice> nodes, string parentKey, int depth,
-        List<(string, BlockDevice, int)> into)
+    private IEnumerable<BlockDevice> OrderDisks(IReadOnlyList<BlockDevice> disks) => Sort.Key switch
     {
-        foreach (var node in nodes)
-        {
-            var key = parentKey.Length == 0 ? node.Kname : parentKey + "/" + node.Kname;
-            into.Add((key, node, depth));
-            if (_collapsed.Contains(key)) continue;
-            Walk(node.Children, key, depth + 1, into);
-        }
-    }
+        "device" => Sort.By(disks, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "kind" => Sort.By(disks, KindOrder).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "size" => Sort.By(disks, r => r.SizeBytes).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "health" => Sort.By(disks, HealthOrder).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
 
-    private IEnumerable<BlockDevice> OrderRoots(IReadOnlyList<BlockDevice> roots) => Sort.Key switch
-    {
-        "device" => Sort.By(roots, r => r.Name, StringComparer.OrdinalIgnoreCase),
-        "kind" => Sort.By(roots, KindOrder).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
-        "size" => Sort.By(roots, r => r.SizeBytes).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
-        "health" => Sort.By(roots, HealthOrder).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        // The SMART figures sort on the nullable straight, so a disk that reported nothing sorts to
+        // one end rather than being given an invented number in the middle of the real ones. .NET
+        // orders null below every value, which puts the silent disks first ascending and last
+        // descending: descending is the click three of them are for (the hottest drive, the oldest,
+        // the most remapped), and it is the direction that keeps the silent ones out of the way.
+        //
+        // **Life left is the exception on both counts, and the two are connected.** It keys on the
+        // flipped figure rather than on percentage_used, because a column has to sort on the value
+        // it was rendered from. That makes it the one of the four whose telling click is
+        // *ascending*, since least-life-first is worst-first, which is the order the Health column
+        // already sorts into. And that in turn is why it is the one that cannot take the null
+        // straight: nulls sort below every value, so ascending would stack every ATA disk on the
+        // host, which reports no endurance figure at all, on top of the NVMe drive that is actually
+        // wearing out. Mapping absent to int.MaxValue keeps the silent disks at one end, which is
+        // all the nullable-straight rule was ever protecting, and puts them at the end the telling
+        // click needs. Nothing invented is ever drawn: their cell is blank either way.
+        "temp" => Sort.By(disks, r => HealthOf(r)?.TemperatureC).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "poweron" => Sort.By(disks, r => HealthOf(r)?.PowerOnHours).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "wear" => Sort.By(disks, r => StorageRow.LifeLeft(HealthOf(r)?.PercentageUsed) ?? int.MaxValue)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "realloc" => Sort.By(disks, r => HealthOf(r)?.ReallocatedSectors).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
 
         // The host's own order, which is the kernel's enumeration order, and what a third click on a
         // heading comes back to.
-        _ => roots,
+        _ => disks,
     };
 
-    private static int KindOrder(BlockDevice device) => device.Type switch
+    /// <summary>Solid state before spinning before a disk that would not say which it is.</summary>
+    private static int KindOrder(BlockDevice device) => device.Rotational switch
     {
-        "disk" => device.Rotational switch { false => 0, true => 1, _ => 2 },
-        "loop" => 4,
-        "rom" => 5,
-        _ => 3,
+        false => 0,
+        true => 1,
+        _ => 2,
     };
+
+    /// <summary>
+    /// What SMART said about this disk, or null for one that did not answer and for every disk on a
+    /// host whose reading is not usable. The one place the health dictionary is keyed into, so the
+    /// sort arms and the row painter cannot drift apart on what counts as an answer.
+    /// </summary>
+    private DiskHealth? HealthOf(BlockDevice device) =>
+        _health.Usable && _health.ByDevice.TryGetValue(device.Path, out var health) ? health : null;
 
     /// <summary>
     /// Worst first, so one ascending click puts the disks worth looking at at the top. Sorting by
@@ -306,7 +309,7 @@ public partial class StorageModule : UserControl, IModule
     /// that puts security updates at the top of their table.
     /// </summary>
     private int HealthOrder(BlockDevice device) =>
-        (_health.Usable && _health.ByDevice.TryGetValue(device.Path, out var h) ? h.State : SmartState.Unknown)
+        (HealthOf(device)?.State ?? SmartState.Unknown)
         switch
         {
             SmartState.Failing => 0,
@@ -319,37 +322,61 @@ public partial class StorageModule : UserControl, IModule
 
     private void Populate()
     {
-        var visible = Visible();
+        // Before the rows, because every one of them is built or updated with the answer on it and a
+        // row that disagreed with the heading strip would shift every column after it.
+        ApplyColumns();
+
+        var disks = Disks().ToList();
 
         TableRows.Merge(
-            _rows, _byKey, visible,
-            v => v.Key,
-            v => Made(v.Key, v.Device, v.Depth),
-            (row, v) =>
+            _rows, _byKey, disks,
+            d => d.Kname,
+            Made,
+            (row, d) =>
             {
-                row.Update(v.Device, v.Depth, !_collapsed.Contains(v.Key));
+                row.Update(d);
                 ApplyHealth(row);
+                row.Columns = _columns;
             },
-            // The wanted order is exactly the order the flatten produced, so it is rebuilt from that
+            // The wanted order is exactly the order the sort produced, so it is rebuilt from that
             // rather than sorted again here. Merge has already put every one of these in the index
             // by the time this runs.
-            _ => visible.Select(v => _byKey[v.Key]));
+            _ => disks.Select(d => _byKey[d.Kname]));
 
         DrawEmpty();
-        PaintDetails();
         UpdateMenu();
     }
 
-    private StorageRow Made(string key, BlockDevice device, int depth)
+    private StorageRow Made(BlockDevice device)
     {
-        var row = new StorageRow(key, device, depth, !_collapsed.Contains(key));
+        var row = new StorageRow(device);
         ApplyHealth(row);
+        row.Columns = _columns;
         return row;
+    }
+
+    /// <summary>
+    /// Decides which SMART columns this host earns and puts the answer on the heading strip. The
+    /// rows take the same value in <see cref="Made"/> and in the merge, so the strip and the cells
+    /// under it are two readings of one field rather than two rules that could drift.
+    ///
+    /// <para>The verdict is taken over the disks that <b>answered</b>, which is why an unusable
+    /// reading collapses to <see cref="SmartColumns.None"/> rather than to four empty columns: on a
+    /// host with no smartmontools the Health column already says so in a sentence, and four blank
+    /// headings beside it would be the same absence stated four more times.</para>
+    /// </summary>
+    private void ApplyColumns()
+    {
+        _columns = _health.Usable ? SmartColumns.Over(_health.ByDevice.Values) : SmartColumns.None;
+
+        TempHeader.IsVisible = _columns.Temperature;
+        PowerOnHeader.IsVisible = _columns.PowerOn;
+        WearHeader.IsVisible = _columns.Wear;
+        ReallocHeader.IsVisible = _columns.Reallocated;
     }
 
     private void ApplyHealth(StorageRow row)
     {
-        if (!row.IsDisk) { row.SetHealth(null, false); return; }
         _health.ByDevice.TryGetValue(row.Device.Path, out var health);
 
         // The reason travels with the verdict, so a host that has smartmontools and refused the
@@ -357,57 +384,78 @@ public partial class StorageModule : UserControl, IModule
         row.SetHealth(health, _health.Usable, _health.Failure);
     }
 
-    private void OnRowButtonClicked(object? sender, RoutedEventArgs e)
-    {
-        if (e.Source is StyledElement { DataContext: StorageRow row }) Toggle(row);
-    }
+    // ---- the details window ------------------------------------------------
 
     /// <summary>
-    /// A double-tap on the row toggles it, but a double-tap that landed on the chevron does not:
-    /// the second click of it has already been answered by the button's own Click, so acting on it
-    /// here as well would fold and unfold and fold again on two clicks of one control.
+    /// A double-tap opens the disk. The gesture used to fold the row's children away, which is what
+    /// it was for while this table was a tree; with the tree gone it is free, and opening the thing
+    /// under the pointer is what a double-tap means in the VM list.
     /// </summary>
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         foreach (var v in (e.Source as Visual)?.GetSelfAndVisualAncestors() ?? [])
-        {
-            if (v is Button) return;
             if (v is ListBoxItem { DataContext: StorageRow row })
             {
-                Toggle(row);
+                OpenDetailsFor(row);
                 return;
             }
-        }
     }
 
-    private void Toggle(StorageRow row)
+    private void OpenDetailsForSelected()
     {
-        if (!row.HasChildren) return;
-        if (!_collapsed.Remove(row.Key)) _collapsed.Add(row.Key);
-        Populate();
+        var selected = DeviceList.SelectedItems?.Cast<StorageRow>().ToList() ?? [];
+        if (selected.Count == 1) OpenDetailsFor(selected[0]);
     }
 
     /// <summary>
-    /// Folds every parent shut or opens every one. Collapsing is done by asking for the whole tree
-    /// with nothing folded and taking the keys of what has children, rather than by walking the
-    /// devices: the key is a position in the tree and only the walk knows one.
+    /// One window per disk, non-modal, and a second ask focuses the one already up rather than
+    /// stacking another on it. The containers module's log windows verbatim, including the
+    /// reference check in the <c>Closed</c> handler: without it a stale close would evict a
+    /// replacement window opened under the same key.
     /// </summary>
-    private void SetAllFolded(bool folded)
+    private void OpenDetailsFor(StorageRow row)
     {
-        _collapsed.Clear();
-        if (folded)
-            foreach (var (key, device, _) in Visible())
-                if (device.Children.Count > 0) _collapsed.Add(key);
+        if (_storage is null) return;
 
-        Populate();
+        if (_details.TryGetValue(row.Key, out var existing))
+        {
+            if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
+            existing.Activate();
+            return;
+        }
+
+        var window = new DiskDetailsWindow(Storage, ViewOf(row));
+        _details[row.Key] = window;
+        window.Closed += (_, _) =>
+        {
+            if (_details.TryGetValue(row.Key, out var w) && ReferenceEquals(w, window))
+                _details.Remove(row.Key);
+        };
+        window.Show();
     }
+
+    /// <summary>
+    /// Everything the window opens with, out of what this module already holds: the disk and its
+    /// whole subtree, the two files the Partitions tab reads a boot state out of, and the summary
+    /// verdict the table is drawing. That last one is what lets the Health tab say something on its
+    /// first frame instead of sitting blank until its own deeper read lands.
+    /// </summary>
+    private DiskView ViewOf(StorageRow row) => new(
+        row.Device,
+        _layout.Fstab,
+        _layout.SwapDevices,
+        row.Health,
+        row.HealthProbed,
+        _health.Failure,
+        Detail: null);
 
     // ---- drawing -----------------------------------------------------------
 
     /// <summary>
-    /// Three empty tables that are three different answers, and never one of them drawn as another:
-    /// a host with no lsblk, a listing that failed with the host's own reason on it, and a host that
-    /// genuinely reports no block devices.
+    /// Four empty tables that are four different answers, and never one of them drawn as another: a
+    /// host with no lsblk, a listing that failed with the host's own reason on it, a host that
+    /// genuinely reports no block devices at all, and a host whose block devices are real but
+    /// include no whole disk, which this table is the only place that distinction shows up.
     /// </summary>
     private void DrawEmpty()
     {
@@ -421,22 +469,21 @@ public partial class StorageModule : UserControl, IModule
                   "It is part of util-linux on every distribution that has one."
             : _layout.ListFailure.Length > 0
                 ? "The host's block devices could not be listed: " + _layout.ListFailure
+            : _layout.Roots.Count > 0
+                ? "This host has block devices, but none of them is a whole disk. This page lists " +
+                  "drives, so loop devices and optical drives are not shown."
             : "This host reports no block devices.";
-    }
-
-    private void PaintDetails()
-    {
-        var selected = DeviceList.SelectedItems?.Cast<StorageRow>().ToList() ?? [];
-
-        if (selected.Count == 1) Details.Show(selected[0], _layout.Fstab, _layout.SwapDevices);
-        else if (selected.Count > 1) Details.ShowNothing($"{selected.Count} devices selected.");
-        else Details.ShowNothing("Select a device to see what it is and what is on it.");
     }
 
     /// <summary>
     /// The left slot counts what was found and the right slot names the tooling that found it,
     /// neither repeating the other and neither repeating the table. The containers module's
     /// <c>docker 29.1.3 · compose 2.29.7</c> shape.
+    ///
+    /// <para>It counts over the whole tree and not over the rows, although only the disks are drawn.
+    /// The partitions and volumes are still in the listing and are still on screen one double-click
+    /// away, so the count is both true and a pointer at what the windows hold; counting rows would
+    /// say "3 disks" on a machine whose interesting half is the twelve logical volumes on them.</para>
     /// </summary>
     private void PaintStatus()
     {
@@ -495,11 +542,12 @@ public partial class StorageModule : UserControl, IModule
     private void UpdateMenu()
     {
         var selected = DeviceList.SelectedItems?.Cast<StorageRow>().ToList() ?? [];
-        MenuCopyPath.IsEnabled = selected.Any(r => r.Path.Length > 0);
 
-        var anyParents = _rows.Any(r => r.HasChildren);
-        MenuExpandAll.IsEnabled = anyParents && _collapsed.Count > 0;
-        MenuCollapseAll.IsEnabled = anyParents && _rows.Any(r => r is { HasChildren: true, IsExpanded: true });
+        // One window is about one disk, so this is the module's one single-selection command. It is
+        // disabled rather than opening the first of several, which would be a different thing from
+        // what was asked for.
+        MenuDetails.IsEnabled = selected.Count == 1;
+        MenuCopyPath.IsEnabled = selected.Any(r => r.Path.Length > 0);
     }
 
     /// <summary>

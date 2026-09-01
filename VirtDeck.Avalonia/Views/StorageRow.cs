@@ -6,57 +6,48 @@ using VirtDeck.Models;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One block device in the storage table: a disk, a partition, a LUKS mapping, a logical volume,
-/// an MD array or a loop device. <see cref="ServiceRow"/>'s shape exactly, including the habit of
-/// keeping the whole record (<see cref="Device"/>) so a command or the details pane reads the
+/// One disk in the storage table. <see cref="ServiceRow"/>'s shape exactly, including the habit of
+/// keeping the whole record (<see cref="Device"/>) so a command or the details window reads the
 /// listing rather than the cells.
 ///
-/// <para>It also carries the three fields that make a flat <c>ListBox</c> read as a tree
-/// (<see cref="Depth"/>, <see cref="HasChildren"/>, <see cref="IsExpanded"/>). There is no
-/// <c>TreeView</c> anywhere in this app and none was added: one would need a <c>ControlTheme</c>
-/// <c>JetBrainsClassic.axaml</c> does not have, and it would give up <c>TableSort</c>,
-/// <c>TableRows.Merge</c> and <c>JbTableRow</c> to gain an indent. The indent is cheaper.</para>
+/// <para><b>Every row here is a whole disk, and that is what this class is now about.</b> It used to
+/// be any block device, and to carry the three fields that made a flat <c>ListBox</c> read as a tree
+/// (a depth, a chevron and a fold flag) so that partitions, LUKS mappings and logical volumes could
+/// be nested under the disk they sit on. That tree is now the disk details window's Partitions tab,
+/// which means the table is a list of the machine's drives and every cell in it is about hardware:
+/// no cell has a "this row is not a disk" branch any more, and the state dot is unconditional
+/// because there is no longer a kind of row that should not have one.</para>
 /// </summary>
 public sealed class StorageRow : INotifyPropertyChanged
 {
-    /// <summary>How far one level of nesting moves a row right. Matches the 16px glyph beside it.</summary>
+    /// <summary>
+    /// How far one level of nesting moves a row right, kept here because the Partitions tab still
+    /// draws a tree and this is the number it indents by. Matches the 16px glyph beside it.
+    /// </summary>
     public const double IndentStep = 16;
 
-    // Stroked at 1.2 like every other 16x16 glyph in the app, so a chevron sits at the weight of the
-    // side menu's icons rather than as a filled blob.
-    private static readonly StreamGeometry Collapsed = StreamGeometry.Parse("M6,3 L11,8 L6,13");
-    private static readonly StreamGeometry Expanded = StreamGeometry.Parse("M3,6 L8,11 L13,6");
-
     /// <summary>
-    /// What the table merges on: the chain of <b>kernel</b> names from the disk down to this row,
-    /// slash-separated (<c>nvme0n1/nvme0n1p3/dm-0/dm-1</c>).
+    /// What the table merges on: the disk's <b>kernel</b> name (<c>sda</c>, <c>nvme0n1</c>).
     ///
-    /// <para><b>The kname alone is not unique in this table, and that is not a corner case.</b>
-    /// lsblk prints a logical volume under <i>every</i> physical volume its group spans, an MD array
-    /// under every member disk, and a multipath device under every path to it. On any host with a
-    /// two-disk volume group the same <c>dm-1</c> is therefore two rows, and a kname-keyed merge
-    /// would collapse them into one and then be handed that one row twice to order.</para>
+    /// <para>The chain of knames this used to be is gone with the tree. A kname was not unique in
+    /// that table, because lsblk prints a logical volume under every physical volume its group spans
+    /// and an MD array under every member disk; among whole disks it is unique, so the disk's own
+    /// name is the whole key.</para>
     ///
-    /// <para>Within the chain each segment is the <b>kernel's</b> name rather than
-    /// <see cref="BlockDevice.Name"/>, which is the other half of the same argument: a device-mapper
-    /// node is called <c>vgmint-root</c>, and that moves the moment somebody renames the volume
-    /// group, where <c>dm-1</c> does not. A merge key that moves rebuilds the row under whoever is
-    /// reading it, which is the whole thing merging exists to avoid.</para>
+    /// <para>It is the <b>kernel's</b> name rather than <see cref="BlockDevice.Name"/> for the
+    /// reason it always was: a merge key that moves rebuilds the row under whoever is reading it.</para>
     /// </summary>
     public string Key { get; }
 
-    public StorageRow(string key, BlockDevice device, int depth, bool expanded)
+    public StorageRow(BlockDevice device)
     {
-        Key = key;
+        Key = device.Kname;
         _device = device;
-        _depth = depth;
-        _expanded = expanded;
-        _hasChildren = device.Children.Count > 0;
     }
 
     private BlockDevice _device;
 
-    /// <summary>The listing as it stands, for the details pane. Never null.</summary>
+    /// <summary>The listing as it stands, and what the details window is opened on. Never null.</summary>
     public BlockDevice Device
     {
         get => _device;
@@ -66,16 +57,15 @@ public sealed class StorageRow : INotifyPropertyChanged
             foreach (var name in new[]
                      {
                          nameof(Name), nameof(Path), nameof(TypeText), nameof(SizeText),
-                         nameof(FsText), nameof(MountText), nameof(UsedText), nameof(Percent),
-                         nameof(HasUsage), nameof(IsDisk), nameof(Summary),
+                         nameof(Summary),
                      })
                 Raise(name);
         }
     }
 
     /// <summary>
-    /// SMART's answer for this disk, or null: for every row that is not a disk, and for a disk on a
-    /// host with no smartmontools. The two are different and <see cref="HealthText"/> says so.
+    /// SMART's answer for this disk, or null on a host with no smartmontools.
+    /// <see cref="HealthText"/> says which.
     /// </summary>
     private DiskHealth? _health;
 
@@ -89,7 +79,13 @@ public sealed class StorageRow : INotifyPropertyChanged
             Raise(nameof(HealthBrush));
             Raise(nameof(HealthTip));
             Raise(nameof(StateBrush));
-            Raise(nameof(Summary));
+            Raise(nameof(TemperatureText));
+            Raise(nameof(PowerOnText));
+            Raise(nameof(PowerOnTip));
+            Raise(nameof(LifeText));
+            Raise(nameof(LifeTip));
+            Raise(nameof(ReallocText));
+            Raise(nameof(ReallocTip));
         }
     }
 
@@ -127,60 +123,64 @@ public sealed class StorageRow : INotifyPropertyChanged
         private set { if (Set(ref _healthUnavailable, value)) Raise(nameof(HealthTip)); }
     }
 
-    // ---- the tree ----------------------------------------------------------
-
-    private int _depth;
-
-    /// <summary>Levels below the disk this row sits on. A root is 0.</summary>
-    public int Depth
-    {
-        get => _depth;
-        private set { if (Set(ref _depth, value)) Raise(nameof(IndentPixels)); }
-    }
-
-    /// <summary>The width of the spacer at the head of the row. A margin would not light up with it.</summary>
-    public double IndentPixels => Depth * IndentStep;
-
-    private bool _hasChildren;
-
-    public bool HasChildren
-    {
-        get => _hasChildren;
-        private set { if (Set(ref _hasChildren, value)) Raise(nameof(ChevronData)); }
-    }
-
-    private bool _expanded;
-
-    public bool IsExpanded
-    {
-        get => _expanded;
-        set { if (Set(ref _expanded, value)) Raise(nameof(ChevronData)); }
-    }
+    private SmartColumns _columns;
 
     /// <summary>
-    /// Which way the chevron points. A geometry off the row rather than two overlaid
-    /// <c>Path</c>s with opposed <c>IsVisible</c>, for the reason <see cref="ServiceRow.StateBrush"/>
-    /// is a brush off the row: one fact, decided once, in the place that knows it.
+    /// Which of the four SMART columns this <b>table</b> is drawing. It is decided once over the
+    /// whole listing and then put on every row identically, which is what keeps the cells lined up
+    /// under the headings: a row that disagreed with its neighbours would shift every column after
+    /// it. <c>UpdateRow.ShowArchitecture</c> is the same shape, a per-row flag whose answer is taken
+    /// over the whole catalog.
+    ///
+    /// <para>It is not <see cref="Health"/>'s to decide, although it is read from the same figures.
+    /// A disk that reports no temperature on a host where another one does keeps an empty cell in a
+    /// column that exists, and the difference between that and no column at all is the whole point
+    /// of drawing them conditionally.</para>
     /// </summary>
-    public StreamGeometry ChevronData => IsExpanded ? Expanded : Collapsed;
+    public SmartColumns Columns
+    {
+        get => _columns;
+        set
+        {
+            if (!Set(ref _columns, value)) return;
+            Raise(nameof(ShowTemperature));
+            Raise(nameof(ShowPowerOn));
+            Raise(nameof(ShowWear));
+            Raise(nameof(ShowReallocated));
+        }
+    }
+
+    public bool ShowTemperature => _columns.Temperature;
+    public bool ShowPowerOn => _columns.PowerOn;
+    /// <summary>
+    /// Whether the drive reported an endurance figure at all. It stays named for the datum rather
+    /// than for the column, because what the host can answer is <c>percentage_used</c>; which way
+    /// round that is drawn is <see cref="LifeText"/>'s business.
+    /// </summary>
+    public bool ShowWear => _columns.Wear;
+    public bool ShowReallocated => _columns.Reallocated;
 
     // ---- cells -------------------------------------------------------------
 
     public string Name => Device.Name.Length > 0 ? Device.Name : Device.Kname;
     public string Path => Device.Path;
-    public bool IsDisk => Device.IsDisk;
 
     /// <summary>
-    /// What kind of thing this row is, in words.
-    ///
-    /// <para>A disk reads <b>SSD</b> or <b>HDD</b> rather than "Disk": that it is a disk is already
-    /// said by it being a top-level row with a state dot, and which of the two it is is the thing
-    /// somebody actually wants off this column. A disk whose <c>ROTA</c> could not be read stays
-    /// "Disk", because guessing either way would be a claim about hardware.</para>
+    /// What kind of thing this row is, in words. A disk reads <b>SSD</b> or <b>HDD</b> rather than
+    /// "Disk": that it is a disk is already said by it being in this table at all, and which of the
+    /// two it is is the thing somebody actually wants off this column. A disk whose <c>ROTA</c>
+    /// could not be read stays "Disk", because guessing either way would be a claim about hardware.
     /// </summary>
-    public string TypeText => Device.Type switch
+    public string TypeText => KindOf(Device);
+
+    /// <summary>
+    /// The same words for any block device, so the Partitions tab's Kind column and this one cannot
+    /// drift apart. It is static and takes the record because that tab has a row type of its own:
+    /// the alternative was the switch written twice.
+    /// </summary>
+    public static string KindOf(BlockDevice device) => device.Type switch
     {
-        "disk" => Device.Rotational switch { false => "SSD", true => "HDD", _ => "Disk" },
+        "disk" => device.Rotational switch { false => "SSD", true => "HDD", _ => "Disk" },
         "part" => "Partition",
         "lvm" => "LVM volume",
         "crypt" => "LUKS",
@@ -194,37 +194,21 @@ public sealed class StorageRow : INotifyPropertyChanged
 
     public string SizeText => MountRow.Bytes(Device.SizeBytes);
 
-    /// <summary>
-    /// The filesystem on it, or the partition type where there is none. A whole disk answers
-    /// nothing at all, which is correct rather than missing: a disk holds a partition table, not a
-    /// filesystem, and the table type is in the details pane where it belongs.
-    /// </summary>
-    public string FsText =>
-        Device.FsType.Length > 0 ? Device.FsType
-        : Device.IsDisk ? ""
-        : Device.PartTypeName;
-
-    /// <summary>
-    /// Where it is mounted. <c>[SWAP]</c> is lsblk's own word for a swap device and is kept, since
-    /// it is exactly as informative as a path and is what the same host prints in a terminal.
-    /// </summary>
-    public string MountText => Device.PrimaryMount;
-
-    public double Percent => Device.UsedPercent ?? 0;
-
-    /// <summary>Whether there is a filesystem mounted to have a fullness at all.</summary>
-    public bool HasUsage => Device.UsedPercent is not null;
-
-    public string UsedText => Device.UsedPercent is { } p ? $"{p:0}%" : "";
-
     // ---- health ------------------------------------------------------------
 
     /// <summary>
-    /// The dot beside the name. Only a disk gets one: a partition or a logical volume is a fact,
-    /// where a disk is a thing that can be dying. Same rule that gives a container a dot and an
-    /// image none.
+    /// The dot beside the name. Unconditional now: every row in this table is a disk, which is a
+    /// thing that can be dying, where the partitions and volumes that used to share the table were
+    /// facts and deliberately had none. Same rule that gives a container a dot and an image none.
     /// </summary>
-    public IBrush? StateBrush => !IsDisk ? null : Health?.State switch
+    public IBrush StateBrush => BrushOf(Health?.State ?? SmartState.Unknown);
+
+    /// <summary>
+    /// The colour for a verdict, wherever one is drawn. Static and shared because the disk details
+    /// window draws the same six states, and a second copy of this switch would be two vocabularies
+    /// for one fact.
+    /// </summary>
+    public static IBrush BrushOf(SmartState state) => state switch
     {
         SmartState.Passed => StateBrushes.Running,
         SmartState.Warning => StateBrushes.Transient,
@@ -241,28 +225,38 @@ public sealed class StorageRow : INotifyPropertyChanged
     /// <summary>
     /// The Health cell. The app's own state vocabulary rather than smartctl's <c>PASSED</c>, so this
     /// column reads like every other state column in the app; smartctl's own words are in
-    /// <see cref="HealthTip"/>, which is where the host's phrasing belongs.
+    /// <see cref="HealthTip"/>, which is where the host's phrasing belongs, and the whole reading is
+    /// in the details window, which is where a paragraph belongs.
+    ///
+    /// <para><b>It is the verdict alone, and the temperature it used to carry is now a column.</b>
+    /// Nothing is lost by that: <see cref="SmartColumns.Over"/> draws the Temperature column exactly
+    /// when some disk reported a temperature, so a reading that existed to be appended here has a
+    /// cell of its own to sit in, and where none did there was never anything to append. It also
+    /// stops one cell holding two unrelated facts, one of which sorts and one of which did not.</para>
     /// </summary>
     public string HealthText
     {
         get
         {
-            if (!IsDisk) return "";
             if (!HealthProbed) return "not available";
-
-            var word = Health?.State switch
-            {
-                SmartState.Passed => "Healthy",
-                SmartState.Warning => "Warning",
-                SmartState.Failing => "Failing",
-                SmartState.Standby => "Asleep",
-                SmartState.Unsupported => "No SMART",
-                _ => "Unknown",
-            };
-
-            return Health?.TemperatureC is { } c ? $"{word} · {c:0} C" : word;
+            return VerdictOf(Health?.State ?? SmartState.Unknown);
         }
     }
+
+    /// <summary>
+    /// The app's own word for a verdict, shared with the disk details window for the reason
+    /// <see cref="BrushOf"/> is shared. smartctl's own <c>PASSED</c> stays in the tooltip and in the
+    /// window's Health tab, which is where the host's phrasing belongs.
+    /// </summary>
+    public static string VerdictOf(SmartState state) => state switch
+    {
+        SmartState.Passed => "Healthy",
+        SmartState.Warning => "Warning",
+        SmartState.Failing => "Failing",
+        SmartState.Standby => "Asleep",
+        SmartState.Unsupported => "No SMART",
+        _ => "Unknown",
+    };
 
     /// <summary>
     /// The Health cell's colour, and it is <b>never null</b>. A null <c>IBrush</c> bound to
@@ -271,13 +265,12 @@ public sealed class StorageRow : INotifyPropertyChanged
     /// <see cref="VmDetailsView"/> invisible once, and here it would hide the word "not available"
     /// on exactly the host that needs to read it.
     /// </summary>
-    public IBrush HealthBrush => (IsDisk && HealthProbed ? StateBrush : null) ?? StateBrushes.Stopped;
+    public IBrush HealthBrush => HealthProbed ? StateBrush : StateBrushes.Stopped;
 
     public string HealthTip
     {
         get
         {
-            if (!IsDisk) return "";
             if (!HealthProbed)
                 return HealthUnavailable.Length > 0
                     ? HealthUnavailable
@@ -292,29 +285,120 @@ public sealed class StorageRow : INotifyPropertyChanged
         }
     }
 
+    // ---- the SMART numbers -------------------------------------------------
+    //
+    // Four cells, every one of them empty on a disk that did not answer for it. Whether the column
+    // around them is drawn at all is SmartColumns'; these only ever say what this row knows. Each
+    // keeps the figure smartctl gave and formats it here, which is the rule the rest of this class
+    // follows: the record decided nothing.
+
     /// <summary>
-    /// The row tooltip. A disk names the hardware, because the model and the serial are what
-    /// identify a physical thing somebody may have to walk over and pull out of a bay; everything
-    /// else says where it sits and what is on it.
+    /// The drive's own sensor, in whole degrees. Celsius throughout, because that is the unit SMART
+    /// reports in and converting would mean saying which unit in the cell, in a column this narrow.
+    /// </summary>
+    public string TemperatureText => Health?.TemperatureC is { } c ? $"{c:0} C" : "";
+
+    /// <summary>Total powered-on time, as a duration rather than the five-digit hour count.</summary>
+    public string PowerOnText => Health?.PowerOnHours is { } h ? Age(h) : "";
+
+    /// <summary>The hours themselves, which the cell rounds away. Worth having on hover, not in a column.</summary>
+    public string PowerOnTip => Health?.PowerOnHours is { } h ? $"{h:N0} hours powered on" : "";
+
+    /// <summary>
+    /// How much of the drive's rated write endurance is <b>left</b>, which is NVMe's
+    /// <c>percentage_used</c> flipped. ATA reports no comparable figure, which is why this column and
+    /// Reallocated are rarely both on screen.
+    ///
+    /// <para><b>The reading is drawn the way round a person thinks about it.</b> The drive counts
+    /// upwards from nothing to its warranty limit, so its own figure is worst-at-the-top: 1% means a
+    /// nearly new drive. Every other percentage in this app and every other figure in this table is
+    /// better when it is higher, so an endurance column alone reading the other way is the one that
+    /// gets misread, and it gets misread in the dangerous direction. It is flipped once, here, and
+    /// the raw <c>percentage_used</c> survives untouched in the details window's NVMe log, which is
+    /// the place that reports what the drive said rather than what it means.</para>
+    /// </summary>
+    public string LifeText => LifeLeft(Health?.PercentageUsed) is { } left ? $"{left}%" : "";
+
+    /// <summary>
+    /// The flip, in one place because three of them read it: this cell, the sort arm behind the
+    /// column, and the details window's health summary. A column must sort on the value it was
+    /// rendered from, so a second copy of this arithmetic is a sort that runs backwards.
+    ///
+    /// <para><b>Clamped at zero, and that is not defensive.</b> A drive past its rated endurance
+    /// goes on reporting upwards, so <c>percentage_used</c> of 105 is an ordinary reading on a
+    /// well-used SSD and "-5% left" is not a thing to draw. Zero is the honest floor: it says the
+    /// warranty figure is spent, which is what the drive means, and <see cref="LifeTip"/> is where
+    /// the overshoot is said out loud.</para>
+    /// </summary>
+    public static int? LifeLeft(int? percentageUsed) =>
+        percentageUsed is { } used ? Math.Max(0, 100 - used) : null;
+
+    public string LifeTip
+    {
+        get
+        {
+            if (Health?.PercentageUsed is not { } used) return "";
+
+            var line = used >= 100
+                ? $"The drive has spent all of its rated write endurance, and reports {used}% of it " +
+                  "used."
+                : $"{100 - used}% of the drive's rated write endurance is left; it reports {used}% " +
+                  "used.";
+
+            return line + " The rating is the manufacturer's warranty figure rather than a cliff: a " +
+                   "drive at 0% left usually goes on working, and one with most of its life left can " +
+                   "still fail for other reasons.";
+        }
+    }
+
+    /// <summary>
+    /// ATA attribute 5, the sectors the drive has already remapped to its spares.
+    ///
+    /// <para>It is drawn plain rather than in the transient amber, although a non-zero count is
+    /// exactly what that colour is for. The count is already what puts the disk into
+    /// <see cref="SmartState.Warning"/>, so the dot beside the name and the Health cell are both
+    /// amber before anybody reads this column, and colouring the number too would be the same alarm
+    /// sounded a third time.</para>
+    /// </summary>
+    public string ReallocText => Health?.ReallocatedSectors is { } n ? n.ToString("N0") : "";
+
+    /// <summary>
+    /// The pending count beside the reallocated one, which has no column of its own: the two are the
+    /// same story a step apart (remapped already, and waiting to be), and a second column that is
+    /// zero on every healthy disk earns less than the line it costs here.
+    /// </summary>
+    public string ReallocTip
+    {
+        get
+        {
+            if (Health?.ReallocatedSectors is not { } n) return "";
+
+            var line = n == 0
+                ? "No sectors have been remapped."
+                : $"{n:N0} sector{(n == 1 ? " has" : "s have")} been remapped to the drive's spares.";
+
+            return Health?.PendingSectors is { } pending
+                ? line + (pending == 0
+                    ? " None are pending."
+                    : $" {pending:N0} more {(pending == 1 ? "is" : "are")} pending, meaning the drive " +
+                      "could not read them and has not remapped them yet.")
+                : line;
+        }
+    }
+
+    /// <summary>
+    /// The row tooltip. It names the hardware, because the model and the serial are what identify a
+    /// physical thing somebody may have to walk over and pull out of a bay.
     /// </summary>
     public string Summary
     {
         get
         {
-            var parts = new List<string> { $"{Path.Length switch { 0 => Name, _ => Path }} · {SizeText}" };
+            var parts = new List<string> { $"{(Path.Length == 0 ? Name : Path)} · {SizeText}" };
 
-            if (IsDisk)
-            {
-                if (Device.Model.Length > 0) parts.Add(Device.Model);
-                if (Device.Serial.Length > 0) parts.Add("serial " + Device.Serial);
-                if (Device.Transport.Length > 0) parts.Add(Device.Transport);
-            }
-            else
-            {
-                if (FsText.Length > 0) parts.Add(FsText);
-                if (Device.Label.Length > 0) parts.Add($"labelled \"{Device.Label}\"");
-                parts.Add(MountText.Length > 0 ? "mounted at " + MountText : "not mounted");
-            }
+            if (Device.Model.Length > 0) parts.Add(Device.Model);
+            if (Device.Serial.Length > 0) parts.Add("serial " + Device.Serial);
+            if (Device.Transport.Length > 0) parts.Add(Device.Transport);
 
             return string.Join(" · ", parts);
         }
@@ -332,13 +416,7 @@ public sealed class StorageRow : INotifyPropertyChanged
     /// Takes the listing again. The health half is separate because it arrives on its own round
     /// trip, after this row is already on screen.
     /// </summary>
-    public void Update(BlockDevice device, int depth, bool expanded)
-    {
-        Device = device;
-        Depth = depth;
-        HasChildren = device.Children.Count > 0;
-        IsExpanded = expanded;
-    }
+    public void Update(BlockDevice device) => Device = device;
 
     /// <param name="probed">Whether an answer could be had at all; see <see cref="HealthProbed"/>.</param>
     /// <param name="unavailable">Why not, when <paramref name="probed"/> is false and the host said.</param>
@@ -360,4 +438,47 @@ public sealed class StorageRow : INotifyPropertyChanged
     }
 
     private void Raise(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+/// <summary>
+/// Which of the storage table's four SMART columns are worth drawing on this host, taken over the
+/// whole listing rather than per disk.
+///
+/// <para><b>A column of blanks is not an answer</b>, which is the absent-tooling rule one level
+/// down: the module already refuses to hide itself over a missing smartctl, because the rest of the
+/// page is exactly as useful without it, and by the same argument a column no disk on this host can
+/// fill in is a heading with nothing under it. Which of these a host can answer is a fact about its
+/// drives and not about VirtDeck: Wear is NVMe's <c>percentage_used</c> and Reallocated is ATA's
+/// attribute 5, so a host with one kind of drive in it draws one of the two and never both.</para>
+///
+/// <para><b>Reported, not non-zero.</b> The Reallocated column stays on a host whose disks all read
+/// zero, because there that zero is the reading somebody came for: it is the difference between "no
+/// sectors have gone bad" and "nothing here can tell you". Hiding it until something went wrong
+/// would make the column's own appearance the alarm, which is a worse way to say it than the amber
+/// the row already wears.</para>
+/// </summary>
+public readonly record struct SmartColumns(bool Temperature, bool PowerOn, bool Wear, bool Reallocated)
+{
+    /// <summary>What a host with no readable SMART draws, which is the four columns gone.</summary>
+    public static readonly SmartColumns None = new();
+
+    /// <summary>
+    /// The union over every disk that answered. A figure one disk reported is enough to earn the
+    /// column, and the disks that did not then keep an empty cell in it, which is the honest reading:
+    /// the host can say this about some of its drives and not about others.
+    /// </summary>
+    public static SmartColumns Over(IEnumerable<DiskHealth> health)
+    {
+        bool temperature = false, powerOn = false, wear = false, reallocated = false;
+
+        foreach (var disk in health)
+        {
+            temperature |= disk.TemperatureC is not null;
+            powerOn |= disk.PowerOnHours is not null;
+            wear |= disk.PercentageUsed is not null;
+            reallocated |= disk.ReallocatedSectors is not null;
+        }
+
+        return new SmartColumns(temperature, powerOn, wear, reallocated);
+    }
 }

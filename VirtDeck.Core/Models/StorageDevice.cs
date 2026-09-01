@@ -132,6 +132,69 @@ namespace VirtDeck.Models
     public sealed record FstabEntry(string Spec, string Target, string FsType, string Options);
 
     /// <summary>
+    /// Whether <c>/etc/fstab</c> names a device, and how.
+    ///
+    /// <para>Lifted out of the storage details pane when that pane became the disk details window:
+    /// it is pure logic over two model types, its one remaining caller is the Partitions tab's
+    /// "At boot" column, and a view is the wrong place for a rule about a file format.</para>
+    /// </summary>
+    public static class Fstab
+    {
+        /// <summary>
+        /// What the file says about this device, or "not in fstab". Configured-but-not-mounted and
+        /// mounted-but-not-configured are both ordinary states worth being able to read, and neither
+        /// can be seen from the device alone.
+        /// </summary>
+        public static string BootLine(BlockDevice device, IReadOnlyList<FstabEntry> fstab)
+        {
+            var entry = fstab.FirstOrDefault(e => Names(e.Spec, device));
+            if (entry is null) return "not in fstab";
+
+            var where = entry.Target == "none" ? entry.FsType : entry.Target;
+            return $"{where} ({entry.Options})";
+        }
+
+        /// <summary>
+        /// Whether one fstab spec names this device. Matched on all five spellings a line may use,
+        /// because <c>UUID=</c> is what an installer writes, <c>LABEL=</c> is what a hand-edited file
+        /// often uses, and a device path is what the rest do; matching only one of them would report
+        /// a configured filesystem as unconfigured on most hosts.
+        /// </summary>
+        public static bool Names(string spec, BlockDevice device)
+        {
+            if (spec.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase))
+                return device.Uuid.Length > 0 &&
+                       string.Equals(spec[5..], device.Uuid, StringComparison.OrdinalIgnoreCase);
+
+            if (spec.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase))
+                return device.PartUuid.Length > 0 &&
+                       string.Equals(spec[9..], device.PartUuid, StringComparison.OrdinalIgnoreCase);
+
+            if (spec.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase))
+                return device.Label.Length > 0 && spec[6..] == device.Label;
+
+            if (spec.StartsWith("PARTLABEL=", StringComparison.OrdinalIgnoreCase))
+                return device.PartLabel.Length > 0 && spec[10..] == device.PartLabel;
+
+            // A path, and it may be either the device node or a /dev/mapper or /dev/disk/by-*
+            // symlink to it. Only the node can be compared here, since resolving a symlink means a
+            // round trip; the /dev/mapper form is the one that matters in practice and it ends in
+            // the device's name.
+            return spec == device.Path ||
+                   (spec.StartsWith("/dev/mapper/", StringComparison.Ordinal) &&
+                    spec["/dev/mapper/".Length..] == device.Name);
+        }
+
+        /// <summary>
+        /// Whether this device is in use as swap. A swap volume is mounted in every sense that
+        /// matters and in none that <c>statvfs</c> understands, so it is answered from
+        /// <c>/proc/swaps</c> rather than left reading "not mounted".
+        /// </summary>
+        public static bool IsSwap(BlockDevice device, IReadOnlyList<string> swaps) =>
+            device.FsType == "swap" || swaps.Contains(device.Path, StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// What SMART says about a disk. Six answers rather than a bool, because five of them are not
     /// "it is fine" and collapsing them would put the same word on a disk that is failing, a disk
     /// that is asleep and a disk nobody could ask.
@@ -183,6 +246,182 @@ namespace VirtDeck.Models
         string Serial = "",
         string Firmware = "",
         string Detail = "");
+
+    /// <summary>
+    /// One row of an ATA drive's SMART attribute table, as <c>smartctl -A</c> reports it.
+    ///
+    /// <para>The module-wide pass walks this table and keeps two numbers out of it (ids 5 and 197),
+    /// because on ATA the temperature, the power-on hours and the reallocated count do not exist
+    /// anywhere else. This is the same table kept whole, which is what the disk details window's
+    /// Health tab draws and what nothing before it had anywhere to put.</para>
+    ///
+    /// <para><see cref="Raw"/> and <see cref="RawString"/> are both here and neither is redundant.
+    /// The number is what sorts and what a threshold is compared against; the string is smartctl's
+    /// own rendering, which for attribute 194 reads <c>"31 (Min/Max 24/45)"</c> and for 9 reads
+    /// <c>"14523h+21m+43.480s"</c>. Drawing the number alone would throw away what the vendor
+    /// packed into the other bytes.</para>
+    /// </summary>
+    /// <param name="WhenFailed">
+    /// <c>"now"</c>, <c>"past"</c>, or empty. Not a bool, because a drive that tripped an attribute
+    /// years ago and recovered is a different reading from one tripping it now, and only the second
+    /// is a reason to colour the row.
+    /// </param>
+    public sealed record SmartAttribute(
+        int Id,
+        string Name,
+        int? Value = null,
+        int? Worst = null,
+        int? Threshold = null,
+        long? Raw = null,
+        string RawString = "",
+        bool PreFailure = false,
+        bool UpdatedOnline = false,
+        string WhenFailed = "")
+    {
+        /// <summary>
+        /// Whether the drive says this attribute is at or past the point it was told to warn about.
+        /// Both halves must be present: a threshold of 0 with a value of 0 is the ordinary reading
+        /// for a great many old-age attributes and is not a failure.
+        /// </summary>
+        public bool AtThreshold =>
+            Value is { } v && Threshold is { } t && t > 0 && v <= t;
+
+        /// <summary>Failing now, which is the only state that earns a row a colour.</summary>
+        public bool FailingNow =>
+            string.Equals(WhenFailed, "now", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// An NVMe drive's SMART/Health Information log, whole.
+    ///
+    /// <para>NVMe has no attribute table: the protocol defines this one fixed log instead, which is
+    /// why the Health tab draws a two-column name and value table here where an ATA drive gets seven
+    /// columns. Five of these fields are already read by the module-wide pass to reach a verdict;
+    /// the rest exist only for this window.</para>
+    /// </summary>
+    public sealed record NvmeHealth
+    {
+        public long? CriticalWarning { get; init; }
+        public double? TemperatureC { get; init; }
+        public int? AvailableSpare { get; init; }
+        public int? AvailableSpareThreshold { get; init; }
+        public int? PercentageUsed { get; init; }
+
+        /// <summary>Units of 1000 512-byte blocks, which is what the spec counts in.</summary>
+        public long? DataUnitsRead { get; init; }
+        public long? DataUnitsWritten { get; init; }
+
+        public long? HostReadCommands { get; init; }
+        public long? HostWriteCommands { get; init; }
+        public long? ControllerBusyTimeMinutes { get; init; }
+        public long? PowerCycles { get; init; }
+        public long? PowerOnHours { get; init; }
+        public long? UnsafeShutdowns { get; init; }
+        public long? MediaErrors { get; init; }
+        public long? ErrorLogEntries { get; init; }
+        public long? WarningTempTimeMinutes { get; init; }
+        public long? CriticalTempTimeMinutes { get; init; }
+    }
+
+    /// <summary>
+    /// One line of the drive's self-test log. Read but never started: running a self test is a write
+    /// to the drive and is outside what this window does.
+    /// </summary>
+    /// <param name="LbaFirstError">Where a read test stopped, or null when it did not.</param>
+    public sealed record SelfTestEntry(
+        int Num,
+        string Type,
+        string Status,
+        long? LifetimeHours = null,
+        long? LbaFirstError = null)
+    {
+        /// <summary>
+        /// Whether this run ended badly. smartctl spells a clean run "Completed without error" and
+        /// an aborted one several ways, so the test is for the words that mean a failure rather than
+        /// for the one that means success.
+        /// </summary>
+        public bool Failed =>
+            Status.Contains("failure", StringComparison.OrdinalIgnoreCase) ||
+            Status.Contains("failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Everything <c>smartctl -x</c> says about one disk: the full attribute table or NVMe log, the
+    /// self-test history, and the identity block.
+    ///
+    /// <para><b>This is a second read and not a richer version of the module-wide pass.</b> That
+    /// pass runs over every disk on the host to fill four summary columns and must stay cheap; this
+    /// one runs for the single disk a window was opened on. The verdict is reached by the same
+    /// <c>Assess</c> and worded by the same <c>Detail</c>, so the table and the window can never
+    /// disagree about a disk.</para>
+    ///
+    /// <para><see cref="Probed"/> and <see cref="Failure"/> are <see cref="HealthReading"/>'s pair
+    /// and are here for the same reason: a host with no smartmontools, a smartmontools too old for
+    /// <c>-j</c>, and a device with no SMART are three different answers the tab has to draw, and
+    /// none of them is an exception.</para>
+    /// </summary>
+    public sealed record DiskDetail
+    {
+        public string Device { get; init; } = "";
+        public SmartState State { get; init; } = SmartState.Unknown;
+
+        /// <summary>The sentence behind the state, in smartctl's own words where there are any.</summary>
+        public string Detail { get; init; } = "";
+
+        // The identity block. Every one of these can be absent: a virtio disk answers none of them,
+        // and an NVMe drive has no SATA version to report.
+        public string Model { get; init; } = "";
+        public string Serial { get; init; } = "";
+        public string Firmware { get; init; } = "";
+        public string Wwn { get; init; } = "";
+        public long? CapacityBytes { get; init; }
+
+        /// <summary>RPM, 0 for a solid-state device, or null where the drive did not say.</summary>
+        public int? RotationRate { get; init; }
+
+        public string FormFactor { get; init; } = "";
+        public string SataVersion { get; init; } = "";
+        public string InterfaceSpeed { get; init; } = "";
+
+        /// <summary><c>ATA</c>, <c>NVMe</c>, <c>SCSI</c>: what smartctl spoke to the device in.</summary>
+        public string Protocol { get; init; } = "";
+
+        public bool? SmartEnabled { get; init; }
+        public bool? TrimSupported { get; init; }
+
+        public double? TemperatureC { get; init; }
+        public long? PowerOnHours { get; init; }
+        public long? PowerCycles { get; init; }
+
+        /// <summary>The ATA attribute table in the drive's own order, empty on NVMe.</summary>
+        public IReadOnlyList<SmartAttribute> Attributes { get; init; } = [];
+
+        /// <summary>The NVMe health log, null on ATA.</summary>
+        public NvmeHealth? Nvme { get; init; }
+
+        /// <summary>The self-test log, newest first, empty where there is none.</summary>
+        public IReadOnlyList<SelfTestEntry> SelfTests { get; init; } = [];
+
+        /// <summary>How many entries the drive's error log holds, or null where it could not be read.</summary>
+        public int? ErrorLogCount { get; init; }
+
+        /// <summary>Whether <c>smartctl</c> is installed and was run at all.</summary>
+        public bool Probed { get; init; }
+
+        /// <summary>What <c>smartctl --version</c> said.</summary>
+        public string Version { get; init; } = "";
+
+        /// <summary>Why the read produced nothing although smartctl is here, or empty.</summary>
+        public string Failure { get; init; } = "";
+
+        /// <summary>Whether an answer can actually be expected, <see cref="HealthReading.Usable"/>'s rule.</summary>
+        public bool Usable => Probed && Failure.Length == 0;
+
+        /// <summary>Whether there is a table or a log with anything in it to draw.</summary>
+        public bool HasReadings => Attributes.Count > 0 || Nvme is not null;
+
+        public static readonly DiskDetail NotProbed = new();
+    }
 
     /// <summary>
     /// One reading of the host's block devices, in <see cref="UnitCatalog"/>'s shape: the listing,

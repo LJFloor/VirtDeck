@@ -10,9 +10,15 @@
     <x:Double x:Key="ColDevice">280</x:Double>
     <x:Double x:Key="ColKind">110</x:Double>
     <x:Double x:Key="ColSize">100</x:Double>
-    <x:Double x:Key="ColFs">130</x:Double>
-    <x:Double x:Key="ColMount">170</x:Double>
-    <x:Double x:Key="ColUsed">140</x:Double>
+
+    <!-- The four SMART columns, which are drawn only where a disk on this host answered for them.
+         They are kept narrow on purpose: three of them are on screen at once on a typical host, and
+         Health is the fill column that absorbs what is left, so every pixel taken here comes out of
+         the one cell that has a sentence to fit. -->
+    <x:Double x:Key="ColTemp">70</x:Double>
+    <x:Double x:Key="ColPowerOn">100</x:Double>
+    <x:Double x:Key="ColWear">70</x:Double>
+    <x:Double x:Key="ColRealloc">100</x:Double>
 
     <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
   </UserControl.Resources>
@@ -39,131 +45,131 @@
       </DockPanel>
     </Border>
 
-    <!-- Four of the seven columns sort and three deliberately do not, and that is not an oversight.
-         A sort here reorders the **disks** and never what is stacked on them: a partition table's
-         order is a fact about the disk, and floating a LUKS mapping above the EFI partition by size
-         turns a stack into a pile. So the columns that carry an order are the ones that mean
-         something about a whole disk, and Filesystem, Mounted at and Used, which only ever describe
-         a child, carry no SortKey at all. TableSort skips a cell with an empty key rather than
-         cycling into one nothing answers, which is exactly what that affordance is for.
+    <!-- **Every column here sorts, and that is new.** Three of them used not to: Filesystem,
+         Mounted at and Used only ever described a partition or a volume, and a sort on them would
+         have reordered the disks by a fact about something stacked on one. Those three are gone with
+         the tree, so what is left is eight columns that are each about a whole disk and each carry
+         an order. TableSort still skips a cell with an empty SortKey; the storage table is simply no
+         longer the table that needed it, and the Partitions tab in the details window is where a
+         sort would now turn a stack into a pile.
 
-         Indent clears the chevron slot (16) plus the state dot's own (14) so the heading sits over
-         the name rather than over the art in front of it. -->
+         **The four SMART columns are drawn only where a disk on this host answered for them**, which
+         is the absent-tooling rule applied to a column rather than to a page: a column of blanks is
+         not an answer, and which of these a host can fill in is a fact about its drives rather than
+         about VirtDeck. Life left is NVMe's and Reallocated is ATA's, so a single-technology host draws
+         one or the other and never both. The verdict stays last and stays the fill column, so the
+         numbers behind it read left to right into it and what is left over goes to the one cell with
+         a sentence in it. Their visibility is the module's to set; see SmartColumns.
+
+         Indent clears the state dot's slot (14) so the heading sits over the name rather than over
+         the art in front of it. It was 30 while a chevron stood there too. -->
     <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
             BorderThickness="0,0,0,1" BorderBrush="#22808080">
       <DockPanel Name="DeviceHeaderStrip">
-        <c:ColumnHeader DockPanel.Dock="Left" Text="Device" SortKey="device" Indent="30"
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Device" SortKey="device" Indent="14"
                         Width="{StaticResource ColDevice}" />
         <c:ColumnHeader DockPanel.Dock="Left" Text="Kind" SortKey="kind"
                         Width="{StaticResource ColKind}"
-                        Tip="What the device is. A disk reads SSD or HDD, because that it is a disk is already said by its place in the tree." />
+                        Tip="What the drive is. SSD or HDD, because that it is a disk is already said by it being in this table." />
         <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
                         Width="{StaticResource ColSize}" />
-        <c:ColumnHeader DockPanel.Dock="Left" Text="Filesystem"
-                        Width="{StaticResource ColFs}"
-                        Tip="The filesystem on it, or the partition type where there is none. A whole disk holds a partition table rather than a filesystem, so it says nothing here." />
-        <c:ColumnHeader DockPanel.Dock="Left" Text="Mounted at"
-                        Width="{StaticResource ColMount}" />
-        <c:ColumnHeader DockPanel.Dock="Left" Text="Used"
-                        Width="{StaticResource ColUsed}" />
+        <c:ColumnHeader Name="TempHeader" DockPanel.Dock="Left" Text="Temp" SortKey="temp"
+                        Width="{StaticResource ColTemp}"
+                        Tip="What the drive's own temperature sensor reads. Empty for a disk that has none to report." />
+        <c:ColumnHeader Name="PowerOnHeader" DockPanel.Dock="Left" Text="Powered on" SortKey="poweron"
+                        Width="{StaticResource ColPowerOn}"
+                        Tip="How long the drive has been powered on in total, as SMART has counted it. Sorting puts the oldest drive on the host at one end." />
+        <c:ColumnHeader Name="WearHeader" DockPanel.Dock="Left" Text="Life left" SortKey="wear"
+                        Width="{StaticResource ColWear}"
+                        Tip="How much of its rated write endurance an NVMe drive has left. It is the drive's own percentage-used figure flipped, so it reads the same way round as everything else here: higher is better. 100% is the manufacturer's rating rather than a cliff, and a drive at 0% left usually goes on working." />
+        <c:ColumnHeader Name="ReallocHeader" DockPanel.Dock="Left" Text="Reallocated" SortKey="realloc"
+                        Width="{StaticResource ColRealloc}"
+                        Tip="Sectors the drive has already remapped to its spares. Zero is the healthy reading; a count that climbs between visits is the classic sign of a disk on its way out." />
         <c:ColumnHeader Text="Health" SortKey="health"
                         Tip="What the drive's own SMART reports. Sorting puts the disks worth looking at first." />
       </DockPanel>
     </Border>
 
-    <!-- List, splitter, details pane. A Grid rather than a third DockPanel.Dock because a
-         GridSplitter can only resize rows it is a child of. The pane's row height is restored from
-         settings in the constructor and saved back on Deactivate, as in the VM module. -->
-    <Grid Name="StorageSplit" RowDefinitions="*,4,200">
+    <Panel>
+      <!-- Multiple, so Copy device path can take several at once. Disk details is a single-selection
+           command and says so by being disabled on anything else: one window per disk is the point
+           of it, and opening five at once from one keystroke is not what anybody meant. -->
+      <ListBox Name="DeviceList" SelectionMode="Multiple" Background="Transparent" Padding="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ContextMenu>
+          <ContextMenu Name="DeviceMenu">
+            <MenuItem Name="MenuDetails" Header="Disk details" />
+            <MenuItem Name="MenuCopyPath" Header="Copy device path" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:StorageRow">
 
-      <Panel Grid.Row="0">
-        <!-- Multiple, so Copy device path can take several at once and so the details pane has a
-             "several selected" state to draw rather than showing one of them as if it were the
-             selection. The VM list is the same. -->
-        <ListBox Name="DeviceList" SelectionMode="Multiple" Background="Transparent" Padding="0"
-                 ItemContainerTheme="{StaticResource JbTableRow}">
-          <ListBox.ContextMenu>
-            <ContextMenu Name="DeviceMenu">
-              <MenuItem Name="MenuCopyPath" Header="Copy device path" />
-              <MenuItem Name="MenuExpandAll" Header="Expand all" />
-              <MenuItem Name="MenuCollapseAll" Header="Collapse all" />
-            </ContextMenu>
-          </ListBox.ContextMenu>
-          <ListBox.ItemTemplate>
-            <DataTemplate DataType="vm:StorageRow">
-              <StackPanel Classes="cells" Orientation="Horizontal" ToolTip.Tip="{Binding Summary}">
+            <!-- **A DockPanel and not a horizontal StackPanel, which is a fix and not a style
+                 preference.** The heading strip above is a DockPanel whose last child fills, so
+                 Health is its fill column; the row was a StackPanel, which measures its children
+                 with infinite width, so the Health cell's TextTrimming never fired and a long
+                 verdict ran off the right-hand edge of the row while the heading above it had been
+                 squeezed to nothing. Docking every cell Left and leaving Health as the fill child is
+                 what makes the row and the strip the same layout.
 
-                <!-- The tree lives in this one cell: a spacer as wide as the row is deep, a
-                     chevron where there is something under it, and the state dot. Both the spacer
-                     and the chevron's empty slot are Borders with a width rather than margins, so
-                     the row's hover paints them along with everything else instead of leaving a
+                 The .cells gutter style has a DockPanel arm with no :not(:nth-child(1)) guard, which
+                 is right here for the reason it is right in the file explorer: the first cell is a
+                 DockPanel rather than a TextBlock, so the rule does not reach it and every TextBlock
+                 it does reach genuinely is a column that wants the 6px. -->
+            <DockPanel Classes="cells" ToolTip.Tip="{Binding Summary}">
+
+              <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColDevice}">
+                <!-- The dot's slot is kept at its width whatever the dot is doing, so every name in
+                     the column starts at the same place. A Border with a width rather than a margin,
+                     so the row's hover paints it along with everything else instead of leaving a
                      dead strip down the left. -->
-                <DockPanel Width="{StaticResource ColDevice}">
-                  <Border DockPanel.Dock="Left" Width="{Binding IndentPixels}" />
+                <Panel DockPanel.Dock="Left" Width="14">
+                  <Ellipse Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center"
+                           Fill="{Binding StateBrush}" ToolTip.Tip="{Binding HealthTip}" />
+                </Panel>
 
-                  <Button DockPanel.Dock="Left" Theme="{StaticResource JbToolButton}"
-                          IsVisible="{Binding HasChildren}" Padding="0" Width="16" Height="16"
-                          MinHeight="0" VerticalAlignment="Center">
-                    <Path Data="{Binding ChevronData}" Width="16" Height="16"
-                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
-                  </Button>
-                  <Border DockPanel.Dock="Left" Width="16" IsVisible="{Binding !HasChildren}" />
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+              </DockPanel>
 
-                  <!-- Only a disk gets a dot: a partition is a fact, a disk is a thing that can be
-                       dying. The slot is kept at its width either way so every name in the column
-                       starts at the same place. -->
-                  <Panel DockPanel.Dock="Left" Width="14">
-                    <Ellipse Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center"
-                             Fill="{Binding StateBrush}" IsVisible="{Binding IsDisk}"
-                             ToolTip.Tip="{Binding HealthTip}" />
-                  </Panel>
+              <TextBlock DockPanel.Dock="Left" Text="{Binding TypeText}"
+                         Width="{StaticResource ColKind}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding SizeText}"
+                         Width="{StaticResource ColSize}" VerticalAlignment="Center" />
 
-                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis" />
-                </DockPanel>
+              <!-- The SMART numbers. Every one is blank on a disk that did not report it, and the
+                   column itself is gone when no disk on the host did; the flags are table-wide and
+                   set from the listing, never per row. -->
+              <TextBlock DockPanel.Dock="Left" Text="{Binding TemperatureText}"
+                         Width="{StaticResource ColTemp}" VerticalAlignment="Center"
+                         IsVisible="{Binding ShowTemperature}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding PowerOnText}"
+                         Width="{StaticResource ColPowerOn}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis"
+                         IsVisible="{Binding ShowPowerOn}" ToolTip.Tip="{Binding PowerOnTip}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding LifeText}"
+                         Width="{StaticResource ColWear}" VerticalAlignment="Center"
+                         IsVisible="{Binding ShowWear}" ToolTip.Tip="{Binding LifeTip}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding ReallocText}"
+                         Width="{StaticResource ColRealloc}" VerticalAlignment="Center"
+                         IsVisible="{Binding ShowReallocated}" ToolTip.Tip="{Binding ReallocTip}" />
 
-                <TextBlock Text="{Binding TypeText}" Width="{StaticResource ColKind}"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding SizeText}" Width="{StaticResource ColSize}"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding FsText}" Width="{StaticResource ColFs}"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding MountText}" Width="{StaticResource ColMount}"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding HealthText}" Foreground="{Binding HealthBrush}"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding HealthTip}" />
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
 
-                <!-- A Border and not a bare StackPanel: the .cells gutter style in App.axaml reaches
-                     direct TextBlock and Border children only, so a panel put here would sit 6px
-                     left of the column it belongs to. -->
-                <Border Width="{StaticResource ColUsed}">
-                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding UsedText}" Width="34" VerticalAlignment="Center" />
-                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}"
-                                 Width="90" Height="6" VerticalAlignment="Center"
-                                 IsVisible="{Binding HasUsage}" />
-                  </StackPanel>
-                </Border>
+      <!-- Why the table is empty, so a host with no lsblk, a listing that failed, a host with
+           genuinely nothing on it and a host whose block devices are all loop devices never look
+           the same. -->
+      <TextBlock Name="DeviceEmpty" Opacity="0.6" IsVisible="False"
+                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
 
-                <TextBlock Text="{Binding HealthText}" Foreground="{Binding HealthBrush}"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           ToolTip.Tip="{Binding HealthTip}" />
-              </StackPanel>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-
-        <!-- Why the table is empty, so a host with no lsblk, a listing that failed and a host with
-             genuinely nothing on it never look the same. -->
-        <TextBlock Name="DeviceEmpty" Opacity="0.6" IsVisible="False"
-                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-      </Panel>
-
-      <GridSplitter Grid.Row="1" Background="#22808080" ResizeDirection="Rows" />
-
-      <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="#22808080">
-        <vm:StorageDetailsView Name="Details" />
-      </Border>
-
-    </Grid>
   </DockPanel>
 </UserControl>

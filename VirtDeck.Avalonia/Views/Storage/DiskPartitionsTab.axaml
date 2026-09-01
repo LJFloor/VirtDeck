@@ -1,0 +1,104 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+             x:Class="VirtDeck.Avalonia.Views.Storage.DiskPartitionsTab">
+
+  <UserControl.Resources>
+    <x:Double x:Key="ColPartName">200</x:Double>
+    <x:Double x:Key="ColPartKind">95</x:Double>
+    <x:Double x:Key="ColPartSize">85</x:Double>
+    <x:Double x:Key="ColPartFs">100</x:Double>
+    <x:Double x:Key="ColPartLabel">110</x:Double>
+    <x:Double x:Key="ColPartMount">145</x:Double>
+    <x:Double x:Key="ColPartUsed">100</x:Double>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- **The heading cells are plain TextBlocks and not Controls/ColumnHeader, which is the one
+         deliberate refusal on this page.** The argument that used to keep three of the storage
+         table's columns unsorted applies to this whole table: a partition table's order is a fact
+         about the disk, and floating a LUKS mapping above the EFI partition by size turns a stack
+         into a pile. A heading that offers an order which would destroy what the table is showing is
+         worse than one that does not offer. HostManagerWindow's saved-host list refuses to sort for
+         the same shape of reason.
+
+         The 12,3 padding and the 6px cell gutter still have to match the rest of the app, so the
+         strip is written exactly as a sortable one is; it simply has nothing to click. -->
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Left" Text="Device" Width="{StaticResource ColPartName}" />
+        <TextBlock DockPanel.Dock="Left" Text="Kind" Width="{StaticResource ColPartKind}" />
+        <TextBlock DockPanel.Dock="Left" Text="Size" Width="{StaticResource ColPartSize}" />
+        <TextBlock DockPanel.Dock="Left" Text="Filesystem" Width="{StaticResource ColPartFs}" />
+        <TextBlock DockPanel.Dock="Left" Text="Label" Width="{StaticResource ColPartLabel}" />
+        <TextBlock DockPanel.Dock="Left" Text="Mounted at" Width="{StaticResource ColPartMount}" />
+        <TextBlock DockPanel.Dock="Left" Text="Used" Width="{StaticResource ColPartUsed}" />
+        <TextBlock Text="At boot"
+                   ToolTip.Tip="What /etc/fstab says about it. Configured but not mounted and mounted but not configured are both ordinary states, and neither can be seen from the device alone." />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <ListBox Name="PartitionList" Background="Transparent" Padding="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="s:DiskPartitionRow">
+            <DockPanel Classes="cells" ToolTip.Tip="{Binding Tip}">
+
+              <!-- The stack, drawn with an indent. No chevron: one disk's worth of rows is a handful
+                   and there is nothing worth folding away, which is what the table this came from
+                   needed them for. The spacer is a Border with a width rather than a margin, so the
+                   row's hover paints it instead of leaving a dead strip down the left. -->
+              <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColPartName}">
+                <Border DockPanel.Dock="Left" Width="{Binding IndentPixels}" />
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+
+              <TextBlock DockPanel.Dock="Left" Text="{Binding KindText}"
+                         Width="{StaticResource ColPartKind}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding SizeText}"
+                         Width="{StaticResource ColPartSize}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding FsText}"
+                         Width="{StaticResource ColPartFs}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding LabelText}"
+                         Width="{StaticResource ColPartLabel}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding MountText}"
+                         Width="{StaticResource ColPartMount}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+
+              <!-- **MinWidth="0" is what keeps this cell inside its own column, and Width alone
+                   never did.** Fluent gives ProgressBar a MinWidth of 200, and a minimum outranks
+                   Width in measure, so the bar lays out at 198px inside a 100px cell whatever the
+                   markup asks for and runs straight through the column beside it. Nothing errors and
+                   nothing warns; the bar is simply somewhere else.
+
+                   The 6px gutter is written out here because the .cells DockPanel arm in App.axaml
+                   reaches direct TextBlock children only, and this cell is a Border. -->
+              <Border DockPanel.Dock="Left" Width="{StaticResource ColPartUsed}" Padding="6,0,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding UsedText}" Width="30" VerticalAlignment="Center" />
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}"
+                               Width="52" MinWidth="0" Height="6" VerticalAlignment="Center"
+                               IsVisible="{Binding HasUsage}" />
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="{Binding BootText}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <TextBlock Name="PartitionEmpty" Opacity="0.6" IsVisible="False"
+                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+
+  </DockPanel>
+</UserControl>
