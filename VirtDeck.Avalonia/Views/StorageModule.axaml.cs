@@ -362,12 +362,22 @@ public partial class StorageModule : UserControl, IModule
         if (e.Source is StyledElement { DataContext: StorageRow row }) Toggle(row);
     }
 
+    /// <summary>
+    /// A double-tap on the row toggles it, but a double-tap that landed on the chevron does not:
+    /// the second click of it has already been answered by the button's own Click, so acting on it
+    /// here as well would fold and unfold and fold again on two clicks of one control.
+    /// </summary>
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if ((e.Source as Visual)?.GetSelfAndVisualAncestors()
-            .OfType<ListBoxItem>()
-            .FirstOrDefault()?.DataContext is StorageRow row)
-            Toggle(row);
+        foreach (var v in (e.Source as Visual)?.GetSelfAndVisualAncestors() ?? [])
+        {
+            if (v is Button) return;
+            if (v is ListBoxItem { DataContext: StorageRow row })
+            {
+                Toggle(row);
+                return;
+            }
+        }
     }
 
     private void Toggle(StorageRow row)
