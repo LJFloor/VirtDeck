@@ -438,14 +438,12 @@ namespace VirtDeck.Services
             const string script = """
                 export LC_ALL=C
                 if command -v virsh >/dev/null 2>&1; then
-                  a=$(virsh list --all --name 2>/dev/null | grep -c .)
                   r=$(virsh list --name 2>/dev/null | grep -c .)
-                  printf 'v\t%s\t%s\n' "${r:-0}" "${a:-0}"
+                  printf 'v\t%s\n' "${r:-0}"
                 fi
                 if command -v docker >/dev/null 2>&1; then
-                  a=$(docker ps --all --quiet 2>/dev/null | grep -c .)
                   r=$(docker ps --quiet 2>/dev/null | grep -c .)
-                  printf 'd\t%s\t%s\n' "${r:-0}" "${a:-0}"
+                  printf 'd\t%s\n' "${r:-0}"
                 fi
                 exit 0
                 """;
@@ -455,15 +453,12 @@ namespace VirtDeck.Services
 
             foreach (var (tag, text) in PackageScripts.Records(raw))
             {
-                var f = text.Split('\t');
-                if (f.Length < 2) continue;
-                if (!int.TryParse(f[0].Trim(), out var running)) continue;
-                if (!int.TryParse(f[1].Trim(), out var total)) continue;
+                if (!int.TryParse(text.Trim(), out var running)) continue;
 
                 workload = tag switch
                 {
-                    "v" => workload with { HasVirsh = true, VmsRunning = running, VmsTotal = total },
-                    "d" => workload with { HasDocker = true, ContainersRunning = running, ContainersTotal = total },
+                    "v" => workload with { HasVirsh = true, VmsRunning = running },
+                    "d" => workload with { HasDocker = true, ContainersRunning = running },
                     _ => workload,
                 };
             }

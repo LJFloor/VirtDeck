@@ -78,13 +78,8 @@ public partial class HostManagerWindow : Window
     /// What to do with a live connection. Defaults to opening a shell on it, which is the startup
     /// path; a shell opening this window passes its own replace instead.
     /// </param>
-    /// <param name="addNew">
-    /// Open on a fresh blank host rather than on a saved one. This is what "Add host" means now
-    /// that there is one window: a shortcut to the row the plus button would have made, not a
-    /// second place a host can be defined.
-    /// </param>
     public HostManagerWindow(HostProfile? select, HostProfile? connected,
-                             Action<SshConnectionManager>? onConnected, bool addNew = false)
+                             Action<SshConnectionManager>? onConnected)
     {
         InitializeComponent();
         _onConnected = onConnected ?? (ssh => new MainWindow(ssh).Show());
@@ -131,17 +126,10 @@ public partial class HostManagerWindow : Window
         {
             // With nothing saved this window is still the front door, so it opens on a blank host
             // rather than on an empty list with a disabled form and no obvious way in.
-            if (addNew || _rows.Count == 0) _rows.Add(NewHost());
+            if (_rows.Count == 0) _rows.Add(NewHost());
 
-            if (addNew)
-            {
-                HostList.SelectedItem = _rows[^1];
-            }
-            else
-            {
-                var target = select ?? AppSettings.Current.LastHost();
-                HostList.SelectedItem = _rows.FirstOrDefault(r => r.OriginalKey == target?.Key) ?? _rows[0];
-            }
+            var target = select ?? AppSettings.Current.LastHost();
+            HostList.SelectedItem = _rows.FirstOrDefault(r => r.OriginalKey == target?.Key) ?? _rows[0];
             PaintList();
 
             // The probe settles _rememberAvailable before anything reads it; the password fetch is

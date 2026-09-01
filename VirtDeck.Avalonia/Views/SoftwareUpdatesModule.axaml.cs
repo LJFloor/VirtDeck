@@ -30,7 +30,14 @@ namespace VirtDeck.Avalonia.Views;
 ///
 /// <b>There is no poll and no event tail.</b> Nothing on a host announces that a mirror published a
 /// package, so this is the user accounts module's answer rather than the services module's: a
-/// Refresh button, and a read on every activation.
+/// Refresh button.
+///
+/// <b>The listing is the host's, not this page's.</b> <see cref="PackageService"/> is one instance
+/// per connection and the dashboard's update tile reads the same one, so a listing either page pays
+/// for is the listing both of them draw, a refresh on either shows up on the other through
+/// <c>PackageService.Changed</c>, and neither re-runs seconds of work on the shared SSH lock to be
+/// told what it already knows. The probe still runs on every activation, because that one is cheap
+/// and is how a package manager installed mid-session stops being a dead end.
 /// </summary>
 public partial class SoftwareUpdatesModule : UserControl, IModule
 {
@@ -156,7 +163,17 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private void SetStatus(string text) { Status = text; StatusChanged?.Invoke(); }
     private void SetCaps(string text) { HostCapabilities = text; StatusChanged?.Invoke(); }
 
-    public void Attach(SshConnectionManager ssh) => _packages = new PackageService(ssh);
+    /// <summary>
+    /// The service is the connection's and not this module's: the dashboard's update tile attaches
+    /// to the same instance, so there is one listing, one reboot reading and one probe between the
+    /// two pages rather than two of each that can disagree. <see cref="OnPackagesChanged"/> is how
+    /// this page hears about a read the other one paid for.
+    /// </summary>
+    public void Attach(SshConnectionManager ssh)
+    {
+        _packages = PackageService.For(ssh);
+        _packages.Changed += OnPackagesChanged;
+    }
 
     public async Task ActivateAsync()
     {
@@ -164,17 +181,56 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         _active = true;
 
         // Draw the last answer before the round trip that replaces it, so a re-entry is not a blank
-        // table for as long as the host takes to answer.
+        // table for as long as the host takes to answer. That answer is shared with the dashboard,
+        // so it may be one this page never read.
         SetCaps(Packages.CapabilityText);
         if (Packages.Catalog.Available) Draw(Packages.Catalog);
+        DrawReboot();
+
+        // Read before the busy check and not after it: a request is spent by being looked at, and
+        // one left on the service while an upgrade was already running would fire the next time
+        // somebody opened this page, long after the button was pressed.
+        var install = Packages.TakeInstallRequest();
 
         // A command owns the screen while it runs, and re-listing underneath it would replace the
         // table it is reporting on. The command re-lists when it finishes.
         if (_busy) return;
 
-        await LoadAsync();
+        // Whoever asked for this asked about the updates, not about the history.
+        if (install) Tabs.SelectedIndex = 0;
+
+        await LoadAsync(force: false);
         if (_active && Tabs.SelectedIndex == 1) await LoadHistoryAsync(force: false);
+
+        // Asked for from the dashboard's Update now, which is the count on that page made
+        // actionable and nothing more: the install happens here, where the progress strip and the
+        // Cancel button are, and it asks first exactly as the button on this page does. Nothing is
+        // installed merely because somebody arrived on this page.
+        if (install && _active && _rows.Count > 0) await UpgradeAsync(securityOnly: false);
     }
+
+    /// <summary>
+    /// The shared package state moved, which is most often the dashboard having refreshed. It
+    /// arrives on whichever thread did the reading, so it is marshalled.
+    ///
+    /// <para>It draws only a listing that exists: a probe raises this too, and drawing an empty
+    /// catalog then would put "no package manager was found" on a host that has one and has simply
+    /// not been listed yet. And it draws nothing at all while a command is running, for the reason
+    /// <see cref="ActivateAsync"/> gives: the table under a transaction belongs to the transaction,
+    /// which re-lists when it finishes.</para>
+    /// </summary>
+    private void OnPackagesChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        if (_packages is null) return;
+
+        SetCaps(Packages.CapabilityText);
+        UpdateCommands();
+
+        if (_busy) return;
+
+        if (Packages.HasListed) Draw(Packages.Catalog);
+        DrawReboot();
+    });
 
     /// <summary>
     /// Stops the reads and leaves the commands alone. There is no timer to stop and no tail to leave
@@ -216,20 +272,26 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     public void Shutdown()
     {
         Deactivate();
+        if (_packages is not null) _packages.Changed -= OnPackagesChanged;
         try { _opCts?.Cancel(); } catch { }
     }
 
     // ---- Reading -------------------------------------------------------
 
     /// <summary>
-    /// Probe, list, and ask about a reboot, in that order and on every activation.
+    /// Probe, list, and ask about a reboot, in that order.
     ///
-    /// <b>The probe is not cached across activations on purpose.</b> A host that had no package
-    /// manager when VirtDeck connected may have one now, and latching the first answer would make
-    /// installing one mid-session a dead end. It is one cheap round trip against a module nobody
-    /// opens in a loop.
+    /// <para><b>The probe is not cached across activations on purpose.</b> A host that had no
+    /// package manager when VirtDeck connected may have one now, and latching the first answer would
+    /// make installing one mid-session a dead end. It is one cheap round trip against a module
+    /// nobody opens in a loop.</para>
+    ///
+    /// <para><b>The listing is, and it is cached on the host and not on the page.</b> It is seconds
+    /// of work holding the shared SSH lock, and the dashboard reads the same one through the same
+    /// service, so a listing already in hand is drawn rather than paid for a second time. Refresh,
+    /// on either page, is <paramref name="force"/> and is how somebody asks the host again.</para>
     /// </summary>
-    private async Task LoadAsync()
+    private async Task LoadAsync(bool force)
     {
         if (_packages is null) return;
 
@@ -246,15 +308,20 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
                 return;
             }
 
-            SetStatus($"Reading available updates with {Packages.Manager.DisplayName}…");
-            Draw(await Packages.ListAsync(_cts.Token));
+            if (force || !Packages.HasListed)
+            {
+                SetStatus($"Reading available updates with {Packages.Manager.DisplayName}…");
+                await Packages.ListAsync(_cts.Token);
+                await Packages.ReadRebootAsync(_cts.Token);
+            }
+
+            Draw(Packages.Catalog);
 
             // Repainted from the listing rather than only from the probe: the age of the package
             // index is something only the listing learns, and it is the half of that slot that
             // changes.
             SetCaps(Packages.CapabilityText);
 
-            await Packages.ReadRebootAsync(_cts.Token);
             DrawReboot();
         }
         catch (OperationCanceledException) { }
@@ -584,7 +651,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             if (!ok) return;
         }
 
-        await LoadAsync();
+        await LoadAsync(force: true);
     }
 
     /// <summary>
@@ -628,7 +695,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         // Whatever happened, the table has to stop claiming the host still wants these: a cancelled
         // or failed run has installed some of them, and only a fresh listing knows which.
-        await LoadAsync();
+        await LoadAsync(force: true);
 
         if (ok) SetStatus(_rows.Count == 0 ? "Up to date" : Status);
     }

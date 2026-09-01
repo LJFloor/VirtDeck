@@ -97,9 +97,28 @@
                 <Ellipse Name="ContainerDot" Width="9" Height="9" Margin="0,0,5,0" VerticalAlignment="Center" />
                 <TextBlock Name="ContainerText" Classes="factvalue" />
               </StackPanel>
-              <StackPanel Name="UpdateRowPanel" Orientation="Horizontal" IsVisible="False">
-                <TextBlock Classes="factlabel" Text="Updates" />
-                <TextBlock Name="UpdateText" Classes="factvalue" />
+              <StackPanel Name="UpdateRowPanel" IsVisible="False" Spacing="4">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Updates" />
+                  <TextBlock Name="UpdateText" Classes="factvalue" />
+                </StackPanel>
+                <!-- The count made actionable, and drawn only on the one answer this row can give
+                     that has something to act on. Not accented: that class is for the command that
+                     creates something, and this one hands the user to the page that installs, which
+                     asks before it does anything.
+
+                     Under the value and not beside it, because that value is the longest sentence
+                     in this box and a button after it is the first thing off the right-hand edge.
+                     The indent is an empty label cell rather than a margin, so it lines up with the
+                     value from the one width the .factlabel style already states. The Border is the
+                     app's usual workaround rather than padding, a disabled control not being
+                     hit-testable in Avalonia. -->
+                <StackPanel Name="UpdateNowRow" Orientation="Horizontal" IsVisible="False">
+                  <TextBlock Classes="factlabel" />
+                  <Border Background="Transparent" ToolTip.Tip="{Binding #UpdateNowButton.Tag}">
+                    <Button Name="UpdateNowButton" Content="Update now" />
+                  </Border>
+                </StackPanel>
               </StackPanel>
               <TextBlock Name="RebootText" Classes="error" IsVisible="False" Margin="0,4,0,0" />
             </StackPanel>

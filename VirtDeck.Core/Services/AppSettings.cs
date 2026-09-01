@@ -203,25 +203,17 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
-        /// Drops a saved host. The caller deletes its secrets (<see cref="SshCredentialStore.ForgetHost"/>);
-        /// this only owns the list.
-        /// </summary>
-        public void ForgetHost(string key)
-        {
-            Hosts.RemoveAll(h => h.Key == key);
-            if (LastHostKey == key) LastHostKey = "";
-            Save();
-        }
-
-        /// <summary>
         /// Replaces the whole saved list with what the host manager settled on, and is the one
         /// moment any of that window's editing becomes real: it edits a working copy, so Cancel
         /// there costs nothing and a half-typed row can never transiently collide with a saved one.
         ///
-        /// The caller owns the secrets, exactly as <see cref="ForgetHost"/>'s caller does. That
-        /// matters more here than there, because an edit to a host, port or username re-keys the
-        /// profile and the secrets filed under the old <see cref="HostProfile.Key"/> have to be
-        /// moved rather than simply left behind.
+        /// It is also the only way a host is dropped. There was a scoped <c>ForgetHost(key)</c>
+        /// beside this once, for the Forget item the shell's host cell used to carry; with host
+        /// management in one window, removing a row and committing is what forgetting a host is.
+        ///
+        /// <b>The caller owns the secrets.</b> An edit to a host, port or username re-keys the
+        /// profile, so what is filed under the old <see cref="HostProfile.Key"/> has to be moved
+        /// rather than simply left behind, and only the caller knows which key each row came from.
         /// </summary>
         public void ReplaceHosts(IReadOnlyList<HostProfile> hosts)
         {

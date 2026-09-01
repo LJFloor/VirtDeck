@@ -10,10 +10,11 @@ namespace VirtDeck.Avalonia.Views;
 /// closing the shell, or closing the login window without connecting, called
 /// <c>desktop.Shutdown()</c> outright.
 ///
-/// That stops being true the moment a login window can be opened *from* a live shell to add a
+/// That stops being true the moment a connect window can be opened *from* a live shell to add a
 /// host: cancelling it would have killed the app with a connected session on screen. So the two
 /// windows that own the app's lifetime register here instead, and the process ends when the last
-/// one goes.
+/// one goes. A host switch is not one of those moments any more, and never needs to be: it swaps
+/// the shell inside one window rather than building a second one.
 ///
 /// It also keeps <c>desktop.MainWindow</c> pointed at a window that exists. It used to be left on
 /// the login window that closed at hand-off, which was latent rather than broken only because
@@ -49,9 +50,6 @@ public static class ShellRegistry
             if (Lifetime is { } desktop) desktop.Shutdown();
         };
     }
-
-    /// <summary>Every live shell, newest last. The host switcher reads this to find the one it replaces.</summary>
-    public static IReadOnlyList<Window> Windows => Open;
 
     private static IClassicDesktopStyleApplicationLifetime? Lifetime =>
         global::Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;

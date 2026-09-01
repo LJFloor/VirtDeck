@@ -27,10 +27,17 @@ namespace VirtDeck.Services
         //
         // `. /etc/os-release` is fenced: a host without the file is an ordinary case (it is not
         // universal), and the tool search below still answers on its own.
+        //
+        // The `i` record is what the host says it is running, which the shell's host cell names in
+        // its menu. It is a record of its own rather than a third field on `o` because that one is
+        // the machine-readable half of the same question, which PackageManagers.Detect weighs; this
+        // is the sentence a person reads, and it is the unbounded field, which by the idiom's rule
+        // goes last in its own record rather than after two that would then have to be capped.
         private const string ProbeBody = """
             export LC_ALL=C
             . /etc/os-release 2>/dev/null
             printf 'o\t%s\t%s\n' "${ID:-}" "${ID_LIKE:-}"
+            printf 'i\t%s\n' "${PRETTY_NAME:-${NAME:-}}"
             for m in TOOLS; do
               p=$(command -v "$m" 2>/dev/null) || continue
               printf 'v\t%s\t%s\n' "$m" "$("$p" --version 2>/dev/null | head -n 1)"
@@ -61,6 +68,7 @@ namespace VirtDeck.Services
         {
             var id = string.Empty;
             var idLike = string.Empty;
+            var osName = string.Empty;
             var tools = new Dictionary<string, string>(StringComparer.Ordinal);
 
             foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
@@ -75,6 +83,10 @@ namespace VirtDeck.Services
                         break;
                     }
 
+                    case "i":
+                        osName = text.Trim();
+                        break;
+
                     case "v":
                     {
                         // A tool that answered nothing to --version is still installed, so the name is
@@ -88,7 +100,7 @@ namespace VirtDeck.Services
                 }
             }
 
-            return new HostToolset(id, idLike, tools);
+            return new HostToolset(id, idLike, tools) { OsName = osName };
         }
     }
 }

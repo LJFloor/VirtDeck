@@ -144,10 +144,8 @@ namespace VirtDeck.Models
     {
         public bool HasVirsh { get; init; }
         public int VmsRunning { get; init; }
-        public int VmsTotal { get; init; }
 
         public bool HasDocker { get; init; }
         public int ContainersRunning { get; init; }
-        public int ContainersTotal { get; init; }
     }
 }

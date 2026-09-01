@@ -1,0 +1,179 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             x:Class="VirtDeck.Avalonia.Views.ShellView">
+
+  <UserControl.Resources>
+    <!-- Module glyphs. All vector art in this app is inline Path data in the house style: a 16x16
+         box, stroked not filled, so it reads at one weight beside a 12pt label. -->
+    <!-- A gauge: a half dial with a needle on it, which is what a dashboard is called after.
+         The dial is drawn as two quarter sweeps rather than one 180 degree arc, for the reason
+         IconUserAccounts below gives: a single half-circle leaves the renderer no way to tell
+         which of the two semicircles was meant. -->
+    <StreamGeometry x:Key="IconDashboard">M2,12 A6,6 0 0 1 8,6 A6,6 0 0 1 14,12 M8,12 L11.5,8</StreamGeometry>
+    <StreamGeometry x:Key="IconVirtualMachines">M1,2 H15 V11 H1 Z M6,14 H10 M8,11 V14</StreamGeometry>
+    <StreamGeometry x:Key="IconContainers">M1,4 H15 V13 H1 Z M1,4 L3.5,1 H12.5 L15,4 M6,4 V13 M10,4 V13</StreamGeometry>
+    <StreamGeometry x:Key="IconFileExplorer">M1,3 H6 L7.5,5 H15 V13 H1 Z</StreamGeometry>
+    <StreamGeometry x:Key="IconTerminal">M1,3 H15 V13 H1 Z M4,6.5 L6.5,8.5 L4,10.5 M8,10.5 H12</StreamGeometry>
+    <!-- Head and shoulders: a circle above an open arc, both stroked, so it sits at the same weight
+         as the boxes beside it. The arc is drawn as two quarter sweeps rather than one, because a
+         single 180 degree arc gives the renderer no way to tell which of the two semicircles was
+         meant and both flags then have to carry it. -->
+    <StreamGeometry x:Key="IconUserAccounts">M8,2 A2.75,2.75 0 1 1 8,7.5 A2.75,2.75 0 1 1 8,2 Z M2.5,14 A5.5,5.5 0 0 1 8,9.5 A5.5,5.5 0 0 1 13.5,14</StreamGeometry>
+    <!-- Two slider rails with a square handle each. A gear is what a services page usually wears,
+         and a gear is filled art: drawn as a stroke at this size its teeth close up into a blob, so
+         the idea of a setting is carried by the sliders instead. -->
+    <StreamGeometry x:Key="IconServices">M1,5 H15 M1,11 H15 M4,3.5 H6 V6.5 H4 Z M10,9.5 H12 V12.5 H10 Z</StreamGeometry>
+    <!-- An arrow coming down into a tray. The arrow alone is a download and the tray alone is an
+         inbox; together they read as something arriving on the machine, which is what this module is
+         for. Same 16x16 stroked box as the five above, so it sits at their weight. -->
+    <StreamGeometry x:Key="IconSoftwareUpdates">M8,1.5 V9.5 M4.5,6 L8,9.5 L11.5,6 M2,11 V14 H14 V11</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- The status bar: the active module's two slots, the shell's own throughput readout, and one
+         place a module can hang a control of its own. Right-docked items are laid out from the
+         outside in, so the widget sits at the far right, which is where JetBrains puts the ones a
+         window has.
+
+         The inner MinHeight is what keeps the bar one height whether or not anything is hanging in
+         it: a widget is taller than a line of text, so without it the bar would grow on the way
+         into the containers module and shrink again on the way out. It carries the height the
+         padding used to, because a hanging control has to be able to fill the strip **top to
+         bottom** for its hover to read as a status bar cell rather than a pill floating in one;
+         the text beside it is centred in the same row instead.
+
+         The two cells do the same thing sideways, and that is what the negative margins are. The
+         bar's 10px side padding is the right inset for a line of text and the wrong one for
+         something clickable: it leaves the cell's hover stopping 10px short of the window edge,
+         with a dead strip beside it that looks like part of the cell and does not light up. So
+         each cell cancels the padding on the edge it is docked against and carries the same 10px
+         as its own Padding, which lands **inside** the hover; the separator beside it drops its
+         margin on that side, because the cell's padding is now that gap. Nothing moves a pixel;
+         the highlight simply covers what was already there. -->
+    <Border DockPanel.Dock="Bottom" Padding="10,0" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+      <DockPanel MinHeight="26">
+        <ContentControl Name="ModuleWidget" DockPanel.Dock="Right" VerticalAlignment="Stretch"
+                        Margin="0,0,-10,0" />
+        <Border Name="ModuleWidgetRule" DockPanel.Dock="Right" Width="1" Margin="10,4,0,4" Background="#33808080" />
+        <TextBlock Name="HostCapsText" DockPanel.Dock="Right" Opacity="0.7" VerticalAlignment="Center" />
+        <Border DockPanel.Dock="Right" Width="1" Margin="10,4" Background="#33808080" />
+        <TextBlock Name="ThroughputText" DockPanel.Dock="Right" Opacity="0.7" VerticalAlignment="Center"
+                   ToolTip.Tip="Combined SSH tunnel throughput: management channel, file transfers, SPICE consoles and NBD media streams" />
+        <!-- Which host this window is about, at the end of the bar the shell's own readouts are
+             on. It is the shell's, not a module's: it outlives every module switch and none of
+             them owns it. Left-docked ahead of StatusText, which keeps filling what is left. -->
+        <vm:HostSwitcherMenu Name="HostSwitcher" StatusBarMode="True" DockPanel.Dock="Left"
+                             Margin="-10,0,0,0" />
+        <Border DockPanel.Dock="Left" Width="1" Margin="0,4,10,4" Background="#33808080" />
+        <TextBlock Name="StatusText" VerticalAlignment="Center" />
+      </DockPanel>
+    </Border>
+
+    <!-- The side menu. The shell does not name its modules: it walks these items and talks to
+         whichever content implements IModule, so a new module is a TabItem here and nothing else. -->
+    <TabControl Name="Modules" Theme="{StaticResource JbModuleTabControl}">
+
+      <!-- First, which is the whole of what makes it the module the shell lands on: ApplyRelevance
+           settles the first selection onto the first visible tab, and this one names no required
+           tools so it is never hidden. -->
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconDashboard}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Dashboard" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:DashboardModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconVirtualMachines}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Virtual machines" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:VirtualMachinesModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconContainers}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Containers" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:ContainersModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconServices}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Services" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:ServicesModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconSoftwareUpdates}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Software updates" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:SoftwareUpdatesModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconUserAccounts}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="User accounts" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:UserAccountsModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconFileExplorer}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="File explorer" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:FileExplorerModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconTerminal}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Terminal" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:TerminalModule />
+      </TabItem>
+
+    </TabControl>
+  </DockPanel>
+</UserControl>

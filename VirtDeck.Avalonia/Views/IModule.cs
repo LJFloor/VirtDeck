@@ -104,3 +104,33 @@ public interface IModule
     /// <summary>The shell is closing, before the SSH connection is disposed.</summary>
     void Shutdown();
 }
+
+/// <summary>
+/// A module that sometimes hands the user to another one: the dashboard's Update now button, which
+/// belongs on the page that says there are updates and is carried out by the page that installs
+/// them.
+///
+/// <para>It is an interface of its own rather than another member of <see cref="IModule"/> because
+/// seven of the eight never do this, and an event is the one thing that cannot be defaulted on an
+/// interface the way <c>RequiredTools</c>, <c>StatusWidget</c> and <c>BusyReason</c> are: it has
+/// nowhere to keep its handlers. The shell subscribes to whichever modules implement it, so adding
+/// a module is still a TabItem plus a UserControl.</para>
+///
+/// <para><b>The shell still names no module.</b> The type comes off the module asking, exactly as
+/// <c>CurrentModuleType</c> and the module a host switch lands on already do, and the shell only
+/// looks for the tab whose content is of that type.</para>
+/// </summary>
+public interface IModuleNavigator
+{
+    /// <summary>
+    /// Put this module on screen. Named by its type, so the request does not depend on strip order
+    /// and cannot name a tab this host does not have: a type with no visible tab is ignored, which
+    /// is the right answer for a module the host has no tooling for.
+    ///
+    /// <b>It carries no instruction beyond which page to show.</b> What the page is to do when it
+    /// gets there is left where both modules can already see it, on the service they share, and is
+    /// picked up by the incoming module inside its own activation, where it is ordered against its
+    /// own reads instead of against a selection change.
+    /// </summary>
+    event Action<Type>? ModuleRequested;
+}

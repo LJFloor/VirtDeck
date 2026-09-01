@@ -25,7 +25,7 @@ namespace VirtDeck.Avalonia.Views;
 /// policy already says a hidden module leaves its event tails running. Coming back to this page
 /// after five minutes elsewhere shows those five minutes.</para>
 /// </summary>
-public partial class DashboardModule : UserControl, IModule
+public partial class DashboardModule : UserControl, IModule, IModuleNavigator
 {
     private HostMetricsService? _metrics;
     private PackageService? _packages;
@@ -60,14 +60,6 @@ public partial class DashboardModule : UserControl, IModule
     private TableSort? _mountSortOrNull;
     private TableSort MountSort => _mountSortOrNull!;
 
-    /// <summary>
-    /// Whether the update listing has been paid for this session. It is the one expensive read on
-    /// this page (<c>apt-get -s dist-upgrade</c> or dnf's check-update, seconds of work holding the
-    /// shared SSH lock), and this is the module the shell lands on at connect, so it runs once in
-    /// the background and after that only when Refresh asks.
-    /// </summary>
-    private bool _updatesRead;
-
     private SamplerState _samplerState = SamplerState.Healthy;
     private string _samplerDetail = "";
 
@@ -100,8 +92,20 @@ public partial class DashboardModule : UserControl, IModule
             graph.IntervalSeconds = HostMetricsService.IntervalSeconds;
         }
 
-        RefreshButton.Click += async (_, _) => await RefreshAsync();
+        RefreshButton.Click += async (_, _) => await RefreshAsync(force: true);
         RefreshButton.Tag = "Re-read the workload counts and check for updates";
+
+        // The whole of what this button does. The request is left on the service the two pages
+        // share and the shell is asked for the page that installs; that page picks the request up
+        // in its own activation, where it is already ordered against its own listing and its own
+        // confirmation. Nothing is installed from here: this page says what the host needs, and the
+        // page that does it is the one with the progress strip and the Cancel button on it.
+        UpdateNowButton.Click += (_, _) =>
+        {
+            if (_packages is null) return;
+            Packages.RequestInstallAll();
+            ModuleRequested?.Invoke(typeof(SoftwareUpdatesModule));
+        };
 
         DrawOverview(new HostOverview());
         DrawWorkload(new HostWorkload());
@@ -113,7 +117,16 @@ public partial class DashboardModule : UserControl, IModule
     private HostMetricsService Metrics =>
         _metrics ?? throw new InvalidOperationException("Module not attached.");
 
+    private PackageService Packages =>
+        _packages ?? throw new InvalidOperationException("Module not attached.");
+
     // ---- IModule -----------------------------------------------------------
+
+    /// <summary>
+    /// Where Update now goes. The shell selects the tab whose module is of the type named here, so
+    /// this page names the page that installs and the shell still names neither.
+    /// </summary>
+    public event Action<Type>? ModuleRequested;
 
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";
@@ -146,7 +159,12 @@ public partial class DashboardModule : UserControl, IModule
     /// </summary>
     public void Attach(SshConnectionManager ssh)
     {
-        _packages = new PackageService(ssh);
+        // The same instance the software updates module attaches to, so the two pages are two views
+        // of one listing rather than two listings that can disagree. Changed is how this page hears
+        // about a refresh, an upgrade or a probe that happened on the other one.
+        _packages = PackageService.For(ssh);
+        _packages.Changed += OnPackagesChanged;
+
         _metrics = new HostMetricsService(ssh);
 
         // All three arrive on the sampler's own read thread.
@@ -163,11 +181,13 @@ public partial class DashboardModule : UserControl, IModule
         _active = true;
 
         // Draw what is already in hand before the round trip that adds to it, so a re-entry is not
-        // a blank page for as long as the host takes to answer.
+        // a blank page for as long as the host takes to answer. The updates half of that is the
+        // shared answer, which the other page may have refreshed while this one was off screen.
         DrawOverview(Metrics.Overview);
+        DrawUpdates();
         PaintSamplerState();
 
-        await RefreshAsync(includeUpdates: !_updatesRead);
+        await RefreshAsync(force: false);
     }
 
     /// <summary>
@@ -186,6 +206,7 @@ public partial class DashboardModule : UserControl, IModule
     public void Shutdown()
     {
         Deactivate();
+        if (_packages is not null) _packages.Changed -= OnPackagesChanged;
         try { _metrics?.StopSampler(); } catch { }
     }
 
@@ -328,9 +349,13 @@ public partial class DashboardModule : UserControl, IModule
 
     // ---- the reads ---------------------------------------------------------
 
-    private async Task RefreshAsync() => await RefreshAsync(includeUpdates: true);
-
-    private async Task RefreshAsync(bool includeUpdates)
+    /// <param name="force">
+    /// The user pressed Refresh, so the update listing is paid for again. Without it an activation
+    /// costs the cheap half and a probe, and draws the listing already in hand: that listing is
+    /// shared with the software updates module, so re-reading it on every visit to either page
+    /// would be the same seconds of work over and over on the same shared SSH lock.
+    /// </param>
+    private async Task RefreshAsync(bool force)
     {
         if (_metrics is null || _busy) return;
         _busy = true;
@@ -349,7 +374,7 @@ public partial class DashboardModule : UserControl, IModule
                 Diagnostics.SpiceLog.Log($"[dashboard] workload read failed: {ex.Message}");
             }
 
-            if (includeUpdates) await ReadUpdatesAsync();
+            await ReadUpdatesAsync(force);
         }
         finally
         {
@@ -363,66 +388,66 @@ public partial class DashboardModule : UserControl, IModule
         VmRow.IsVisible = workload.HasVirsh;
         if (workload.HasVirsh)
         {
-            VmText.Text = Running(workload.VmsRunning, workload.VmsTotal, "defined");
-            VmDot.Fill = Dot(workload.VmsRunning, workload.VmsTotal);
+            VmText.Text = Running(workload.VmsRunning);
+            VmDot.Fill = Dot(workload.VmsRunning);
         }
 
         ContainerRow.IsVisible = workload.HasDocker;
         if (workload.HasDocker)
         {
-            ContainerText.Text = Running(workload.ContainersRunning, workload.ContainersTotal, "created");
-            ContainerDot.Fill = Dot(workload.ContainersRunning, workload.ContainersTotal);
+            ContainerText.Text = Running(workload.ContainersRunning);
+            ContainerDot.Fill = Dot(workload.ContainersRunning);
         }
     }
 
-    private static string Running(int running, int total, string noun) =>
-        total == 0 ? $"none {noun}" : $"{running} running of {total} {noun}";
+    private static string Running(int running) => $"{running} running";
 
     /// <summary>
-    /// The app's three state colours, read the way they are everywhere else: green means something
-    /// is up, amber means part of it is, grey means nothing is going anywhere.
+    /// Two of the app's three state colours: green means something is up, grey means nothing is.
+    /// There is no amber, because the row no longer states a total for a running count to be part of.
     /// </summary>
-    private static IBrush Dot(int running, int total) =>
-        total == 0 || running == 0 ? StateBrushes.Stopped
-        : running == total ? StateBrushes.Running
-        : StateBrushes.Transient;
+    private static IBrush Dot(int running) =>
+        running == 0 ? StateBrushes.Stopped : StateBrushes.Running;
 
     /// <summary>
     /// The one expensive read on this page, so it is paid once and then only when asked for. It
     /// runs after the workload counts rather than before, because the counts are cheap and the page
     /// should stop looking empty as soon as possible.
+    ///
+    /// <para><b>The listing is not this page's, it is the host's.</b> The same service answers the
+    /// software updates module, so whichever page pays for a listing is the page the other one
+    /// reads it from, and <see cref="PackageService.HasListed"/> is what says it has been paid for.
+    /// Refresh, on either page, is how somebody asks the host again.</para>
     /// </summary>
-    private async Task ReadUpdatesAsync()
+    private async Task ReadUpdatesAsync(bool force)
     {
         if (_packages is null) return;
 
-        UpdateRowPanel.IsVisible = true;
-        UpdateText.Text = "Checking for updates...";
+        // A refresh or an upgrade started on the other page holds the tool's own lock, so a listing
+        // run underneath one fails, and that failure would replace the catalog the page reporting on
+        // the transaction is drawing. What is on screen is the last good answer, and it stays.
+        if (Packages.Running) { DrawUpdates(); return; }
+
+        if (!Packages.HasListed)
+        {
+            UpdateRowPanel.IsVisible = true;
+            UpdateText.Text = "Checking for updates...";
+        }
 
         try
         {
-            var manager = await _packages.ProbeAsync(_cts.Token);
-            if (manager.Id.Length == 0)
+            // Probed on every read rather than once per session: a host that had no package manager
+            // when VirtDeck connected may have one now, and a latched answer would make installing
+            // one mid-session a dead end.
+            var manager = await Packages.ProbeAsync(_cts.Token);
+
+            if (manager.Id.Length > 0 && (force || !Packages.HasListed))
             {
-                // No package manager at all is not a state worth a row: the software updates module
-                // is not on this host's menu either, so the page simply does not raise the subject.
-                UpdateRowPanel.IsVisible = false;
-                RebootText.IsVisible = false;
-                _updatesRead = true;
-                return;
+                await Packages.ListAsync(_cts.Token);
+                await Packages.ReadRebootAsync(_cts.Token);
             }
 
-            var catalog = await _packages.ListAsync(_cts.Token);
-            UpdateText.Text = Describe(catalog, _packages.Manager);
-
-            var reboot = await _packages.ReadRebootAsync(_cts.Token);
-            // Unknown draws nothing. Telling somebody no reboot is needed after a kernel upgrade is
-            // the one wrong answer this check can give, so it does not guess.
-            RebootText.IsVisible = reboot.State == RebootState.Needed;
-            if (RebootText.IsVisible)
-                RebootText.Text = "This host needs a restart to finish applying its updates.";
-
-            _updatesRead = true;
+            DrawUpdates();
         }
         catch (OperationCanceledException)
         {
@@ -431,36 +456,117 @@ public partial class DashboardModule : UserControl, IModule
         }
         catch (Exception ex)
         {
+            // The reason is on screen and Refresh is how somebody asks again, which is also what the
+            // service recorded: a listing that threw counts as read.
+            UpdateRowPanel.IsVisible = true;
             UpdateText.Text = $"Could not read updates: {Trim(ex.Message)}";
-            _updatesRead = true; // the reason is on screen; Refresh is how somebody asks again
+            UpdateNowRow.IsVisible = false;
         }
+    }
+
+    /// <summary>
+    /// The shared package state moved, which is most often the software updates module having
+    /// refreshed, installed something or found a manager where there was none. Marshalled, because
+    /// it arrives on whichever thread did the reading.
+    /// </summary>
+    private void OnPackagesChanged() => Dispatcher.UIThread.Post(DrawUpdates);
+
+    /// <summary>
+    /// The Updates row and the restart notice, drawn from whatever the shared service holds. It is
+    /// the one painter for both this page's own read and the other page's, so a refresh over there
+    /// lands here with no second round trip and no second wording.
+    /// </summary>
+    private void DrawUpdates()
+    {
+        if (_packages is null) return;
+
+        var manager = Packages.Manager;
+
+        // No package manager at all is not a state worth a row: the software updates module is not
+        // on this host's menu either, so the page simply does not raise the subject.
+        if (manager.Id.Length == 0)
+        {
+            UpdateRowPanel.IsVisible = false;
+            UpdateNowRow.IsVisible = false;
+            RebootText.IsVisible = false;
+            return;
+        }
+
+        var catalog = Packages.Catalog;
+
+        UpdateRowPanel.IsVisible = true;
+
+        var (text, tip) = Packages.HasListed
+            ? Describe(catalog, manager)
+            : ("Checking for updates...", "");
+
+        UpdateText.Text = text;
+        UpdateText.SetValue(ToolTip.TipProperty, tip.Length > 0 ? tip : null);
+
+        // The button is the count made actionable, so it is drawn on exactly the answer that has
+        // something to act on: packages pending, from a listing that was actually read. Every other
+        // answer this row can give is a sentence and not a command.
+        var pending = Packages.HasListed && catalog.Read &&
+                      catalog.ListFailure.Length == 0 && catalog.Updates.Count > 0;
+
+        UpdateNowRow.IsVisible = pending;
+        UpdateNowButton.IsEnabled = pending && !Packages.Running;
+        UpdateNowButton.Tag = Packages.Running
+            ? "A package command is already running on this host. The software updates module is " +
+              "where it is reporting."
+            : "Opens the software updates module and installs everything pending.";
+
+        // Unknown draws nothing. Telling somebody no reboot is needed after a kernel upgrade is the
+        // one wrong answer this check can give, so it does not guess.
+        RebootText.IsVisible = Packages.Reboot.State == RebootState.Needed;
+        if (RebootText.IsVisible)
+            RebootText.Text = "This host needs a restart to finish applying its updates.";
     }
 
     /// <summary>
     /// Five answers, kept apart. An empty table means four different things and only one of them is
     /// "up to date", so none of the other three may be drawn as a zero.
+    ///
+    /// <para>It answers a line and a tooltip, because this is one row of a box of one-line facts and
+    /// two of the things worth saying are paragraphs. <b>What is on the row is the answer; what is
+    /// on hover is why it is worded that way.</b> Nothing is only in the tooltip that changes what
+    /// somebody would do.</para>
     /// </summary>
-    private static string Describe(UpdateCatalog catalog, IPackageManager manager)
+    private static (string Text, string Tip) Describe(UpdateCatalog catalog, IPackageManager manager)
     {
-        if (!catalog.Available) return "No package manager on this host";
-        if (catalog.ListFailure.Length > 0) return Trim(catalog.ListFailure);
-        if (!catalog.Read) return "Could not read the update list";
+        if (!catalog.Available) return ("No package manager on this host", "");
+
+        // The whole failure on hover, since the row only has room for its first line.
+        if (catalog.ListFailure.Length > 0) return (Trim(catalog.ListFailure), catalog.ListFailure.Trim());
+
+        if (!catalog.Read) return ("Could not read the update list", "");
+
+        // Only pacman answers this at all, and where it does the age is the whole of the up-to-date
+        // reading: nothing to install is only as good as the database that was read. So it is said
+        // out loud there, and left to the tooltip beside a count, which is already telling somebody
+        // that something needs doing.
+        var age = catalog.IndexAgeText is { Length: > 0 } text ? $"Package index last synced {text}." : "";
 
         if (catalog.Updates.Count == 0)
-            return catalog.IndexAge is not null
-                ? $"Up to date (index {catalog.IndexAgeText})"
-                : "Up to date";
+            return (age.Length > 0 ? $"Up to date (index {catalog.IndexAgeText})" : "Up to date", "");
 
-        var text = $"{catalog.Updates.Count} available";
+        var line = $"{catalog.Updates.Count} available";
+        var tip = age;
 
-        // Arch ships no security metadata at all, so its answer is a reason and not a zero.
-        if (manager.SecurityUnsupportedReason is { Length: > 0 })
-            text += ", security updates not marked by this tool";
+        // Arch ships no security metadata at all, so its answer is a reason and not a zero. Three
+        // words on the row and the tool's own sentence on hover: the third state has to be visible,
+        // and it does not have to be a paragraph in a table of one-line facts.
+        if (manager.SecurityUnsupportedReason is { Length: > 0 } why)
+        {
+            line += ", security not marked";
+            tip = tip.Length > 0 ? $"{why}\n\n{tip}" : why;
+        }
         else if (catalog.SecurityCount > 0)
-            text += $", {catalog.SecurityCount} security";
+        {
+            line += $", {catalog.SecurityCount} security";
+        }
 
-        if (catalog.IndexAge is not null) text += $" (index {catalog.IndexAgeText})";
-        return text;
+        return (line, tip);
     }
 
     // ---- formatting --------------------------------------------------------

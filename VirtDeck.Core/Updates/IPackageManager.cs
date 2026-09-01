@@ -24,6 +24,17 @@ namespace VirtDeck.Updates
         public static readonly HostToolset Empty =
             new(string.Empty, string.Empty, new Dictionary<string, string>());
 
+        /// <summary>
+        /// <c>PRETTY_NAME</c> from os-release, falling back to <c>NAME</c>, or empty where the host
+        /// has no such file. What a distribution calls itself, which is what the shell's host cell
+        /// names; <see cref="OsId"/> is the machine-readable half of the same question and is what
+        /// <see cref="PackageManagers.Detect"/> weighs.
+        ///
+        /// Init-only rather than a fourth positional field, so what identifies this record stays
+        /// the toolset it was named for.
+        /// </summary>
+        public string OsName { get; init; } = string.Empty;
+
         public bool Has(string tool) => Tools.ContainsKey(tool);
 
         public string Version(string tool) => Tools.TryGetValue(tool, out var v) ? v : string.Empty;

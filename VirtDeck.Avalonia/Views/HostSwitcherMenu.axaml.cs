@@ -1,8 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Avalonia.Layout;
-using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using VirtDeck.Services;
 
@@ -46,12 +46,6 @@ public partial class HostSwitcherMenu : UserControl
 
     /// <summary>A saved host was picked. Never raised for the one already connected.</summary>
     public event Action<HostProfile>? HostSelected;
-
-    /// <summary>"Add host" was picked: the caller opens the connect window on a blank host.</summary>
-    public event Action? AddHostClicked;
-
-    /// <summary>"Forget" was picked for this host.</summary>
-    public event Action<HostProfile>? ForgetHostClicked;
 
     /// <summary>"Manage hosts" was picked: the caller opens the host manager.</summary>
     public event Action? ManageHostsClicked;
@@ -102,7 +96,19 @@ public partial class HostSwitcherMenu : UserControl
     }
 
     /// <summary>
-    /// Draws the saved hosts, with <paramref name="current"/> as the label and ticked in the list.
+    /// Draws the menu, with <paramref name="current"/> as the label and ticked in the list.
+    ///
+    /// Three sections, separated: what this machine is, which host to be on, and the one command.
+    /// The first is one <b>disabled item used as a fact rather than a command</b>, which is what a
+    /// menu has instead of a heading: this is the one cell in the shell that is about the machine
+    /// at the far end, so what it is running belongs in it, and it is the thing the cell's own
+    /// label cannot say, that label being the saved host's name or the address it was reached at.
+    ///
+    /// <paramref name="osName"/> comes from the shell's own module probe, so it costs no round trip
+    /// of its own; it is empty until that has answered, and a row with nothing to say is <b>left
+    /// out</b> rather than drawn saying so. That is not the absent-tooling rule being broken:
+    /// nothing here is a command somebody could go looking for, and a host with no os-release is an
+    /// ordinary host rather than one missing something.
     ///
     /// Called on every change rather than merged, unlike every table in the app: this list is a
     /// handful of items with no selection to drop and nothing polls it, so rebuilding is both
@@ -112,7 +118,8 @@ public partial class HostSwitcherMenu : UserControl
     /// (a switch already in flight); passing one is what disables it. Disabled with a reason
     /// rather than hidden, because a command that comes and goes reads as a bug.
     /// </summary>
-    public void Show(HostProfile? current, IReadOnlyList<HostProfile> hosts, string? disabledReason = null)
+    public void Show(HostProfile? current, IReadOnlyList<HostProfile> hosts,
+                     string osName = "", string? disabledReason = null)
     {
         // A profile with no host in it is not a host: the design-time shell produces one, and it is
         // not connected to anything.
@@ -121,7 +128,14 @@ public partial class HostSwitcherMenu : UserControl
         _currentKey = current?.Key ?? "";
         HostLabel.Text = current?.DisplayName ?? NoHost;
 
-        var items = new List<Control>();
+        // Built as sections and joined with separators afterwards, so an empty one (no probe answer
+        // yet, nothing saved yet) takes its rule with it rather than leaving the menu opening or
+        // closing on a hairline.
+        var sections = new List<List<Control>>();
+
+        if (osName.Length > 0) sections.Add([Fact(osName)]);
+
+        var saved = new List<Control>();
         foreach (var host in hosts)
         {
             bool isCurrent = host.Key == _currentKey;
@@ -145,29 +159,23 @@ public partial class HostSwitcherMenu : UserControl
                 item.Click += (_, _) => HostSelected?.Invoke(target);
             }
 
-            items.Add(item);
+            saved.Add(item);
         }
+        if (saved.Count != 0) sections.Add(saved);
 
-        if (items.Count != 0) items.Add(new Separator());
-        items.Add(Command("Add host", () => AddHostClicked?.Invoke()));
-
-        // Offered whatever the list holds, including nothing: it is where a host is defined
-        // deliberately, rather than being created as a side effect of connecting to it. "Add host"
-        // stays beside it as the connect-now route; neither replaces the other.
+        // The one command, and it is the only one: adding a host, renaming one, repointing one at
+        // a different key and forgetting one are all things the manager window does, and it is the
+        // window that owns the whole story of each. Offering shortcuts to two of them from here was
+        // two more routes into the same window and a menu that grew a row per host management verb.
         var manage = Command("Manage hosts", () => ManageHostsClicked?.Invoke());
-        ToolTip.SetTip(manage, "Name, edit, reorder and remove the saved hosts.");
-        items.Add(manage);
+        ToolTip.SetTip(manage, "Add, name, edit, reorder and remove the saved hosts.");
+        sections.Add([manage]);
 
-        // Only for a host that is actually in the list. The shell goes on naming the host it is
-        // connected to after that host has been forgotten, and offering to forget it twice would
-        // be offering to do nothing.
-        if (current != null && hosts.Any(h => h.Key == current.Key))
+        var items = new List<Control>();
+        foreach (var section in sections)
         {
-            var target = current;
-            var forget = Command($"Forget {target.DisplayName}", () => ForgetHostClicked?.Invoke(target));
-            ToolTip.SetTip(forget, "Removes it from this list and deletes its saved passwords. " +
-                                   "The connection you are on now stays open.");
-            items.Add(forget);
+            if (items.Count != 0) items.Add(new Separator());
+            items.AddRange(section);
         }
 
         HostItem.ItemsSource = items;
@@ -179,6 +187,18 @@ public partial class HostSwitcherMenu : UserControl
             : "Hosts you have connected to before."));
     }
 
+    /// <summary>
+    /// The row at the top: something the host said about itself, drawn as a disabled item.
+    ///
+    /// Disabled is the whole of what makes it a fact: it greys, it does not highlight under the
+    /// pointer and it cannot be pressed, which is exactly the reading wanted. No icon: the greying,
+    /// sitting above the first rule and the words themselves are what say this is not a host, and
+    /// the theme reserves the 18px gutter whether or not anything is in it, so the label lines up
+    /// with the host names below regardless. Nothing is hung on it on hover either, because a
+    /// disabled control is not hit-testable and a tip there would never be read.
+    /// </summary>
+    private static Control Fact(string text) => new MenuItem { Header = text, IsEnabled = false };
+
     private static MenuItem Command(string header, Action run)
     {
         var item = new MenuItem { Header = header };
@@ -187,9 +207,14 @@ public partial class HostSwitcherMenu : UserControl
     }
 
     /// <summary>
-    /// The tick beside the host already connected. A Path rather than a glyph character so it is
-    /// drawn in the app's own stroked house style and takes the menu's foreground with it, the way
-    /// every other piece of vector art here does.
+    /// The tick beside the host already connected, and the only art in this menu. A Path rather
+    /// than a glyph character so it is drawn in the app's own stroked house style, the way every
+    /// other piece of vector art here is.
+    ///
+    /// <b>The stroke binds to the row's own Foreground, never to a brush key.</b> Bound to the
+    /// brush it would stay at full strength on a row that is disabled, which this one always is;
+    /// it is the same reason the file explorer's toolbar glyphs bind to their button's foreground
+    /// rather than to <c>JbButtonForeground</c>, which is what this used to do.
     /// </summary>
     private static Control Tick()
     {
@@ -201,10 +226,13 @@ public partial class HostSwitcherMenu : UserControl
             Stretch = Stretch.Uniform,
             StrokeThickness = 1.6,
         };
-        // Themed, never a literal: this has to read on both faces, which is the rule every brush
-        // outside the two deliberately unthemed pairs follows.
-        tick[!global::Avalonia.Controls.Shapes.Shape.StrokeProperty] =
-            new DynamicResourceExtension("JbButtonForeground");
+        tick[!global::Avalonia.Controls.Shapes.Shape.StrokeProperty] = new Binding("Foreground")
+        {
+            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor)
+            {
+                AncestorType = typeof(MenuItem),
+            },
+        };
         return tick;
     }
 
