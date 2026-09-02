@@ -28,7 +28,12 @@
          is the group box's own header rule, which is why it draws only the one below it. -->
     <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
             BorderThickness="0,0,0,1" BorderBrush="#22808080">
-      <DockPanel>
+      <!-- LastChildFill="False" because no column here wants the slack. Left to fill, the last cell
+           would be arranged in the whole of the remaining rect and Stretch centres a child narrower
+           than the rect it was given, so the Used column would drift right of the values under it
+           the wider the window got. Every cell is docked Left and the space past the last one is
+           simply empty, which is what the table has to say about it. -->
+      <DockPanel LastChildFill="False">
         <TextBlock DockPanel.Dock="Left" Text="Device" Width="{StaticResource ColPartName}" />
         <TextBlock DockPanel.Dock="Left" Text="Kind" Width="{StaticResource ColPartKind}" />
         <TextBlock DockPanel.Dock="Left" Text="Size" Width="{StaticResource ColPartSize}" />
@@ -36,8 +41,6 @@
         <TextBlock DockPanel.Dock="Left" Text="Label" Width="{StaticResource ColPartLabel}" />
         <TextBlock DockPanel.Dock="Left" Text="Mounted at" Width="{StaticResource ColPartMount}" />
         <TextBlock DockPanel.Dock="Left" Text="Used" Width="{StaticResource ColPartUsed}" />
-        <TextBlock Text="At boot"
-                   ToolTip.Tip="What /etc/fstab says about it. Configured but not mounted and mounted but not configured are both ordinary states, and neither can be seen from the device alone." />
       </DockPanel>
     </Border>
 
@@ -48,7 +51,7 @@
                ItemContainerTheme="{StaticResource JbTableRow}">
         <ListBox.ItemTemplate>
           <DataTemplate DataType="s:DiskPartitionRow">
-            <DockPanel Classes="cells" ToolTip.Tip="{Binding Tip}">
+            <DockPanel Classes="cells" LastChildFill="False" ToolTip.Tip="{Binding Tip}">
 
               <!-- The stack, drawn with an indent. No chevron: one disk's worth of rows is a handful
                    and there is nothing worth folding away, which is what the table this came from
@@ -90,9 +93,6 @@
                                IsVisible="{Binding HasUsage}" />
                 </StackPanel>
               </Border>
-
-              <TextBlock Text="{Binding BootText}" VerticalAlignment="Center"
-                         TextTrimming="CharacterEllipsis" />
             </DockPanel>
           </DataTemplate>
         </ListBox.ItemTemplate>

@@ -149,72 +149,21 @@ namespace VirtDeck.Models
     }
 
     /// <summary>
-    /// One line of <c>/etc/fstab</c>. Held so the module can say "formatted, not mounted, and not
-    /// meant to be", which is a different and more useful answer than "not mounted".
-    /// </summary>
-    /// <param name="Spec">What the line names: a device path, <c>UUID=</c>, <c>LABEL=</c>.</param>
-    public sealed record FstabEntry(string Spec, string Target, string FsType, string Options);
-
-    /// <summary>
-    /// Whether <c>/etc/fstab</c> names a device, and how.
+    /// Whether a device is in use as swap.
     ///
     /// <para>Lifted out of the storage details pane when that pane became the disk details window:
-    /// it is pure logic over two model types, its one remaining caller is the Partitions tab's
-    /// "At boot" column, and a view is the wrong place for a rule about a file format.</para>
+    /// it is pure logic over two model types, and a view is the wrong place for a rule about what a
+    /// kernel file means. It is what is left of a class that also read <c>/etc/fstab</c>, for the
+    /// partition table's "At boot" column; that column is gone and the file is no longer read.</para>
     /// </summary>
-    public static class Fstab
+    public static class Swap
     {
-        /// <summary>
-        /// What the file says about this device, or "not in fstab". Configured-but-not-mounted and
-        /// mounted-but-not-configured are both ordinary states worth being able to read, and neither
-        /// can be seen from the device alone.
-        /// </summary>
-        public static string BootLine(BlockDevice device, IReadOnlyList<FstabEntry> fstab)
-        {
-            var entry = fstab.FirstOrDefault(e => Names(e.Spec, device));
-            if (entry is null) return "not in fstab";
-
-            var where = entry.Target == "none" ? entry.FsType : entry.Target;
-            return $"{where} ({entry.Options})";
-        }
-
-        /// <summary>
-        /// Whether one fstab spec names this device. Matched on all five spellings a line may use,
-        /// because <c>UUID=</c> is what an installer writes, <c>LABEL=</c> is what a hand-edited file
-        /// often uses, and a device path is what the rest do; matching only one of them would report
-        /// a configured filesystem as unconfigured on most hosts.
-        /// </summary>
-        public static bool Names(string spec, BlockDevice device)
-        {
-            if (spec.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase))
-                return device.Uuid.Length > 0 &&
-                       string.Equals(spec[5..], device.Uuid, StringComparison.OrdinalIgnoreCase);
-
-            if (spec.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase))
-                return device.PartUuid.Length > 0 &&
-                       string.Equals(spec[9..], device.PartUuid, StringComparison.OrdinalIgnoreCase);
-
-            if (spec.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase))
-                return device.Label.Length > 0 && spec[6..] == device.Label;
-
-            if (spec.StartsWith("PARTLABEL=", StringComparison.OrdinalIgnoreCase))
-                return device.PartLabel.Length > 0 && spec[10..] == device.PartLabel;
-
-            // A path, and it may be either the device node or a /dev/mapper or /dev/disk/by-*
-            // symlink to it. Only the node can be compared here, since resolving a symlink means a
-            // round trip; the /dev/mapper form is the one that matters in practice and it ends in
-            // the device's name.
-            return spec == device.Path ||
-                   (spec.StartsWith("/dev/mapper/", StringComparison.Ordinal) &&
-                    spec["/dev/mapper/".Length..] == device.Name);
-        }
-
         /// <summary>
         /// Whether this device is in use as swap. A swap volume is mounted in every sense that
         /// matters and in none that <c>statvfs</c> understands, so it is answered from
         /// <c>/proc/swaps</c> rather than left reading "not mounted".
         /// </summary>
-        public static bool IsSwap(BlockDevice device, IReadOnlyList<string> swaps) =>
+        public static bool IsActive(BlockDevice device, IReadOnlyList<string> swaps) =>
             device.FsType == "swap" || swaps.Contains(device.Path, StringComparer.Ordinal);
     }
 
@@ -466,8 +415,6 @@ namespace VirtDeck.Models
     {
         /// <summary>The whole disks and any device with no parent, in the order lsblk listed them.</summary>
         public IReadOnlyList<BlockDevice> Roots { get; init; } = [];
-
-        public IReadOnlyList<FstabEntry> Fstab { get; init; } = [];
 
         /// <summary>The device paths <c>/proc/swaps</c> named, so a swap volume reads as one.</summary>
         public IReadOnlyList<string> SwapDevices { get; init; } = [];

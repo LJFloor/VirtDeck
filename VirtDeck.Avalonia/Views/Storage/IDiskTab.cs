@@ -19,13 +19,10 @@ namespace VirtDeck.Avalonia.Views.Storage;
 /// which one it got.</para>
 /// </summary>
 /// <param name="Disk">The disk and its whole subtree, as lsblk stated it.</param>
-/// <param name="Fstab">The whole file, because whether a volume is configured to come back at boot
-/// is a fact about the pair and cannot be read off the device.</param>
 /// <param name="Swaps">What <c>/proc/swaps</c> named, so a swap volume does not read "not mounted".</param>
 /// <param name="HealthUnavailable">Why the module's own pass could not answer, when it could not.</param>
 public sealed record DiskView(
     BlockDevice Disk,
-    IReadOnlyList<FstabEntry> Fstab,
     IReadOnlyList<string> Swaps,
     DiskHealth? Health,
     bool HealthProbed,

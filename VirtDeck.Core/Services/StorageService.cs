@@ -14,8 +14,8 @@ namespace VirtDeck.Services
     /// calls, and a modelled failure carried as a <b>value</b> because the module has to draw it.</para>
     ///
     /// <para><b>Two reads, two elevations, and the split is not arbitrary.</b>
-    /// <see cref="ReadLayoutAsync"/> is un-elevated: <c>lsblk</c>, <c>/etc/fstab</c> and
-    /// <c>/proc/swaps</c> are all world-readable, and a read must not put a sudo prompt in front of
+    /// <see cref="ReadLayoutAsync"/> is un-elevated: <c>lsblk</c> and <c>/proc/swaps</c> are both
+    /// world-readable, and a read must not put a sudo prompt in front of
     /// somebody who only wanted to look, which is <c>FileExplorerModule</c>'s rule and the sampler's.
     /// <see cref="ReadHealthAsync"/> is elevated because smartctl issues ioctls on the device node
     /// and root is the only way to get them. That is the same shape this service's neighbour already
@@ -62,12 +62,8 @@ namespace VirtDeck.Services
               printf 'x\t%s\n' "$(lsblk -J -b -o "$COLS_MIN" 2>&1 | head -n 1)"
             fi
 
-            # Every field of an fstab line is whitespace-delimited and none may contain whitespace,
-            # so awk splits it exactly. Comments and blank lines are dropped here rather than on the
-            # client. The options field is last because it is the long one.
-            awk '!/^[ \t]*#/ && NF >= 3 { print "t\t" $1 "\t" $2 "\t" $3 "\t" (NF >= 4 ? $4 : "defaults") }' \
-              /etc/fstab 2>/dev/null
-
+            # What is in use as swap, which lsblk reports as mounted nowhere: a swap volume is
+            # mounted in every sense that matters and in none that statvfs understands.
             awk 'NR > 1 { print "s\t" $1 }' /proc/swaps 2>/dev/null
 
             # Which block devices are not hardware, which is the one thing lsblk cannot say: it
@@ -100,7 +96,6 @@ namespace VirtDeck.Services
             var version = "";
             var json = "";
             var failure = "";
-            var fstab = new List<FstabEntry>();
             var swaps = new List<string>();
             var notHardware = new HashSet<string>(StringComparer.Ordinal);
 
@@ -119,13 +114,6 @@ namespace VirtDeck.Services
                     case "x":
                         failure = text.Trim();
                         break;
-
-                    case "t":
-                    {
-                        var f = text.Split('\t');
-                        if (f.Length >= 4) fstab.Add(new FstabEntry(f[0], f[1], f[2], f[3]));
-                        break;
-                    }
 
                     case "s":
                         if (text.Trim() is { Length: > 0 } device) swaps.Add(device);
@@ -152,7 +140,6 @@ namespace VirtDeck.Services
             return new StorageLayout
             {
                 Roots = roots,
-                Fstab = fstab,
                 SwapDevices = swaps,
                 Available = true,
                 ListFailure = roots.Count == 0 ? failure : "",

@@ -37,7 +37,7 @@ public partial class DiskPartitionsView : UserControl
     public void Show(DiskView view)
     {
         _rows.Clear();
-        foreach (var row in DiskPartitionRow.Flatten(view.Disk, view.Fstab, view.Swaps))
+        foreach (var row in DiskPartitionRow.Flatten(view.Disk, view.Swaps))
             _rows.Add(row);
 
         PartitionEmpty.IsVisible = _rows.Count == 0;

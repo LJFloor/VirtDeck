@@ -981,11 +981,11 @@ it to see.
 - **`lsblk -J` is the whole listing, and that is the decision the module hangs off.** One
   un-elevated round trip returns the entire tree correctly nested: disk, partition, LUKS container,
   LVM logical volume, MD array, loop device, and the filesystem and mount point on each. Measured at
-  **8 ms** on a three-disk host, 25 ms with the fstab and swap reads beside it. So partitions, LUKS
+  **8 ms** on a three-disk host, 25 ms with the swap read beside it. So partitions, LUKS
   and LVM cost nothing extra and there is no per-device round trip anywhere, which was the VM list's
   original latency problem. The whole tree is still read although only the disks are drawn, because
   it is what the window's partition table renders with no round trip of its own.
-- **Un-elevated, and `df` is not used.** `lsblk`, `/etc/fstab` and `/proc/swaps` are all
+- **Un-elevated, and `df` is not used.** `lsblk` and `/proc/swaps` are both
   world-readable, so a read never puts a sudo prompt in front of somebody who only wanted to look,
   which is `FileExplorerModule`'s rule and the sampler's. `lsblk` carries `FSSIZE`/`FSUSED`/`FSAVAIL`
   itself, so the usage figures arrive on the same record as the device they are about and the two
@@ -1000,8 +1000,8 @@ it to see.
   and `MOUNTPOINT` both, so the fallback loses only the usage columns. Verified both ways.
 - **Parsed with `System.Text.Json`, not as tagged records.** The tagged-record idiom is for text this
   app has to invent a format for; lsblk emits JSON natively, and `DockerService.InspectAsync` is the
-  precedent. The envelope around it is still tagged records, because the version, the fstab lines and
-  the swap devices are three more answers in the same round trip. **Every reader takes a number or a
+  precedent. The envelope around it is still tagged records, because the version, the swap devices
+  and the virtual block devices are three more answers in the same round trip. **Every reader takes a number or a
   bool as either a JSON scalar or a string**, because lsblk before 2.33 quoted all of them, and that
   is three lines against an exception on an older host.
 - **A row is keyed by the disk's kname**, which is unique among whole disks and is never empty
@@ -1238,7 +1238,7 @@ persists nothing, as no window in this app does.
   `DiskPartitionsView` does not implement `IDiskTab` and the walk does not reach it: the General page
   hands it the view along with its own, which is a page naming a literal element of its own markup
   rather than the window naming a page. `DiskView` is the record every page is
-  handed: the disk's subtree, the fstab, the swap list, the module's summary verdict, and the deep
+  handed: the disk's subtree, the swap list, the module's summary verdict, and the deep
   read once it lands. It is replaced whole rather than mutated, so no page holds anything that can go
   stale under it.
 - **Nothing waits for a round trip that has already been paid for.** The window is constructed with
@@ -1346,13 +1346,20 @@ margin, so the row's hover paints it instead of leaving a dead strip down the le
   applies to the whole table rather than to three columns of it. A heading offering an order that
   would destroy what the table is showing is worse than one that does not offer;
   `HostManagerWindow`'s saved-host list refuses to sort for the same shape of reason.
-- **"At boot" is the one fact that cannot be read off the device**, so "formatted, not mounted, and
-  not meant to be" is a readable state. `Core/Models/Fstab` is the match, lifted out of the deleted
-  pane into Core because it is pure logic over two model types: `UUID=`, `PARTUUID=`, `LABEL=`,
-  `PARTLABEL=` and a device path including the `/dev/mapper/` form, since matching only one of them
-  would report a configured filesystem as unconfigured on most hosts. A swap volume is answered from
-  `/proc/swaps` rather than left reading "not mounted", since it is mounted in every sense that
-  matters and in none that `statvfs` understands.
+- **There was an "At boot" column and there is not any more.** It read `/etc/fstab` and said what
+  that file has about the row, so that "formatted, not mounted, and not meant to be" was a readable
+  state; it is gone at the user's request, and the whole of what fed it went with it rather than
+  being left as a listing nothing draws. `/etc/fstab` is no longer read at all, `FstabEntry`,
+  `StorageLayout.Fstab` and the spec matching (`UUID=`, `PARTUUID=`, `LABEL=`, `PARTLABEL=` and the
+  `/dev/mapper/` path form) are deleted, and `Core/Models/Fstab` survives as `Core/Models/Swap` for
+  the one rule that had nothing to do with that file: a swap volume is answered from `/proc/swaps`
+  rather than left reading "not mounted", since it is mounted in every sense that matters and in
+  none that `statvfs` understands.
+- **The heading strip and the rows are both `LastChildFill="False"`**, which they had no need to be
+  while that column was the fill child. Docked cells all carry a width, and a fill child narrower
+  than the rect it is handed is **centred** by `Stretch` rather than left where its heading is, so
+  leaving the last column to fill would have walked Used rightwards as the window widened. The slack
+  past the last cell is simply empty, which is what this table has to say about it.
 - **Two empty states**, because a disk nobody has partitioned and a disk carrying an empty partition
   table are different answers.
 

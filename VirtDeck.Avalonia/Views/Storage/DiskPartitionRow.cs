@@ -19,14 +19,11 @@ public sealed class DiskPartitionRow
 {
     private readonly BlockDevice _device;
 
-    public DiskPartitionRow(
-        BlockDevice device, int depth,
-        IReadOnlyList<FstabEntry> fstab, IReadOnlyList<string> swaps)
+    public DiskPartitionRow(BlockDevice device, int depth, IReadOnlyList<string> swaps)
     {
         _device = device;
         Depth = depth;
-        BootText = Fstab.BootLine(device, fstab);
-        _swap = Fstab.IsSwap(device, swaps);
+        _swap = Swap.IsActive(device, swaps);
     }
 
     private readonly bool _swap;
@@ -78,9 +75,6 @@ public sealed class DiskPartitionRow
 
     public string UsedText => _device.UsedPercent is { } p ? $"{p:0}%" : "";
 
-    /// <summary>What <c>/etc/fstab</c> says about it, or that it says nothing.</summary>
-    public string BootText { get; }
-
     /// <summary>
     /// The row tooltip: the identifiers that have no column, and the exact figures the Used cell
     /// rounds to a percentage.
@@ -110,22 +104,21 @@ public sealed class DiskPartitionRow
     /// of sortable headings: a partition table's order is a fact about the disk, and floating a LUKS
     /// mapping above the EFI partition by size turns a stack into a pile.</para>
     /// </summary>
-    public static List<DiskPartitionRow> Flatten(
-        BlockDevice disk, IReadOnlyList<FstabEntry> fstab, IReadOnlyList<string> swaps)
+    public static List<DiskPartitionRow> Flatten(BlockDevice disk, IReadOnlyList<string> swaps)
     {
         var rows = new List<DiskPartitionRow>();
-        Walk(disk.Children, 0, rows, fstab, swaps);
+        Walk(disk.Children, 0, rows, swaps);
         return rows;
     }
 
     private static void Walk(
         IEnumerable<BlockDevice> nodes, int depth, List<DiskPartitionRow> into,
-        IReadOnlyList<FstabEntry> fstab, IReadOnlyList<string> swaps)
+        IReadOnlyList<string> swaps)
     {
         foreach (var node in nodes)
         {
-            into.Add(new DiskPartitionRow(node, depth, fstab, swaps));
-            Walk(node.Children, depth + 1, into, fstab, swaps);
+            into.Add(new DiskPartitionRow(node, depth, swaps));
+            Walk(node.Children, depth + 1, into, swaps);
         }
     }
 }

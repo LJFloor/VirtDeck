@@ -35,7 +35,7 @@ public partial class DiskDetailsWindow : Window
     private bool _busy;
 
     /// <summary>The design-time constructor XAML needs. Never used at runtime.</summary>
-    public DiskDetailsWindow() : this(null, new DiskView(new BlockDevice(), [], [], null, false, "", null))
+    public DiskDetailsWindow() : this(null, new DiskView(new BlockDevice(), [], null, false, "", null))
     {
     }
 
@@ -182,7 +182,6 @@ public partial class DiskDetailsWindow : Window
             _view = _view with
             {
                 Disk = disk,
-                Fstab = layout.Fstab,
                 Swaps = layout.SwapDevices,
             };
             ShowAll();

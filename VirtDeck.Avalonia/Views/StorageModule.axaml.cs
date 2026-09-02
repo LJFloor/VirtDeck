@@ -442,13 +442,12 @@ public partial class StorageModule : UserControl, IModule
 
     /// <summary>
     /// Everything the window opens with, out of what this module already holds: the disk and its
-    /// whole subtree, the two files the partition table reads a boot state out of, and the summary
-    /// verdict this table is drawing. That last one is what lets the Health tab say something on its
-    /// first frame instead of sitting blank until its own deeper read lands.
+    /// whole subtree, what the host says is in use as swap, and the summary verdict this table is
+    /// drawing. That last one is what lets the Health tab say something on its first frame instead
+    /// of sitting blank until its own deeper read lands.
     /// </summary>
     private DiskView ViewOf(StorageRow row) => new(
         row.Device,
-        _layout.Fstab,
         _layout.SwapDevices,
         row.Health,
         row.HealthProbed,
