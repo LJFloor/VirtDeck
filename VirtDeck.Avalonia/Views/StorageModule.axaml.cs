@@ -63,6 +63,30 @@ public partial class StorageModule : UserControl, IModule
     private StorageLayout _layout = new();
     private HealthReading _health = HealthReading.NotProbed;
 
+    // ---- the ZFS half ------------------------------------------------------
+
+    private ZfsService? _zfs;
+
+    private readonly ObservableCollection<ZfsPoolRow> _poolRows = [];
+    private readonly Dictionary<string, ZfsPoolRow> _poolByKey = new(StringComparer.Ordinal);
+
+    /// <summary>Open pool details windows, keyed by pool name, exactly as <see cref="_details"/> is by kname.</summary>
+    private readonly Dictionary<string, PoolDetailsWindow> _poolDetails = new(StringComparer.Ordinal);
+
+    private ZfsReading _reading = ZfsReading.NotProbed;
+
+    /// <summary>A ZFS listing is in hand, so an empty table means "none" and not "not yet".</summary>
+    private bool _zfsRead;
+
+    /// <summary>
+    /// Separate from <see cref="_busy"/> on purpose: the two tabs read from the host independently,
+    /// so a disk listing in flight must not grey out a pool command and the reverse.
+    /// </summary>
+    private bool _zfsBusy;
+
+    private TableSort? _poolSortOrNull;
+    private TableSort PoolSort => _poolSortOrNull!;
+
     /// <summary>
     /// Which of the four SMART columns this host earns, recomputed from the health pass on every
     /// <see cref="Populate"/> and put on both the heading strip and every row from there, so the two
@@ -96,9 +120,56 @@ public partial class StorageModule : UserControl, IModule
         MenuCopyPath.Click += async (_, _) => await CopyPathAsync();
 
         DeviceList.ContextRequested += (_, _) => UpdateMenu();
+
+        PoolList.ItemsSource = _poolRows;
+
+        _poolSortOrNull = new TableSort(PoolHeaderStrip);
+        _poolSortOrNull.Changed += PopulatePools;
+
+        ZfsRefreshButton.Tag = "Read the host's ZFS pools again";
+        ZfsRefreshButton.Click += async (_, _) => await RefreshZfsAsync();
+        NewPoolButton.Click += async (_, _) => await CreatePoolAsync();
+        ImportPoolButton.Click += async (_, _) => await ImportPoolAsync();
+
+        PoolList.DoubleTapped += OnPoolDoubleTapped;
+        PoolList.SelectionChanged += (_, _) => UpdatePoolMenu();
+        PoolList.ContextRequested += (_, _) => UpdatePoolMenu();
+
+        MenuPoolDetails.Click += (_, _) => OpenPoolDetailsForSelected();
+        MenuScrub.Click += async (_, _) => await ScrubSelectedAsync(stop: false);
+        MenuStopScrub.Click += async (_, _) => await ScrubSelectedAsync(stop: true);
+        MenuExport.Click += async (_, _) => await ExportSelectedAsync();
+        MenuDestroy.Click += async (_, _) => await DestroySelectedAsync();
+        MenuCopyPoolName.Click += async (_, _) => await CopyPoolNameAsync();
+
+        // The Source test is not defensive noise. SelectionChanged is declared on
+        // SelectingItemsControl and **bubbles**, so both tables inside these tabs raise it through
+        // this handler as well; without the test, clicking a row would read as a tab switch and
+        // cost a round trip to the host per click. ContainersModule makes the same point.
+        Tabs.SelectionChanged += async (_, e) =>
+        {
+            if (!ReferenceEquals(e.Source, Tabs)) return;
+            PaintStatus();
+            UpdateMenu();
+            UpdatePoolMenu();
+            await RefreshActiveAsync();
+        };
+
         UpdateMenu();
+        UpdatePoolMenu();
         Populate();
+        PopulatePools();
     }
+
+    /// <summary>The two subjects this module draws, in tab order.</summary>
+    private enum Tab { Disks, Zfs }
+
+    /// <summary>
+    /// The page on screen. The clamp is not padding: <c>SelectedIndex</c> is -1 transiently, and a
+    /// bare cast would put <c>(Tab)(-1)</c> through every switch below and match none of them.
+    /// <c>ContainersModule</c> and <c>ServicesModule</c> both clamp their own for this reason.
+    /// </summary>
+    private Tab Current => (Tab)Math.Clamp(Tabs.SelectedIndex, 0, (int)Tab.Zfs);
 
     private StorageService Storage =>
         _storage ?? throw new InvalidOperationException("Module not attached.");
@@ -137,7 +208,13 @@ public partial class StorageModule : UserControl, IModule
         StatusChanged?.Invoke();
     }
 
-    public void Attach(SshConnectionManager ssh) => _storage = new StorageService(ssh);
+    public void Attach(SshConnectionManager ssh)
+    {
+        _storage = new StorageService(ssh);
+        _zfs = new ZfsService(ssh);
+    }
+
+    private ZfsService Zfs => _zfs ?? throw new InvalidOperationException("Module not attached.");
 
     public async Task ActivateAsync()
     {
@@ -146,9 +223,29 @@ public partial class StorageModule : UserControl, IModule
         // Draw what is already in hand before the round trip that replaces it, so a re-entry is not
         // a blank page for as long as the host takes to answer.
         Populate();
+        PopulatePools();
         PaintStatus();
 
-        await RefreshAsync();
+        await RefreshActiveAsync();
+    }
+
+    /// <summary>
+    /// One activation's worth of reading.
+    ///
+    /// <para><b>The layout is read whichever tab is up, and the health pass is not.</b> The layout
+    /// is 25 ms and un-elevated, and it is what the create dialog picks disks out of, so the ZFS
+    /// page needs it as much as the disks page does. The SMART pass is the expensive half and is
+    /// only about the table on the other tab, so it is the one that waits.</para>
+    ///
+    /// <para><b>The ZFS listing runs on every activation too, and that is the absent-tooling rule
+    /// rather than an oversight.</b> Whether this host has ZFS at all is what decides if the tab is
+    /// even usable, so a latched answer would make installing ZFS mid-session a dead end. On a host
+    /// without it the script's own <c>command -v</c> guard returns almost immediately.</para>
+    /// </summary>
+    private async Task RefreshActiveAsync()
+    {
+        await RefreshAsync(health: Current == Tab.Disks);
+        await RefreshZfsAsync();
     }
 
     /// <summary>
@@ -175,6 +272,9 @@ public partial class StorageModule : UserControl, IModule
 
         foreach (var window in _details.Values.ToList()) window.Close();
         _details.Clear();
+
+        foreach (var window in _poolDetails.Values.ToList()) window.Close();
+        _poolDetails.Clear();
     }
 
     // ---- reading -----------------------------------------------------------
@@ -187,7 +287,7 @@ public partial class StorageModule : UserControl, IModule
     /// of a second on a host with eight spinning disks. Waiting for both would make a fast page slow
     /// to say what it already knew.</para>
     /// </summary>
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(bool health = true)
     {
         if (_busy) return;
         _busy = true;
@@ -211,6 +311,8 @@ public partial class StorageModule : UserControl, IModule
             // live on something else, a CD-ROM has nothing to report, and a zvol is a slice of the
             // disks above it rather than a disk. They go over whole rather than as paths, because
             // the device type smartctl has to be told is read off the listing.
+            if (!health) return;
+
             var disks = Disks().Where(d => d.Path.Length > 0).ToList();
             if (disks.Count == 0) return;
 
@@ -493,6 +595,10 @@ public partial class StorageModule : UserControl, IModule
     /// </summary>
     private void PaintStatus()
     {
+        // The two slots belong to the page on screen. The shell repaints from both on every module
+        // switch, so only the property has to be current, and it always is.
+        if (Current == Tab.Zfs) { PaintZfsStatus(); return; }
+
         if (_layout.Available && _layout.Roots.Count > 0)
         {
             var all = _layout.All().ToList();
@@ -520,6 +626,41 @@ public partial class StorageModule : UserControl, IModule
             !_health.Probed ? "smartmontools not installed"
             : _health.Failure.Length > 0 ? _health.Failure
             : Tool(_health.Version, "smartmontools"));
+
+        SetCaps(string.Join(" · ", caps));
+    }
+
+    /// <summary>
+    /// The ZFS page's two slots: how many pools on the left, what version of ZFS on the right.
+    ///
+    /// <para>The right slot carries the <b>userland</b> version, and it names the kernel module's
+    /// too when the two disagree. That is not trivia: the userland is what decides which flags
+    /// exist, the two version independently, and a package upgraded without a reboot leaves them
+    /// apart. It is the one thing a status slot can say that saves somebody working out why a
+    /// command they read about is not there.</para>
+    /// </summary>
+    private void PaintZfsStatus()
+    {
+        if (!_zfsRead)
+        {
+            SetStatus("Reading the host's ZFS pools...");
+            SetCaps("");
+            return;
+        }
+
+        var n = _poolRows.Count;
+        SetStatus(
+            !_reading.Available ? "ZFS not installed."
+            : _reading.ListFailure.Length > 0 ? "Pools could not be listed."
+            : n == 0 ? "No pools."
+            : $"{n} pool{(n == 1 ? "" : "s")}");
+
+        if (!_reading.Available) { SetCaps("zpool not installed"); return; }
+
+        var caps = new List<string>();
+        if (_reading.Version.Length > 0) caps.Add(_reading.Version);
+        if (!_reading.ModuleLoaded) caps.Add("kernel module not loaded");
+        else if (_reading.VersionSkew) caps.Add("module " + _reading.KmodVersion);
 
         SetCaps(string.Join(" · ", caps));
     }
@@ -572,6 +713,385 @@ public partial class StorageModule : UserControl, IModule
 
         try { await clipboard.SetTextAsync(string.Join("\n", paths)); }
         catch (Exception ex) { await MessageDialog.Info(Owner, "Copy device path", Trim(ex.Message)); }
+    }
+
+    // ======================================================================
+    // The ZFS half
+    // ======================================================================
+
+    /// <summary>
+    /// The pool listing, elevated, one round trip. It also answers whether the tab is usable at
+    /// all, which is why it runs on every activation rather than once per session.
+    /// </summary>
+    private async Task RefreshZfsAsync()
+    {
+        if (_zfs is null) return;
+        if (_zfsBusy) return;
+        _zfsBusy = true;
+        ZfsRefreshButton.IsEnabled = false;
+        var ct = _cts.Token;
+
+        try
+        {
+            var reading = await Zfs.ReadPoolsAsync(ct);
+            if (ct.IsCancellationRequested) return;
+
+            _reading = reading;
+            _zfsRead = true;
+
+            SyncZfsTab();
+            PopulatePools();
+            PaintStatus();
+        }
+        catch (OperationCanceledException)
+        {
+            // Deactivate cancels this token, so stepping to another module mid-read lands here on
+            // every switch. It is caught rather than thrown on because the shell awaits
+            // ActivateAsync from an event handler, where an escaping exception has nowhere to go.
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // A refusal here is a value the tab draws, not a module that failed: the disks table
+            // one tab across is still entirely correct.
+            _reading = new ZfsReading { Available = true, Probed = true, ListFailure = Trim(ex.Message) };
+            _zfsRead = true;
+            SyncZfsTab();
+            PopulatePools();
+            PaintStatus();
+        }
+        finally
+        {
+            _zfsBusy = false;
+            ZfsRefreshButton.IsEnabled = true;
+        }
+    }
+
+
+    /// <summary>
+    /// Enables the ZFS tab, or disables it whole with the reason on hover.
+    ///
+    /// <para><b>This is the app's second page disabled whole rather than command by command</b>,
+    /// after the containers module's Stacks tab, and for the same shape of reason: without
+    /// <c>zpool</c> not one command on the page can run, so leaving it open would be a table of
+    /// nothing over three buttons that all refuse. It still states its reason, which a disabled
+    /// control normally cannot do, because <c>ToolTip.ShowOnDisabled</c> in the markup buys what a
+    /// <c>TabItem</c> cannot get from an enabled parent <c>Border</c> the way <c>CheckRow</c> and
+    /// <c>ServiceRow</c> do.</para>
+    ///
+    /// <para>The module itself never goes away: <c>zpool</c> is deliberately not in
+    /// <see cref="RequiredTools"/>, for the reason <c>smartctl</c> is not.</para>
+    /// </summary>
+    private void SyncZfsTab()
+    {
+        // Until the first read has answered, the tab is left as it is rather than being disabled
+        // and enabled again a round trip later, which would read as a glitch rather than an answer.
+        if (!_zfsRead) return;
+
+        var have = _reading.Available;
+        ZfsTab.IsEnabled = have;
+        ToolTip.SetTip(ZfsTab, have
+            ? null
+            : "zpool was not found on this host, so it has no ZFS pools to manage. It comes from " +
+              "zfsutils-linux on Debian and Ubuntu, and from the zfs package elsewhere.");
+
+        // Avalonia leaves a disabled tab selected rather than moving on, so a page that goes away
+        // under the user has to hand them somewhere to be.
+        if (!have && Current == Tab.Zfs) Tabs.SelectedIndex = (int)Tab.Disks;
+    }
+
+    // ---- the rows ----------------------------------------------------------
+
+    private IEnumerable<ZfsPool> Pools() => OrderPools(_reading.Pools);
+
+    private IEnumerable<ZfsPool> OrderPools(IReadOnlyList<ZfsPool> pools) => PoolSort.Key switch
+    {
+        "pool" => PoolSort.By(pools, p => p.Name, StringComparer.OrdinalIgnoreCase),
+
+        // Every figure sorts on the nullable straight, so a pool that reported `-` for a column
+        // goes to one end rather than being handed an invented zero in among the real readings.
+        // .NET orders null below every value, which puts the silent ones first ascending and last
+        // descending, and descending is the telling click for all of these.
+        "size" => PoolSort.By(pools, p => p.SizeBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+        "alloc" => PoolSort.By(pools, p => p.AllocatedBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+        "free" => PoolSort.By(pools, p => p.FreeBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+        "cap" => PoolSort.By(pools, p => p.CapacityPercent).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+        "frag" => PoolSort.By(pools, p => p.FragmentationPercent).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+        "dedup" => PoolSort.By(pools, p => p.DedupRatio).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+
+        "health" => PoolSort.By(pools, PoolHealthOrder).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
+
+        // The host's own order, which is what a third click on a heading comes back to.
+        _ => pools,
+    };
+
+    /// <summary>
+    /// Worst first, so one ascending click puts the pools worth looking at at the top. Sorting by
+    /// health to be shown the healthy ones is not a thing anybody clicks for, which is the argument
+    /// that already orders the disks table and the updates table.
+    /// </summary>
+    private static int PoolHealthOrder(ZfsPool pool) => pool.Health switch
+    {
+        ZfsHealth.Faulted => 0,
+        ZfsHealth.Unavail => 1,
+        ZfsHealth.Suspended => 2,
+        ZfsHealth.Degraded => 3,
+        ZfsHealth.Removed => 4,
+        ZfsHealth.Offline => 5,
+        ZfsHealth.Unknown => 6,
+        _ => 7,
+    };
+
+    private void PopulatePools()
+    {
+        var pools = Pools().ToList();
+
+        TableRows.Merge(
+            _poolRows, _poolByKey, pools,
+            p => p.Name,
+            p => new ZfsPoolRow(p),
+            (row, p) => row.Update(p),
+            _ => pools.Select(p => _poolByKey[p.Name]));
+
+        DrawPoolEmpty();
+        UpdatePoolMenu();
+    }
+
+    /// <summary>
+    /// Five empty tables that are five different answers, and never one drawn as another: a host
+    /// with no zpool, a host with the tools installed and the kernel module not loaded, a listing
+    /// that failed with ZFS's own reason on it, a listing nobody could run, and a host that
+    /// genuinely has no pools. Only the last of those is a state to be pleased about.
+    /// </summary>
+    private void DrawPoolEmpty()
+    {
+        PoolEmpty.IsVisible = _poolRows.Count == 0;
+        if (_poolRows.Count > 0) return;
+
+        PoolEmpty.Text =
+            !_zfsRead ? "Reading the host's ZFS pools..."
+            : !_reading.Available
+                ? "zpool is not installed on this host."
+            : !_reading.ModuleLoaded && _reading.ModuleAvailable
+                ? "The ZFS tools are installed but the kernel module is not loaded, so this host " +
+                  "has no pools it can see. Loading it is 'sudo modprobe zfs' on the host."
+            : _reading.ListFailure.Length > 0
+                ? "The host's ZFS pools could not be listed: " + _reading.ListFailure
+            : !_reading.Probed
+                ? "The host's ZFS pools could not be listed."
+            : "This host has no ZFS pools. Create one to get started.";
+    }
+
+    // ---- the details window ------------------------------------------------
+
+    private void OnPoolDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        foreach (var v in (e.Source as Visual)?.GetSelfAndVisualAncestors() ?? [])
+            if (v is ListBoxItem { DataContext: ZfsPoolRow row })
+            {
+                OpenPoolDetailsFor(row);
+                return;
+            }
+    }
+
+    private void OpenPoolDetailsForSelected()
+    {
+        if (SelectedPools is [var only]) OpenPoolDetailsFor(only);
+    }
+
+    /// <summary>
+    /// One window per pool, non-modal, and a second ask focuses the one already up. The disk
+    /// details window's tracking verbatim, including the reference check in <c>Closed</c>: without
+    /// it a stale close would evict a replacement opened under the same key.
+    /// </summary>
+    private void OpenPoolDetailsFor(ZfsPoolRow row)
+    {
+        if (_zfs is null) return;
+
+        if (_poolDetails.TryGetValue(row.Key, out var existing))
+        {
+            if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
+            existing.Activate();
+            return;
+        }
+
+        var window = new PoolDetailsWindow(Zfs, new PoolView(row.Pool, ZpoolStatus.NotProbed));
+        _poolDetails[row.Key] = window;
+        window.Closed += (_, _) =>
+        {
+            if (_poolDetails.TryGetValue(row.Key, out var w) && ReferenceEquals(w, window))
+                _poolDetails.Remove(row.Key);
+        };
+        window.Show();
+    }
+
+    // ---- the commands ------------------------------------------------------
+
+    private List<ZfsPoolRow> SelectedPools =>
+        PoolList.SelectedItems?.Cast<ZfsPoolRow>().ToList() ?? [];
+
+    private void UpdatePoolMenu()
+    {
+        var selected = SelectedPools;
+
+        // One window is about one pool, so this is the single-selection command, disabled rather
+        // than opening the first of several.
+        MenuPoolDetails.IsEnabled = selected.Count == 1;
+
+        var any = selected.Count > 0 && !_zfsBusy;
+        MenuScrub.IsEnabled = any;
+        MenuStopScrub.IsEnabled = any;
+        MenuExport.IsEnabled = any;
+
+        // Destroy is single-selection on purpose, and not because several would be hard. Its
+        // confirmation types the pool's name, and a question that names one pool must not act on
+        // three.
+        MenuDestroy.IsEnabled = selected.Count == 1 && !_zfsBusy;
+        MenuCopyPoolName.IsEnabled = selected.Count > 0;
+    }
+
+    /// <summary>
+    /// A scrub reads every block on the pool and repairs what it can from redundancy.
+    ///
+    /// <para><b>Neither starting nor stopping one asks first.</b> A scrub writes nothing, and
+    /// stopping one costs the progress it had made and nothing else, so a confirmation would be a
+    /// dialog in front of a decision that cannot go wrong.</para>
+    /// </summary>
+    private async Task ScrubSelectedAsync(bool stop)
+    {
+        var pools = SelectedPools;
+        if (pools.Count == 0 || _zfsBusy) return;
+
+        await RunPoolCommandAsync(
+            stop ? "Stop scrub" : "Scrub",
+            stop ? $"Stopping the scrub on {Names(pools)}..." : $"Scrubbing {Names(pools)}...",
+            async () =>
+            {
+                foreach (var pool in pools) await Zfs.ScrubAsync(pool.Key, stop);
+            });
+    }
+
+    private async Task ExportSelectedAsync()
+    {
+        var pools = SelectedPools;
+        if (pools.Count == 0 || _zfsBusy) return;
+
+        var ok = await MessageDialog.Confirm(Owner, "Export pool",
+            $"Export {Names(pools)}?\n\n" +
+            "The pool's datasets will be unmounted and it will disappear from this list until it " +
+            "is imported again. Nothing on it is deleted, and anything using it right now, a " +
+            "running VM with a disk on it included, will lose access.");
+        if (!ok) return;
+
+        await RunPoolCommandAsync("Export pool", $"Exporting {Names(pools)}...", async () =>
+        {
+            foreach (var pool in pools) await Zfs.ExportPoolAsync(pool.Key, force: false);
+        });
+    }
+
+    /// <summary>
+    /// The most destructive command in the app, and the only one that makes the user type the name.
+    ///
+    /// <para>Everything else destructive here is undone by doing it again or is bounded by what it
+    /// names: a container comes back from its image, an exported pool imports again. This takes
+    /// every dataset, zvol and snapshot on the pool at once, and a VM whose disk was a zvol there
+    /// stops having a disk. So the primary button is <b>Cancel</b>, which is what Enter presses,
+    /// and the destructive one is only enabled once the pool's own name has been typed.</para>
+    /// </summary>
+    private async Task DestroySelectedAsync()
+    {
+        if (SelectedPools is not [var row] || _zfsBusy) return;
+
+        var dialog = new DestroyPoolDialog(row.Pool);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true) return;
+
+        await RunPoolCommandAsync("Destroy pool", $"Destroying {row.Key}...",
+            () => Zfs.DestroyPoolAsync(row.Key, force: dialog.Force));
+    }
+
+    private async Task ImportPoolAsync()
+    {
+        if (_zfs is null || _zfsBusy) return;
+
+        SetStatus("Looking for pools to import...");
+        IReadOnlyList<ZfsService.ImportablePool> found;
+        try { found = await Zfs.ListImportableAsync(_cts.Token); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Import pool", Trim(ex.Message));
+            return;
+        }
+        finally { PaintStatus(); }
+
+        if (found.Count == 0)
+        {
+            await MessageDialog.Info(Owner, "Import pool",
+                "No pools were found to import. A pool shows up here when its disks are attached " +
+                "to this host and it is not already imported.");
+            return;
+        }
+
+        var dialog = new ImportPoolDialog(found);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Selected is not { } pick) return;
+
+        await RunPoolCommandAsync("Import pool", $"Importing {pick.Name}...",
+            () => Zfs.ImportPoolAsync(pick.Name, force: dialog.Force));
+    }
+
+    /// <summary>
+    /// The create flow, and the dry run is the whole of what makes it safe. See
+    /// <see cref="CreatePoolDialog"/>, which owns the preview and the Force question; by the time
+    /// it hands a request back, <c>zpool create -n</c> has already accepted it.
+    /// </summary>
+    private async Task CreatePoolAsync()
+    {
+        if (_zfs is null || _zfsBusy) return;
+
+        var dialog = new CreatePoolDialog(Zfs, _layout, _reading, TakenPoolNames());
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request) return;
+
+        await RunPoolCommandAsync("New pool", $"Creating {request.Name}...",
+            () => Zfs.CreatePoolAsync(request));
+    }
+
+    private IReadOnlyList<string> TakenPoolNames() =>
+        [.. _reading.Pools.Select(p => p.Name)];
+
+    /// <summary>
+    /// One shape for every pool mutation: say what is happening, run it, report a refusal in ZFS's
+    /// own words, and re-list either way. The client never leads the host, so nothing here assumes
+    /// the command worked and paints the result; the refresh is what says what happened.
+    /// </summary>
+    private async Task RunPoolCommandAsync(string title, string status, Func<Task> work)
+    {
+        _zfsBusy = true;
+        UpdatePoolMenu();
+        SetStatus(status);
+
+        try { await work(); }
+        catch (Exception ex) { await MessageDialog.Info(Owner, title, ex.Message); }
+        finally { _zfsBusy = false; }
+
+        await RefreshZfsAsync();
+    }
+
+    /// <summary>
+    /// Names a selection for a question. Up to three by name and a count past that, because
+    /// <c>MessageDialog</c> is a fixed 420 wide and sizes to its content.
+    /// </summary>
+    private static string Names(IReadOnlyList<ZfsPoolRow> pools) =>
+        pools.Count == 1 ? pools[0].Key
+        : pools.Count <= 3 ? string.Join(", ", pools.Select(p => p.Key))
+        : $"{pools.Count} pools";
+
+    private async Task CopyPoolNameAsync()
+    {
+        var names = SelectedPools.Select(r => r.Key).Where(n => n.Length > 0).ToList();
+        if (names.Count == 0) return;
+        if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard) return;
+
+        try { await clipboard.SetTextAsync(string.Join("\n", names)); }
+        catch (Exception ex) { await MessageDialog.Info(Owner, "Copy name", Trim(ex.Message)); }
     }
 
     /// <summary>The first line of a message, which is all a status slot has room for.</summary>

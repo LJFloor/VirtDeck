@@ -1,0 +1,101 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+             x:Class="VirtDeck.Avalonia.Views.Storage.PoolTopologyView">
+
+  <UserControl.Resources>
+    <x:Double x:Key="ColVdevName">300</x:Double>
+    <x:Double x:Key="ColVdevState">100</x:Double>
+    <x:Double x:Key="ColVdevCount">60</x:Double>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- Classes rather than a bound brush, because a brush would have to be non-null on every row:
+         a null IBrush on Foreground is a real local value that suppresses the inherited one rather
+         than falling back to it, and the only honest non-null answer for an ordinary vdev is
+         whatever the theme was going to use anyway. DiskHealthTab colours its rows the same way.
+         Both colours are literal for the reason the state dots are: what they say must not change
+         with the light or dark face. -->
+    <Style Selector="ListBoxItem.failing TextBlock">
+      <Setter Property="Foreground" Value="#c75450" />
+    </Style>
+    <Style Selector="ListBoxItem.warning TextBlock">
+      <Setter Property="Foreground" Value="#d68f00" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel>
+
+    <!-- **The heading cells are plain TextBlocks and not Controls/ColumnHeader, and that is the
+         deliberate refusal this table shares with the partition table one tab across.** A pool's
+         topology is a fact about the pool: the leaves under a vdev belong to it, and the class rows
+         say what a device is for. Sorting by name would float a spare above the raidz it is a spare
+         for, and sorting by error count would take every leaf away from its parent. A heading that
+         offers an order which would destroy what the table is showing is worse than one that does
+         not offer, which is the same argument HostManagerWindow's saved-host list makes.
+
+         The 12,3 padding and the 6px cell gutter still have to match every other table in the app,
+         so the strip is written exactly as a sortable one is; it simply has nothing to click. -->
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <!-- LastChildFill="False" because no column here wants the slack. Left to fill, the last cell
+           would be arranged in the whole remaining rect and Stretch centres a child narrower than
+           the rect it was given, so the Note column would drift right of the values under it the
+           wider the window got. -->
+      <DockPanel LastChildFill="False">
+        <TextBlock DockPanel.Dock="Left" Text="Device" Width="{StaticResource ColVdevName}" />
+        <TextBlock DockPanel.Dock="Left" Text="State" Width="{StaticResource ColVdevState}" />
+        <TextBlock DockPanel.Dock="Left" Text="Read" Width="{StaticResource ColVdevCount}" />
+        <TextBlock DockPanel.Dock="Left" Text="Write" Width="{StaticResource ColVdevCount}" />
+        <TextBlock DockPanel.Dock="Left" Text="Cksum" Width="{StaticResource ColVdevCount}" />
+        <TextBlock DockPanel.Dock="Left" Text="Note" />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <!-- No border of its own: the group box hosting this draws one and the rows are meant to run
+           right up to it, which is what its Padding="0" is for. -->
+      <ListBox Name="VdevList" Background="Transparent" Padding="0" BorderThickness="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.Styles>
+          <Style Selector="ListBoxItem" x:DataType="s:PoolVdevRow">
+            <Setter Property="Classes.failing" Value="{Binding IsFailing}" />
+            <Setter Property="Classes.warning" Value="{Binding IsWarning}" />
+          </Style>
+        </ListBox.Styles>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="s:PoolVdevRow">
+            <DockPanel Classes="cells" LastChildFill="False" ToolTip.Tip="{Binding Tip}">
+
+              <!-- The tree, drawn with an indent and no chevron: one pool's topology is a handful
+                   of rows and there is nothing worth folding away. The spacer is a Border with a
+                   width rather than a margin, so the row's hover paints it instead of leaving a
+                   dead strip down the left. -->
+              <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColVdevName}">
+                <Border DockPanel.Dock="Left" Width="{Binding IndentPixels}" />
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+
+              <TextBlock DockPanel.Dock="Left" Text="{Binding StateText}"
+                         Width="{StaticResource ColVdevState}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding ReadText}"
+                         Width="{StaticResource ColVdevCount}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding WriteText}"
+                         Width="{StaticResource ColVdevCount}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding CksumText}"
+                         Width="{StaticResource ColVdevCount}" VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding NoteText}"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <TextBlock Name="TopologyEmpty" Opacity="0.6" IsVisible="False" Margin="12"
+                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+
+  </DockPanel>
+</UserControl>

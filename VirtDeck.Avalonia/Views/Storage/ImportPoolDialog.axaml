@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+        x:Class="VirtDeck.Avalonia.Views.Storage.ImportPoolDialog"
+        Title="Import pool"
+        Width="520" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="ImportButton" Content="Import" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="These pools are on disks attached to this host but are not currently imported. Importing one mounts its datasets and puts it back in the list." />
+
+      <ListBox Name="PoolList" Height="180" ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="s:ImportableRow">
+            <StackPanel Margin="0,3" ToolTip.Tip="{Binding Tip}">
+              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Detail}" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <StackPanel Classes="options">
+        <CheckBox Name="ForceBox" Content="Force the import" />
+        <TextBlock Classes="subnote" TextWrapping="Wrap"
+                   Text="Needed when the pool was last used by another machine and was not exported cleanly. If that machine still has it open, importing here can corrupt it." />
+      </StackPanel>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

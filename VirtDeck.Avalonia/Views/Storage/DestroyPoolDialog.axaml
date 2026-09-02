@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Storage.DestroyPoolDialog"
+        Title="Destroy pool"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <!-- **Cancel is the primary and carries IsDefault, which is the opposite of every other dialog
+         in the app.** Elsewhere the primary is the thing you came to do; here the thing you came to
+         do is irreversible and takes every dataset on the pool with it, so Enter must not press it.
+         The same argument keeps "keep the home directories" and "keep the named volumes" as the
+         primary in the account and stack deletes. -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Border Background="Transparent" ToolTip.Tip="{Binding #DestroyButton.Tag}">
+        <Button Name="DestroyButton" Content="Destroy" MinWidth="88" />
+      </Border>
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" IsDefault="True" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold" />
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="Every dataset, volume and snapshot on the pool goes with it, and none of it can be recovered. A virtual machine whose disk is a zvol on this pool will stop having a disk." />
+
+      <TextBlock Name="MembersNote" Classes="note" TextWrapping="Wrap" IsVisible="False" />
+
+      <StackPanel Classes="options">
+        <TextBlock Name="ConfirmPrompt" TextWrapping="Wrap" />
+        <TextBox Name="ConfirmBox" />
+      </StackPanel>
+
+      <StackPanel Classes="options">
+        <CheckBox Name="ForceBox" Content="Force, even if the pool is busy" />
+        <TextBlock Classes="subnote" TextWrapping="Wrap"
+                   Text="Only needed when something still has the pool open. Without it ZFS refuses and says what is holding it, which is usually the more useful answer." />
+      </StackPanel>
+
+    </StackPanel>
+  </DockPanel>
+</Window>

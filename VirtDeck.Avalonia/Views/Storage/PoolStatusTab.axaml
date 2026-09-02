@@ -1,0 +1,85 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Storage.PoolStatusTab">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.sectionlabel">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Margin" Value="0,0,0,3" />
+    </Style>
+    <!-- The host's own words, so a fixed-pitch face and no wrapping games: ZFS lays its scan
+         figures out in columns and a proportional font would pull them apart. JbMonoFont is the
+         app's one resolved monospaced family; naming a family here would be the "monospace" alias
+         mistake the terminal already paid for once. -->
+    <Style Selector="TextBlock.hostwords">
+      <Setter Property="FontFamily" Value="{DynamicResource JbMonoFont}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel Margin="16,14,16,14">
+
+    <!-- Scrub sits at the bottom with the state, because it is the one thing on this page that
+         acts rather than reports. It is not accented: that class is for the one command on a page
+         that creates something, and a scrub creates nothing. -->
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+      <Border DockPanel.Dock="Left" Background="Transparent" ToolTip.Tip="{Binding #ScrubButton.Tag}">
+        <Button Name="ScrubButton" MinWidth="110" />
+      </Border>
+      <TextBlock Name="ScrubNote" Opacity="0.6" Margin="12,0,0,0" TextWrapping="Wrap"
+                 VerticalAlignment="Center" />
+    </DockPanel>
+
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+      <TextBlock Name="TitleName" DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                 VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+      <Ellipse Name="TitleDot" DockPanel.Dock="Left" Width="9" Height="9"
+               Margin="12,0,5,0" VerticalAlignment="Center" />
+      <TextBlock Name="TitleState" DockPanel.Dock="Left" VerticalAlignment="Center" />
+    </DockPanel>
+
+    <ScrollViewer>
+      <StackPanel>
+
+        <!-- **Every section here is ZFS's own prose and none of it is paraphrased.** A scrub ETA, a
+             resilver percentage and the sentence naming which device to replace are all things
+             OpenZFS words better than this app would, and it rewords them between releases. What
+             VirtDeck did was work out which section a line belonged to; what it says is ZFS's. -->
+        <StackPanel Name="StatusBlock" IsVisible="False">
+          <TextBlock Classes="sectionlabel" Text="What is wrong" />
+          <TextBlock Name="StatusText" Classes="hostwords" />
+        </StackPanel>
+
+        <StackPanel Name="ActionBlock" IsVisible="False">
+          <TextBlock Classes="sectionlabel" Text="What to do" />
+          <TextBlock Name="ActionText" Classes="hostwords" />
+        </StackPanel>
+
+        <StackPanel Name="ScanBlock" IsVisible="False">
+          <TextBlock Classes="sectionlabel" Text="Last scan" />
+          <TextBlock Name="ScanText" Classes="hostwords" />
+        </StackPanel>
+
+        <StackPanel Name="ErrorsBlock" IsVisible="False">
+          <TextBlock Classes="sectionlabel" Text="Data errors" />
+          <TextBlock Name="ErrorsText" Classes="hostwords" />
+        </StackPanel>
+
+        <StackPanel Name="SeeBlock" IsVisible="False" Margin="0,0,0,14">
+          <TextBlock Classes="sectionlabel" Text="More about this" />
+          <!-- Inline rather than a HyperlinkButton, which would bring a button's padding into the
+               middle of a sentence. JbLinkForeground is the one brush for a link out of the app,
+               themed so it does not read as disabled text on one face. -->
+          <TextBlock Name="SeeLink" Foreground="{DynamicResource JbLinkForeground}"
+                     TextDecorations="Underline" Cursor="Hand" TextWrapping="NoWrap" />
+        </StackPanel>
+
+        <TextBlock Name="EmptyText" Opacity="0.6" TextWrapping="Wrap" IsVisible="False"
+                   MaxWidth="460" HorizontalAlignment="Left" />
+
+      </StackPanel>
+    </ScrollViewer>
+
+  </DockPanel>
+</UserControl>

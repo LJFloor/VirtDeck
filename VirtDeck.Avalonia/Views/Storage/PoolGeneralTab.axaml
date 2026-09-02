@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+             x:Class="VirtDeck.Avalonia.Views.Storage.PoolGeneralTab">
+
+  <DockPanel Margin="16,14,16,14">
+
+    <!-- The name, the state and a note. TitleState is the only bound Foreground on this page, and
+         deliberately: a null IBrush is a real local value that suppresses the inherited one rather
+         than falling back to it, so keeping the binding to this one line is what leaves every value
+         below it visible. -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+      <TextBlock Name="TitleName" DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                 VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+      <Ellipse Name="TitleDot" DockPanel.Dock="Left" Width="9" Height="9"
+               Margin="12,0,5,0" VerticalAlignment="Center" />
+      <TextBlock Name="TitleState" DockPanel.Dock="Left" VerticalAlignment="Center" />
+      <TextBlock Name="TitleNote" Opacity="0.6" Margin="10,0,0,0"
+                 VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+    </DockPanel>
+
+    <!-- Two columns split by meaning and not by count: what the pool holds on the left, how it is
+         configured on the right.
+
+         **They are docked rather than filling, and the table below them takes the slack.** The
+         facts are a fixed dozen short lines whose height is known before the window opens, and the
+         topology is the half that runs to whatever length the pool happens to have, so giving the
+         fill to the table is what makes the page grow in the direction its content does. -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,24,*" Margin="0,0,0,14">
+      <ItemsControl Name="LeftFacts" Grid.Column="0" />
+      <ItemsControl Name="RightFacts" Grid.Column="2" />
+    </Grid>
+
+    <!-- **The topology is a group box on this page rather than a tab of its own**, which is what a
+         pool's identity and the thing it is made of being one subject asks for: the page reads as
+         one answer instead of putting half of it behind a click, and the Status tab is left as the
+         one thing that is genuinely a separate reading. Padding="0" because the whole content is a
+         table, so the rows run to the frame the box already draws instead of a second border
+         sitting a few pixels inside the first. -->
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Topology" Padding="0">
+      <s:PoolTopologyView Name="Topology" />
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

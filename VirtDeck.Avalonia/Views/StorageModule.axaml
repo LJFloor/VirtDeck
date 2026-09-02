@@ -20,10 +20,29 @@
     <x:Double x:Key="ColWear">70</x:Double>
     <x:Double x:Key="ColRealloc">100</x:Double>
 
+    <!-- The pools table's own layout. Wider first column than the disks table's, because a pool
+         name is the user's own and a by-id member name is not what is drawn here. -->
+    <x:Double x:Key="ColPool">220</x:Double>
+    <x:Double x:Key="ColPoolSize">95</x:Double>
+    <x:Double x:Key="ColPoolAlloc">95</x:Double>
+    <x:Double x:Key="ColPoolFree">95</x:Double>
+    <x:Double x:Key="ColPoolCap">120</x:Double>
+    <x:Double x:Key="ColPoolFrag">65</x:Double>
+    <x:Double x:Key="ColPoolDedup">70</x:Double>
+
     <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
   </UserControl.Resources>
 
-  <DockPanel>
+  <!-- **Two subjects on one host, not two views of one fact**, which is what ContainersModule's
+       four tabs are and what ServicesModule's two are. The disks are the hardware; a pool is a
+       thing built out of that hardware, with its own toolbar, its own empty states and its own
+       round trip. Each page carries its own toolbar rather than sharing one at the top, because a
+       toolbar shows only what applies to the table under it and the ZFS page has a command that
+       creates something where the disks page has none. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Header="Disks">
+      <DockPanel>
 
     <!-- A Refresh button and nothing else. Nothing on a host announces a disk being plugged in that
          VirtDeck can hear without root and a udev tail, and a device layout changes about as often
@@ -171,5 +190,162 @@
                  HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Panel>
 
-  </DockPanel>
+      </DockPanel>
+    </TabItem>
+
+    <!-- **Disabled whole rather than command by command when the host has no ZFS**, which is the
+         one page-level shape ContainersModule's Stacks tab already establishes: without zpool not
+         one command on this page can run, so an enabled page would be a table of nothing over
+         buttons that all refuse. ToolTip.ShowOnDisabled is what lets it still say why, and it is
+         the exception to the enabled-parent-Border rule the rest of the app follows, because a
+         TabItem has no parent of its own to hang a tooltip off.
+
+         The module itself stays on screen either way: `zpool` is deliberately not in RequiredTools,
+         for the reason smartctl is not, that naming a tool one part of a page needs takes the whole
+         page away over it. -->
+    <TabItem Header="ZFS" Name="ZfsTab" ToolTip.ShowOnDisabled="True">
+      <DockPanel>
+
+        <!-- Refresh, then the two commands that need no selection. New pool is accented because it
+             is the one command on this page that brings something new into being; Import is beside
+             it rather than on the right-click menu because it is the one command whose subject is
+             not in the table yet. Everything else acts on a pool and lives on the menu. -->
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Border Background="Transparent" ToolTip.Tip="{Binding #ZfsRefreshButton.Tag}">
+                <Button Name="ZfsRefreshButton" Theme="{StaticResource JbIconButton}">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </Border>
+              <Border Background="Transparent" ToolTip.Tip="{Binding #NewPoolButton.Tag}">
+                <Button Name="NewPoolButton" Content="New pool" Classes="accent" />
+              </Border>
+              <Border Background="Transparent" ToolTip.Tip="{Binding #ImportPoolButton.Tag}">
+                <Button Name="ImportPoolButton" Content="Import pool" />
+              </Border>
+            </StackPanel>
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <!-- Every column is about the whole pool, so every one of them sorts. Health is the fill
+             column, as it is one tab to the left, so the numbers read left to right into the one
+             cell that holds a word. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="PoolHeaderStrip">
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Pool" SortKey="pool" Indent="14"
+                            Width="{StaticResource ColPool}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
+                            Width="{StaticResource ColPoolSize}"
+                            Tip="The pool's raw capacity, which on a raidz pool counts the parity disks too. It is what zpool list calls SIZE and is not what you can store." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Allocated" SortKey="alloc"
+                            Width="{StaticResource ColPoolAlloc}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Free" SortKey="free"
+                            Width="{StaticResource ColPoolFree}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Capacity" SortKey="cap"
+                            Width="{StaticResource ColPoolCap}"
+                            Tip="How full the pool is. ZFS slows down markedly once a pool is past about 80 percent, because it has to work harder to find contiguous space." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Frag" SortKey="frag"
+                            Width="{StaticResource ColPoolFrag}"
+                            Tip="How fragmented the pool's free space is, which is about how easily it can find room rather than about the data already written. Blank where ZFS declined to say, which is not the same as zero." />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Dedup" SortKey="dedup"
+                            Width="{StaticResource ColPoolDedup}"
+                            Tip="The deduplication ratio, drawn only where dedup is actually in use. Blank means it is off, which it is on almost every pool." />
+            <c:ColumnHeader Text="Health" SortKey="health"
+                            Tip="What ZFS says about the pool. Sorting puts the pools worth looking at first." />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <!-- Multiple, so Copy name can take several at once and so a scrub can be started on a
+               few pools in one go. Pool details is single-selection and says so by being disabled
+               on anything else, exactly as Disk details is. -->
+          <ListBox Name="PoolList" SelectionMode="Multiple" Background="Transparent" Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="PoolMenu">
+                <MenuItem Name="MenuPoolDetails" Header="Pool details" />
+                <Separator />
+                <MenuItem Name="MenuScrub" Header="Start scrub" />
+                <MenuItem Name="MenuStopScrub" Header="Stop scrub" />
+                <Separator />
+                <MenuItem Name="MenuExport" Header="Export pool" />
+                <MenuItem Name="MenuDestroy" Header="Destroy pool" />
+                <Separator />
+                <MenuItem Name="MenuCopyPoolName" Header="Copy name" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:ZfsPoolRow">
+
+                <!-- A DockPanel and not a StackPanel, for the reason the disks row is one: a
+                     StackPanel measures its children with infinite width, so the Health cell's
+                     TextTrimming never fires and a long state runs off the edge while the heading
+                     above it has been squeezed to nothing. -->
+                <DockPanel Classes="cells" ToolTip.Tip="{Binding Summary}">
+
+                  <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColPool}">
+                    <!-- The dot's slot keeps its width whatever the dot is doing, so every name in
+                         the column starts in the same place. A Border rather than a margin, so the
+                         row's hover paints it instead of leaving a dead strip down the left. -->
+                    <Panel DockPanel.Dock="Left" Width="14">
+                      <Ellipse Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center"
+                               Fill="{Binding StateBrush}" ToolTip.Tip="{Binding HealthTip}" />
+                    </Panel>
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding SizeText}"
+                             Width="{StaticResource ColPoolSize}" VerticalAlignment="Center" />
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding AllocText}"
+                             Width="{StaticResource ColPoolAlloc}" VerticalAlignment="Center" />
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding FreeText}"
+                             Width="{StaticResource ColPoolFree}" VerticalAlignment="Center" />
+
+                  <!-- **MinWidth="0" is what keeps this bar inside its own column, and Width alone
+                       never did.** Fluent gives ProgressBar a MinWidth of 200 and a minimum
+                       outranks Width in measure, so a bar asked for 52px lays out at 198 and runs
+                       straight through the columns beside it. Nothing errors and nothing warns.
+
+                       The 6px gutter is written out because the .cells DockPanel arm in App.axaml
+                       reaches direct TextBlock children only, and this cell is a Border. -->
+                  <Border DockPanel.Dock="Left" Width="{StaticResource ColPoolCap}" Padding="6,0,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding CapacityText}" Width="38" VerticalAlignment="Center" />
+                      <ProgressBar Minimum="0" Maximum="100" Value="{Binding CapacityPercent}"
+                                   Width="60" MinWidth="0" Height="6" VerticalAlignment="Center"
+                                   IsVisible="{Binding HasCapacity}" />
+                    </StackPanel>
+                  </Border>
+
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding FragText}"
+                             Width="{StaticResource ColPoolFrag}" VerticalAlignment="Center" />
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding DedupText}"
+                             Width="{StaticResource ColPoolDedup}" VerticalAlignment="Center" />
+
+                  <TextBlock Text="{Binding HealthText}" Foreground="{Binding HealthBrush}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding HealthTip}" />
+                </DockPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Why the table is empty. Five answers, because they are five different situations and
+               only one of them is "this host has no pools": no zpool at all, the userland present
+               with the kernel module not loaded, a listing that failed, a listing nobody could run,
+               and a host that genuinely has none. -->
+          <TextBlock Name="PoolEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="440"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+  </TabControl>
 </UserControl>

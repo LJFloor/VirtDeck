@@ -1,0 +1,111 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+        x:Class="VirtDeck.Avalonia.Views.Storage.CreatePoolDialog"
+        Title="New ZFS pool"
+        Width="560" Height="700" MinWidth="520" MinHeight="560"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #CreateButton.Tag}">
+        <Button Name="CreateButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel Classes="page">
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+          <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" PlaceholderText="tank" />
+
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Layout" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="1" Grid.Column="1" Name="LayoutBox" HorizontalAlignment="Stretch" />
+        </Grid>
+
+        <TextBlock Name="LayoutNote" Classes="note" TextWrapping="Wrap" />
+
+        <HeaderedContentControl Header="Disks" Theme="{StaticResource JbGroupBox}">
+          <StackPanel Classes="options">
+
+            <ListBox Name="DiskList" Height="180" Background="Transparent"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="s:PoolDiskRow">
+                  <!-- The tooltip hangs off an enabled Border, because a disabled control is not
+                       hit-testable in Avalonia and the reason a disk cannot be picked is exactly
+                       what somebody hovers to find out. CheckRow and ServiceRow do the same. -->
+                  <Border Background="Transparent" ToolTip.Tip="{Binding DisabledReason}" Padding="0,3">
+                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                              IsEnabled="{Binding IsEnabled}">
+                      <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Detail}" Opacity="0.7"
+                                   TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                    </CheckBox>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Named out loud, so a disk missing from the list above is never a mystery. -->
+            <TextBlock Name="BootNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+            <TextBlock Name="NoDisksNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+
+            <Grid ColumnDefinitions="100,*" RowDefinitions="Auto" Margin="0,6,0,0">
+              <TextBlock Grid.Column="0" Text="Vdevs" VerticalAlignment="Center" />
+              <Border Grid.Column="1" Background="Transparent" ToolTip.Tip="{Binding #VdevBox.Tag}"
+                      HorizontalAlignment="Left">
+                <NumericUpDown Name="VdevBox" Minimum="1" Maximum="32" Increment="1"
+                               Width="110" FormatString="0" />
+              </Border>
+            </Grid>
+
+            <TextBlock Name="TopologyNote" Classes="subnote" TextWrapping="Wrap" />
+
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Header="Options" Theme="{StaticResource JbGroupBox}">
+          <StackPanel Classes="options">
+
+            <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Sector size" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="0" Grid.Column="1" Name="AshiftBox" HorizontalAlignment="Stretch" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Compression" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="1" Grid.Column="1" Name="CompressionBox" HorizontalAlignment="Stretch" />
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Mount at" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" Name="MountBox" />
+            </Grid>
+
+            <TextBlock Name="AshiftNote" Classes="subnote" TextWrapping="Wrap" />
+
+            <CheckBox Name="AutoTrimBox" Content="Trim automatically" />
+            <TextBlock Classes="subnote" TextWrapping="Wrap"
+                       Text="Tells the SSDs in the pool which blocks are free as they become free. It does nothing useful on spinning disks." />
+
+          </StackPanel>
+        </HeaderedContentControl>
+
+        <StackPanel Classes="options">
+          <Border Background="Transparent" ToolTip.Tip="{Binding #ForceBox.Tag}" HorizontalAlignment="Left">
+            <CheckBox Name="ForceBox" Content="Force, overwriting what is on the disks" />
+          </Border>
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Lets a disk that already holds a filesystem or an exported pool be used, destroying what is on it. It can never reach a mounted disk, a pool that is currently imported, or this host's boot drive: ZFS refuses those outright and so does this." />
+        </StackPanel>
+
+        <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+      </StackPanel>
+    </ScrollViewer>
+
+  </DockPanel>
+</Window>

@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+        x:Class="VirtDeck.Avalonia.Views.Storage.PoolDetailsWindow"
+        Title="Pool"
+        Width="960" Height="620" MinWidth="720" MinHeight="460"
+        WindowStartupLocation="CenterScreen">
+
+  <!-- Declared here rather than in each page, so no two of them can drift apart on what a fact
+       looks like. Styles and data templates on a Window reach its whole tree, tab content included.
+       Both are DiskDetailsWindow's verbatim, and the DiskFact template is the same type: a fact is
+       a label and a value whatever it is about. -->
+  <Window.Styles>
+    <Style Selector="TextBlock.factlabel">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Width" Value="112" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.factvalue">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </Window.Styles>
+
+  <Window.DataTemplates>
+    <DataTemplate DataType="s:DiskFact">
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,3" ToolTip.Tip="{Binding Tip}">
+        <TextBlock Classes="factlabel" Text="{Binding Label}" />
+        <TextBlock Classes="factvalue" Text="{Binding Value}" />
+      </StackPanel>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel>
+
+    <!-- Refresh and Close, and a status line to their left for what the deeper read is doing. No
+         Cancel: the only thing this window writes is a scrub, which is its own button and is
+         stopped by pressing it again. -->
+    <Border DockPanel.Dock="Bottom" Padding="16,12"
+            BorderThickness="0,1,0,0" BorderBrush="#33808080" Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Name="StatusText" Grid.Column="0" Opacity="0.7"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Margin="0,0,12,0" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="RefreshButton" Content="Refresh" MinWidth="88" />
+          <Button Name="CloseButton" Content="Close" IsCancel="True" MinWidth="88" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Top-placed tabs rather than JbSideTabControl, which DiskDetailsWindow settles: two short
+         names do not earn a 160px rail.
+
+         **Two pages, because there are two questions and not three.** What the pool is and what it
+         is made of are one subject read together, so the topology is a group box on the General
+         page rather than a tab beside it; what ZFS says about its health is the other, and it is
+         the half that is a separate round trip and can be refused. -->
+    <TabControl Name="SectionTabs">
+      <TabItem Header="General">
+        <s:PoolGeneralTab />
+      </TabItem>
+      <TabItem Header="Status">
+        <s:PoolStatusTab />
+      </TabItem>
+    </TabControl>
+
+  </DockPanel>
+</Window>
