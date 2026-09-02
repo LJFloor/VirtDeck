@@ -30,6 +30,10 @@ if errorlevel 1 (
     goto :fail
 )
 
+rem Drop the debug symbols: they are dead weight in a release artifact and one of
+rem them (SkiaSharp's) is about 80 MB on its own.
+del /s /q "%PUBLISH_DIR%\*.pdb" >nul 2>nul
+
 echo.
 echo === [2/3] Packaging SpiceClient source (LGPL corresponding source) ===
 rem Stage a clean copy of the SpiceClient project (source only, no bin/obj/.vs), then zip it.
