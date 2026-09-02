@@ -5,8 +5,15 @@ using VirtDeck.Models;
 namespace VirtDeck.Avalonia.Views.Storage;
 
 /// <summary>
-/// What the hardware is: the identifiers that name a physical thing somebody may have to walk over
-/// and pull out of a bay, and the geometry that explains how it is laid out.
+/// The window's main page: what the hardware is, and what is stacked on it.
+///
+/// <para>The identifiers that name a physical thing somebody may have to walk over and pull out of a
+/// bay, the geometry that explains how it is laid out, and below them the disk's own partition
+/// table, drawn by <see cref="DiskPartitionsView"/> inside a group box. <b>That table used to be a
+/// tab of its own and is one subject with the block above it</b>, so the page now answers "what is
+/// this disk, and what is on it" without a click in the middle of the sentence; the deep SMART
+/// reading is what is left behind a tab, being the one part of this window that is genuinely a
+/// separate question and a separate round trip.</para>
 ///
 /// <para>The storage module's old details pane, promoted to a page. Two things it could not do
 /// before it had the room: the identity block is now the whole of one, including the fields only
@@ -101,6 +108,13 @@ public partial class DiskGeneralTab : UserControl, IDiskTab
         _right.Add(new DiskFact("Health", view.Verdict, view.Reason));
 
         if (device.ReadOnly) _right.Add(new DiskFact("Access", "read-only"));
+
+        // The stack, handed the same view this page was given. The window's tab walk cannot reach it
+        // (it is not the content of a TabItem), so this page hands it on, which is a page naming a
+        // literal element of its own markup rather than the window naming a page. It is named
+        // PartitionTable and not Partitions because the generated field and the summary method below
+        // would then be two members of this class under one name, which does not compile.
+        PartitionTable.Show(view);
     }
 
     /// <summary>What lsblk said, or what SMART said where lsblk said nothing.</summary>

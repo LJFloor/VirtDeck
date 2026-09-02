@@ -69,6 +69,17 @@ namespace VirtDeck.Services
               /etc/fstab 2>/dev/null
 
             awk 'NR > 1 { print "s\t" $1 }' /proc/swaps 2>/dev/null
+
+            # Which block devices are not hardware, which is the one thing lsblk cannot say: it
+            # gives a ZFS zvol and a zram device the same TYPE it gives a drive. The kernel does say
+            # it, by giving a virtual block device no `device` symlink to point at, and that is the
+            # rule the Dashboard's sampler already counts disks by. The **virtual** ones are emitted
+            # rather than the real ones, so a host whose /sys/block could not be walked hides
+            # nothing. `[ -d ]` is what stops an unmatched glob being reported as a device called *.
+            for p in /sys/block/*; do
+              [ -d "$p" ] || continue
+              [ -e "$p/device" ] || printf 'n\t%s\n' "${p##*/}"
+            done
             exit 0
             """;
 
@@ -91,6 +102,7 @@ namespace VirtDeck.Services
             var failure = "";
             var fstab = new List<FstabEntry>();
             var swaps = new List<string>();
+            var notHardware = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var (tag, text) in PackageScripts.Records(raw))
             {
@@ -118,6 +130,10 @@ namespace VirtDeck.Services
                     case "s":
                         if (text.Trim() is { Length: > 0 } device) swaps.Add(device);
                         break;
+
+                    case "n":
+                        if (text.Trim() is { Length: > 0 } virtualName) notHardware.Add(virtualName);
+                        break;
                 }
             }
 
@@ -129,7 +145,7 @@ namespace VirtDeck.Services
             IReadOnlyList<BlockDevice> roots = [];
             if (json.Length > 0)
             {
-                try { roots = ParseTree(json); }
+                try { roots = ParseTree(json, notHardware); }
                 catch (Exception ex) { failure = ex.Message; }
             }
 
@@ -144,17 +160,17 @@ namespace VirtDeck.Services
             };
         }
 
-        private static IReadOnlyList<BlockDevice> ParseTree(string json)
+        private static IReadOnlyList<BlockDevice> ParseTree(string json, IReadOnlySet<string> notHardware)
         {
             using var document = JsonDocument.Parse(json);
             if (!document.RootElement.TryGetProperty("blockdevices", out var list) ||
                 list.ValueKind != JsonValueKind.Array)
                 return [];
 
-            return list.EnumerateArray().Select(n => ReadNode(n, "")).ToList();
+            return list.EnumerateArray().Select(n => ReadNode(n, "", notHardware)).ToList();
         }
 
-        private static BlockDevice ReadNode(JsonElement node, string parent)
+        private static BlockDevice ReadNode(JsonElement node, string parent, IReadOnlySet<string> notHardware)
         {
             // KNAME is what everything here is keyed on, and it is in both column sets. NAME is the
             // fallback only for a listing so old it has neither, where the two are the same anyway.
@@ -166,7 +182,7 @@ namespace VirtDeck.Services
 
             var children = node.TryGetProperty("children", out var kids) &&
                            kids.ValueKind == JsonValueKind.Array
-                ? kids.EnumerateArray().Select(c => ReadNode(c, kname)).ToList()
+                ? kids.EnumerateArray().Select(c => ReadNode(c, kname, notHardware)).ToList()
                 : [];
 
             var pkname = Str(node, "pkname");
@@ -190,6 +206,7 @@ namespace VirtDeck.Services
                 Removable = Bool(node, "rm") ?? false,
                 ReadOnly = Bool(node, "ro") ?? false,
                 Transport = Str(node, "tran"),
+                IsVirtual = notHardware.Contains(kname),
                 // PKNAME is absent from a node lsblk nested under its parent on some versions, so
                 // the walk's own parent is the fallback. The tree is the truth either way.
                 ParentKname = pkname.Length > 0 ? pkname : parent,
@@ -275,13 +292,29 @@ namespace VirtDeck.Services
         // so without it "asleep" and "could not be opened" arrive as one answer. 3 is a value
         // nothing else here produces, which keeps them two.
         //
-        // **`-d` is passed explicitly wherever `smartctl --scan` knows a type**, because `-n` alone
-        // leaks: the commands smartctl issues to *autodetect* a device type will themselves spin it
-        // up, which the man page says out loud. The scan is a glob over /dev and opens nothing, so
-        // it costs nothing to ask. It lists an NVMe **controller** (`/dev/nvme0`) where lsblk lists
-        // a **namespace** (`/dev/nvme0n1`), which is why the namespace has a case of its own rather
-        // than being expected to match; anything the scan does not know at all (virtio, mmc, an
-        // exotic USB bridge) falls through to autodetection, which is the honest last resort.
+        // **The guard is for platters, so a disk the listing says has none is asked without it.**
+        // An SSD parks as readily as a drive does (measured: an idle SATA SSD here answers "Device
+        // is in SLEEP mode"), and with the guard on, its whole row would read "spun down" for the
+        // ordinary reason that nobody had written to it lately. What the guard buys back there is
+        // nothing: there is no platter to spin, waking it is a link reset and a few milliseconds,
+        // and the cost of not asking is the one column somebody opened the page for. It keys on
+        // ROTA being **positively false**, so a disk that would not say which it is keeps the guard,
+        // which is the safe direction to be wrong in.
+        //
+        // **The `-d` is resolved from the transport lsblk reported, and `smartctl --scan` is
+        // deliberately not what resolves it.** A `-d` has to be given, because `-n` alone leaks: the
+        // commands smartctl issues to *autodetect* a device type will themselves spin it up, which
+        // the man page says out loud ("it may also be necessary to specify the device type with the
+        // '-d' option"). But the scan guesses the type **from the device name**, and on Linux that
+        // means every `/dev/sd*` there is comes back `-d scsi`, whatever it actually is (verified
+        // against smartctl 7.4: `/dev/sda -d scsi # /dev/sda, SCSI device` for a SATA SSD). Forcing
+        // that on a SATA disk sends SCSI commands into the kernel's SAT translation, which answers a
+        // temperature of **0**, no health status and no attribute table at all, so a perfectly good
+        // SSD drew as "Unknown, 0 C" with three empty columns beside it, and its standby state went
+        // undetected into the bargain. `--scan-open` is the accurate one and is the one that cannot
+        // be used here: it opens every device, which is the whole thing `-n` exists to avoid. So the
+        // type comes from the listing, which is the only thing here that knows what the device is;
+        // see `SmartType` for which transports resolve one and which are left to autodetection.
         //
         // **`-A` although no attribute table is drawn.** On ATA the temperature, the power-on hours
         // and the reallocated sector count are not in `-H -i` at all: all three are SMART attributes.
@@ -296,24 +329,26 @@ namespace VirtDeck.Services
             command -v smartctl >/dev/null 2>&1 || exit 0
             printf 'v\t%s\n' "$(smartctl --version 2>/dev/null | head -n 1)"
 
-            # A glob over /dev that opens nothing, so it is free and needs no privilege. Its only
-            # job here is to say which -d smartctl would have autodetected, so that -n can be
-            # trusted; see the note above.
-            scan=$(smartctl --scan 2>/dev/null)
-
+            # The devices and what to ask each one with, as three arrays the client fills in
+            # together: `y[i]` is the `-d` for `d[i]`, empty where nothing here can say and smartctl
+            # is left to autodetect, and `n[i]` is its `-n`, empty where there is no platter to
+            # protect. They are assembled into a quoted argv rather than expanded into the command
+            # line, which is the same rule every other vector in this app follows.
             DEVICES
-            for dev in "${d[@]}"; do
-              t=$(printf '%s\n' "$scan" | awk -v want="$dev" '$1 == want { print $3; exit }')
-              if [ -z "$t" ]; then
-                case "$dev" in
-                  /dev/nvme*) t=nvme ;;
-                esac
-              fi
-              if [ -n "$t" ]; then
-                out=$(smartctl -j -n standby,3 -d "$t" -H -i -A -- "$dev" 2>/dev/null)
-              else
-                out=$(smartctl -j -n standby,3 -H -i -A -- "$dev" 2>/dev/null)
-              fi
+
+            i=0
+            while [ "$i" -lt "${#d[@]}" ]; do
+              dev=${d[$i]}
+              typ=${y[$i]}
+              noc=${n[$i]}
+              i=$((i + 1))
+              [ -n "$dev" ] || continue
+
+              a=()
+              [ -n "$typ" ] && a+=(-d "$typ")
+              [ -n "$noc" ] && a+=(-n "$noc")
+
+              out=$(smartctl -j "${a[@]}" -H -i -A -- "$dev" 2>/dev/null)
               [ -n "$out" ] || continue
               printf 'h\t%s\t%s\n' "$dev" "$(printf '%s' "$out" | base64 | tr -d '\n')"
             done
@@ -321,16 +356,59 @@ namespace VirtDeck.Services
             """;
 
         /// <summary>
-        /// Asks SMART about each of <paramref name="disks"/> (device paths), in one elevated round
-        /// trip. Answers <see cref="HealthReading.NotProbed"/> for a host with no smartmontools,
-        /// which is a stated answer the module draws rather than a blank column.
+        /// The <c>-d</c> to give smartctl for a device, or empty to let it autodetect.
+        ///
+        /// <para><b>Two transports resolve a type and everything else is left alone, on purpose.</b>
+        /// <c>nvme</c> and <c>sata</c> are the two whose answer is the same on every Linux host: an
+        /// NVMe namespace is <c>nvme</c>, and anything ATA is reached through libata's SAT layer and
+        /// so is <c>sat</c>. USB is deliberately not one of them, because which bridge a disk sits
+        /// behind is decided from a VID/PID table only smartctl's own autodetection carries, and
+        /// answering <c>sat</c> there would turn a working reading into "Unknown USB bridge". Nor is
+        /// <c>sas</c>: a SATA disk on a SAS HBA is reported by lsblk as <c>sas</c> and is still an
+        /// ATA device underneath, which is the exact mistake this function exists to stop making.
+        /// Autodetection is the honest last resort, and it is what smartctl would have done anyway.</para>
+        ///
+        /// <para>The device path is the fallback for a listing too old to carry TRAN, whose column
+        /// set has no transport in it at all: an NVMe namespace is still recognisable by its name,
+        /// which is what the old scan's one special case was for.</para>
+        /// </summary>
+        private static string SmartType(BlockDevice disk) =>
+            disk.Transport.ToLowerInvariant() switch
+            {
+                "nvme" => "nvme",
+                "sata" or "ata" => "sat",
+                _ => disk.Path.StartsWith("/dev/nvme", StringComparison.Ordinal) ? "nvme" : "",
+            };
+
+        /// <summary>
+        /// The <c>-n</c> to give smartctl for a device, or empty to ask it outright. See the note on
+        /// the script for why a disk with no platters is asked outright.
+        /// </summary>
+        private static string PowerGuard(BlockDevice disk) =>
+            disk.Rotational == false ? "" : "standby,3";
+
+        /// <summary>
+        /// Asks SMART about each of <paramref name="disks"/>, in one elevated round trip. Answers
+        /// <see cref="HealthReading.NotProbed"/> for a host with no smartmontools, which is a stated
+        /// answer the module draws rather than a blank column.
+        ///
+        /// <para>It takes the disks themselves rather than their paths, because the device type
+        /// smartctl has to be told rides on the listing and nowhere else: see <see cref="SmartType"/>.
+        /// A disk with no device node is dropped here, since there is nothing to point smartctl at.</para>
         /// </summary>
         public async Task<HealthReading> ReadHealthAsync(
-            IReadOnlyList<string> disks, CancellationToken ct = default)
+            IReadOnlyList<BlockDevice> disks, CancellationToken ct = default)
         {
-            if (disks.Count == 0) return HealthReading.NotProbed;
+            var targets = disks.Where(d => d.Path.Length > 0).ToList();
+            if (targets.Count == 0) return HealthReading.NotProbed;
 
-            var script = HealthScript.Replace("DEVICES", ShellScript.ArrayFrom("d", disks).TrimEnd());
+            // One substitution and not two, so a base64 blob that happens to spell the other
+            // placeholder cannot be rewritten by it.
+            var arrays = ShellScript.ArrayFrom("d", targets.Select(t => t.Path)) +
+                         ShellScript.ArrayFrom("y", targets.Select(SmartType)) +
+                         ShellScript.ArrayFrom("n", targets.Select(PowerGuard));
+
+            var script = HealthScript.Replace("DEVICES", arrays.TrimEnd());
             var raw = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
             return ParseHealth(raw);
         }
@@ -604,12 +682,12 @@ namespace VirtDeck.Services
         // so it can afford `-x` and everything that comes with it: the whole attribute table, the
         // self-test log, the error log counts and the identity block.
         //
-        // Everything the pass above argues for is kept here and none of it is optional:
-        // `smartctl --scan` to resolve `-d` explicitly, because the commands smartctl issues to
-        // *autodetect* a type will themselves spin the disk up; `-n standby,3` so a parked drive is
-        // not woken to be asked, with the `,3` that keeps "asleep" and "could not be opened" two
-        // different answers; and **no `|| exit $?`**, because smartctl's exit status is a bitmask in
-        // which only bit 3 is a verdict.
+        // Everything the pass above argues for is kept here and none of it is optional: the `-d`
+        // resolved from the transport lsblk reported rather than from `smartctl --scan`, which
+        // guesses it from the device name and answers `scsi` for every SATA disk there is;
+        // `-n standby,3` so a parked drive is not woken to be asked, with the `,3` that keeps
+        // "asleep" and "could not be opened" two different answers; and **no `|| exit $?`**, because
+        // smartctl's exit status is a bitmask in which only bit 3 is a verdict.
         //
         // **The cap is not tidiness.** `-x` is 20-80 KB on an ordinary drive, but the payload comes
         // off a host and rides back through the command channel, so a device whose error log is
@@ -621,18 +699,12 @@ namespace VirtDeck.Services
             command -v smartctl >/dev/null 2>&1 || exit 0
             printf 'v\t%s\n' "$(smartctl --version 2>/dev/null | head -n 1)"
 
-            scan=$(smartctl --scan 2>/dev/null)
-
             DEVICE
             dev="${d[0]}"
-            t=$(printf '%s\n' "$scan" | awk -v want="$dev" '$1 == want { print $3; exit }')
-            if [ -z "$t" ]; then
-              case "$dev" in
-                /dev/nvme*) t=nvme ;;
-              esac
-            fi
-            if [ -n "$t" ]; then
-              out=$(smartctl -j STANDBY -d "$t" -x -- "$dev" 2>/dev/null)
+            typ="${y[0]}"
+
+            if [ -n "$typ" ]; then
+              out=$(smartctl -j STANDBY -d "$typ" -x -- "$dev" 2>/dev/null)
             else
               out=$(smartctl -j STANDBY -x -- "$dev" 2>/dev/null)
             fi
@@ -658,20 +730,26 @@ namespace VirtDeck.Services
         /// tab's "Read anyway" asks for. It is a parameter rather than the default because reading
         /// SMART spins the platters up, which is 5 to 15 seconds and defeats whatever power
         /// management the user configured; that is a cost the person looking at the window should be
-        /// the one to accept.</para>
+        /// the one to accept. A disk the listing says has no platters carries no guard in the first
+        /// place, for the reason the pass above gives, so that button never appears for one.</para>
         /// </summary>
         public async Task<DiskDetail> ReadDiskDetailAsync(
-            string device, bool wake = false, CancellationToken ct = default)
+            BlockDevice disk, bool wake = false, CancellationToken ct = default)
         {
-            if (device.Length == 0) return DiskDetail.NotProbed;
+            if (disk.Path.Length == 0) return DiskDetail.NotProbed;
+
+            // The two literal substitutions run **before** the one that injects base64, so a blob
+            // that happens to spell STANDBY or CAP cannot be rewritten by them.
+            var arrays = ShellScript.ArrayFrom("d", [disk.Path]) +
+                         ShellScript.ArrayFrom("y", [SmartType(disk)]);
 
             var script = DetailScript
-                .Replace("DEVICE", ShellScript.ArrayFrom("d", [device]).TrimEnd())
-                .Replace("STANDBY", wake ? "" : "-n standby,3")
-                .Replace("CAP", DetailCapBytes.ToString());
+                .Replace("STANDBY", wake || PowerGuard(disk).Length == 0 ? "" : "-n standby,3")
+                .Replace("CAP", DetailCapBytes.ToString())
+                .Replace("DEVICE", arrays.TrimEnd());
 
             var raw = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
-            return ParseDetail(device, raw);
+            return ParseDetail(disk.Path, raw);
         }
 
         internal static DiskDetail ParseDetail(string device, string raw)

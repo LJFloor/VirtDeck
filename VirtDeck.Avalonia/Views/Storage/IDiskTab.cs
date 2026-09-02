@@ -92,6 +92,10 @@ public sealed record DiskView(
 /// window, since they are literal elements of its markup and not template output, so
 /// <see cref="Show"/> has to be correct on a page the user never opened; and pages own disjoint
 /// parts of the view, so the order they are called in must never matter.</para>
+///
+/// <para>A control a page hosts is not a page: <c>DiskPartitionsView</c> sits in a group box on the
+/// General page and is handed the view by that page, which is why it does not implement this and the
+/// walk does not reach it.</para>
 /// </summary>
 public interface IDiskTab
 {
@@ -104,8 +108,8 @@ public interface IDiskTab
 ///
 /// <para>A second interface rather than another member on <see cref="IDiskTab"/>, for the reason
 /// <c>IModuleNavigator</c> is a second interface beside <c>IModule</c>: an event is the one thing
-/// that cannot be defaulted on an interface, and two of the three pages have nothing to ask for.
-/// The window subscribes to whichever pages implement it, so it still names none of them.</para>
+/// that cannot be defaulted on an interface, and the other page has nothing to ask for. The window
+/// subscribes to whichever pages implement it, so it still names none of them.</para>
 /// </summary>
 public interface IDiskWakeRequest
 {

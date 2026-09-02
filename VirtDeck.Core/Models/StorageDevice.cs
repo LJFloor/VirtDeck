@@ -100,8 +100,32 @@ namespace VirtDeck.Models
         /// <summary>What sits on top of this device, in the order lsblk listed it.</summary>
         public IReadOnlyList<BlockDevice> Children { get; init; } = [];
 
-        /// <summary>Whether this is a whole disk, which is the only thing SMART can be asked about.</summary>
-        public bool IsDisk => Type == "disk";
+        /// <summary>
+        /// Whether the kernel gives this device no <c>device</c> symlink in sysfs, which is the one
+        /// thing about it lsblk cannot say.
+        ///
+        /// <para>A ZFS zvol (<c>zd0</c>) and a zram device are TYPE <c>disk</c>, the same word lsblk
+        /// gives a drive, and nothing else in its output separates them: no transport, no model, no
+        /// serial, and a rotational flag that reads as an SSD. The kernel does separate them, by
+        /// giving a virtual block device no hardware device to point at, which is the rule
+        /// <c>HostMetricsService</c> already counts disks by and is a rule rather than a name
+        /// blacklist for the same reason.</para>
+        ///
+        /// <para>It defaults to <b>false</b>, and the listing emits the virtual devices rather than
+        /// the real ones, so a host whose sysfs could not be walked hides nothing: an answer nobody
+        /// could give shows every disk, which is the call the shell's own module probe makes when it
+        /// fails.</para>
+        /// </summary>
+        public bool IsVirtual { get; init; }
+
+        /// <summary>
+        /// Whether this is a whole drive: what lsblk called a <c>disk</c>, and hardware.
+        ///
+        /// <para>The second half is not pedantry. A host with a dozen zvols on it drew a dozen rows
+        /// in a table about the machine's disks, each of them a slice of the disks in the rows above
+        /// it, and none of them something SMART can be asked about. See <see cref="IsVirtual"/>.</para>
+        /// </summary>
+        public bool IsDisk => Type == "disk" && !IsVirtual;
 
         /// <summary>
         /// How full the filesystem is, or null where there is no filesystem mounted to ask.

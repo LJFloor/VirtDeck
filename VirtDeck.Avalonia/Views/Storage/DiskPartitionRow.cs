@@ -4,7 +4,7 @@ namespace VirtDeck.Avalonia.Views.Storage;
 
 /// <summary>
 /// One device stacked on the disk: a partition, a LUKS container, an LVM logical volume or an MD
-/// array. The Partitions tab's row.
+/// array. The main page's partition table row.
 ///
 /// <para>This is the tree that used to be the storage table, scoped to one disk. It is still drawn
 /// as a flat list with an indent for the same reason it was: there is no <c>TreeView</c> in this app
@@ -106,7 +106,7 @@ public sealed class DiskPartitionRow
     /// <summary>
     /// The disk's whole stack, flattened depth first in the host's own order.
     ///
-    /// <para>lsblk's order is kept and is never sorted, which is what the Partitions tab has instead
+    /// <para>lsblk's order is kept and is never sorted, which is what that table has instead
     /// of sortable headings: a partition table's order is a fact about the disk, and floating a LUKS
     /// mapping above the EFI partition by size turns a stack into a pile.</para>
     /// </summary>

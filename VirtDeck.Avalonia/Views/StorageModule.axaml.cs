@@ -23,15 +23,19 @@ namespace VirtDeck.Avalonia.Views;
 /// <para><b>One row per disk, and everything else is in a window.</b> This table used to be the
 /// whole block-device tree flattened with an indent and a chevron, over a details pane in a
 /// splitter. Both are gone: a disk's partitions, LUKS containers and logical volumes are the
-/// Partitions tab of <see cref="DiskDetailsWindow"/>, and everything the pane said about a disk is
-/// that window's General and Health tabs, where an attribute table finally has somewhere to go. What
+/// partition table on <see cref="DiskDetailsWindow"/>'s General page, and everything the pane said
+/// about a disk is that page and the Health tab beside it, where an attribute table finally has
+/// somewhere to go. What
 /// is left here is a list of the machine's drives, which is what somebody opens this page to see,
 /// and every column in it is about a whole disk and therefore sorts.</para>
 ///
 /// <para><b>Loop devices and optical drives are not listed, and that is a decision rather than a
 /// filter that fell out.</b> The table is about the hardware, so what it draws is what lsblk called
-/// a <c>disk</c>. The cost is real and is stated in the empty state: a mounted ISO and a snap host's
-/// dozens of loop devices are no longer visible anywhere in VirtDeck.</para>
+/// a <c>disk</c> <b>and</b> what the kernel gives a hardware device to point at, which is what keeps
+/// a ZFS zvol or a zram device out of a list of the machine's drives: lsblk calls those disks too,
+/// and each of them is a slice of the disks in the rows above it. The cost is real and is stated in
+/// the empty state: a mounted ISO and a snap host's dozens of loop devices are no longer visible
+/// anywhere in VirtDeck.</para>
 /// </summary>
 public partial class StorageModule : UserControl, IModule
 {
@@ -204,8 +208,10 @@ public partial class StorageModule : UserControl, IModule
 
             // The disks this table draws are exactly the devices SMART can be asked about, which is
             // what makes the two lists one list: a partition, a logical volume and a loop device all
-            // live on something else, and a CD-ROM has nothing to report.
-            var disks = Disks().Where(d => d.Path.Length > 0).Select(d => d.Path).ToList();
+            // live on something else, a CD-ROM has nothing to report, and a zvol is a slice of the
+            // disks above it rather than a disk. They go over whole rather than as paths, because
+            // the device type smartctl has to be told is read off the listing.
+            var disks = Disks().Where(d => d.Path.Length > 0).ToList();
             if (disks.Count == 0) return;
 
             // The health pass answers for itself and never for the listing. It is the elevated half,
@@ -436,8 +442,8 @@ public partial class StorageModule : UserControl, IModule
 
     /// <summary>
     /// Everything the window opens with, out of what this module already holds: the disk and its
-    /// whole subtree, the two files the Partitions tab reads a boot state out of, and the summary
-    /// verdict the table is drawing. That last one is what lets the Health tab say something on its
+    /// whole subtree, the two files the partition table reads a boot state out of, and the summary
+    /// verdict this table is drawing. That last one is what lets the Health tab say something on its
     /// first frame instead of sitting blank until its own deeper read lands.
     /// </summary>
     private DiskView ViewOf(StorageRow row) => new(
@@ -470,8 +476,9 @@ public partial class StorageModule : UserControl, IModule
             : _layout.ListFailure.Length > 0
                 ? "The host's block devices could not be listed: " + _layout.ListFailure
             : _layout.Roots.Count > 0
-                ? "This host has block devices, but none of them is a whole disk. This page lists " +
-                  "drives, so loop devices and optical drives are not shown."
+                ? "This host has block devices, but none of them is a drive. This page lists the " +
+                  "hardware, so loop devices, optical drives and virtual block devices such as ZFS " +
+                  "zvols are not shown."
             : "This host reports no block devices.";
     }
 
@@ -491,7 +498,7 @@ public partial class StorageModule : UserControl, IModule
         {
             var all = _layout.All().ToList();
             var parts = new List<string>();
-            Add(parts, all.Count(d => d.Type == "disk"), "disk");
+            Add(parts, all.Count(d => d.IsDisk), "disk");
             Add(parts, all.Count(d => d.Type == "part"), "partition");
             Add(parts, all.Count(d => d.Type == "lvm"), "logical volume");
             Add(parts, all.Count(d => d.Type == "crypt"), "encrypted volume");

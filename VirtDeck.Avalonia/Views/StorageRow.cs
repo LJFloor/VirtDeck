@@ -13,7 +13,7 @@ namespace VirtDeck.Avalonia.Views;
 /// <para><b>Every row here is a whole disk, and that is what this class is now about.</b> It used to
 /// be any block device, and to carry the three fields that made a flat <c>ListBox</c> read as a tree
 /// (a depth, a chevron and a fold flag) so that partitions, LUKS mappings and logical volumes could
-/// be nested under the disk they sit on. That tree is now the disk details window's Partitions tab,
+/// be nested under the disk they sit on. That tree is now the disk details window's partition table,
 /// which means the table is a list of the machine's drives and every cell in it is about hardware:
 /// no cell has a "this row is not a disk" branch any more, and the state dot is unconditional
 /// because there is no longer a kind of row that should not have one.</para>
@@ -21,7 +21,7 @@ namespace VirtDeck.Avalonia.Views;
 public sealed class StorageRow : INotifyPropertyChanged
 {
     /// <summary>
-    /// How far one level of nesting moves a row right, kept here because the Partitions tab still
+    /// How far one level of nesting moves a row right, kept here because that table still
     /// draws a tree and this is the number it indents by. Matches the 16px glyph beside it.
     /// </summary>
     public const double IndentStep = 16;
@@ -174,7 +174,7 @@ public sealed class StorageRow : INotifyPropertyChanged
     public string TypeText => KindOf(Device);
 
     /// <summary>
-    /// The same words for any block device, so the Partitions tab's Kind column and this one cannot
+    /// The same words for any block device, so the partition table's Kind column and this one cannot
     /// drift apart. It is static and takes the record because that tab has a row type of its own:
     /// the alternative was the switch written twice.
     /// </summary>

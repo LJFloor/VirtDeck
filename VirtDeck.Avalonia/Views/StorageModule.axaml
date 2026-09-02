@@ -50,7 +50,7 @@
          have reordered the disks by a fact about something stacked on one. Those three are gone with
          the tree, so what is left is eight columns that are each about a whole disk and each carry
          an order. TableSort still skips a cell with an empty SortKey; the storage table is simply no
-         longer the table that needed it, and the Partitions tab in the details window is where a
+         longer the table that needed it, and the partition table in the details window is where a
          sort would now turn a stack into a pile.
 
          **The four SMART columns are drawn only where a disk on this host answered for them**, which

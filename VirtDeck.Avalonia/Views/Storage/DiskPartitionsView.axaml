@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
-             x:Class="VirtDeck.Avalonia.Views.Storage.DiskPartitionsTab">
+             x:Class="VirtDeck.Avalonia.Views.Storage.DiskPartitionsView">
 
   <UserControl.Resources>
     <x:Double x:Key="ColPartName">200</x:Double>
@@ -16,7 +16,7 @@
   <DockPanel>
 
     <!-- **The heading cells are plain TextBlocks and not Controls/ColumnHeader, which is the one
-         deliberate refusal on this page.** The argument that used to keep three of the storage
+         deliberate refusal in this table.** The argument that used to keep three of the storage
          table's columns unsorted applies to this whole table: a partition table's order is a fact
          about the disk, and floating a LUKS mapping above the EFI partition by size turns a stack
          into a pile. A heading that offers an order which would destroy what the table is showing is
@@ -24,7 +24,8 @@
          the same shape of reason.
 
          The 12,3 padding and the 6px cell gutter still have to match the rest of the app, so the
-         strip is written exactly as a sortable one is; it simply has nothing to click. -->
+         strip is written exactly as a sortable one is; it simply has nothing to click. Its top rule
+         is the group box's own header rule, which is why it draws only the one below it. -->
     <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
             BorderThickness="0,0,0,1" BorderBrush="#22808080">
       <DockPanel>
@@ -41,7 +42,9 @@
     </Border>
 
     <Panel>
-      <ListBox Name="PartitionList" Background="Transparent" Padding="0"
+      <!-- No border of its own: the group box hosting this draws one, and the rows are meant to run
+           right up to it, which is what its Padding="0" is for. -->
+      <ListBox Name="PartitionList" Background="Transparent" Padding="0" BorderThickness="0"
                ItemContainerTheme="{StaticResource JbTableRow}">
         <ListBox.ItemTemplate>
           <DataTemplate DataType="s:DiskPartitionRow">
@@ -95,7 +98,7 @@
         </ListBox.ItemTemplate>
       </ListBox>
 
-      <TextBlock Name="PartitionEmpty" Opacity="0.6" IsVisible="False"
+      <TextBlock Name="PartitionEmpty" Opacity="0.6" IsVisible="False" Margin="12"
                  TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
                  HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Panel>

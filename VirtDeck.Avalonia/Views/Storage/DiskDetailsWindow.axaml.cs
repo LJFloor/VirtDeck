@@ -5,8 +5,8 @@ using VirtDeck.Services;
 namespace VirtDeck.Avalonia.Views.Storage;
 
 /// <summary>
-/// One disk, in three tabs: what the hardware is, what SMART says about it in full, and what is
-/// stacked on it.
+/// One disk, in two pages: what the hardware is and what is stacked on it, then what SMART says
+/// about it in full.
 ///
 /// <para><b>It is a window and not a pane, and that is the whole point of it.</b> The storage module
 /// used to draw these facts in a 200px splitter pane, which fitted a partition and did not fit a
@@ -19,9 +19,10 @@ namespace VirtDeck.Avalonia.Views.Storage;
 /// <c>Shutdown</c>, because the shell disposes the shared SSH connection straight after that.</para>
 ///
 /// <para><b>What is on screen when.</b> The window is constructed with the layout the module already
-/// had in hand, so General and Partitions are complete on the first frame with no round trip at all,
-/// and the Health tab is seeded with the summary verdict the table was already drawing. The deep
-/// <c>smartctl -x</c> read is fired from <c>Opened</c> and redraws when it lands. That is the same
+/// had in hand, so the General page, its partition table included, is complete on the first frame
+/// with no round trip at all, and the Health tab is seeded with the summary verdict the table was
+/// already drawing. The deep <c>smartctl -x</c> read is fired from <c>Opened</c> and redraws when
+/// it lands. That is the same
 /// ordering argument the module itself makes for putting the un-elevated layout pass before the
 /// elevated SMART one: never make a fast page wait to say what it already knows.</para>
 /// </summary>
@@ -117,7 +118,7 @@ public partial class DiskDetailsWindow : Window
 
         try
         {
-            var detail = await _storage.ReadDiskDetailAsync(_view.Disk.Path, wake, ct);
+            var detail = await _storage.ReadDiskDetailAsync(_view.Disk, wake, ct);
             if (ct.IsCancellationRequested) return;
 
             _view = _view with { Detail = detail };
@@ -154,8 +155,8 @@ public partial class DiskDetailsWindow : Window
     /// script to keep correct for no measurable gain.</para>
     ///
     /// <para>A disk that has left the listing is <b>said</b> and not drawn: what is on screen stays,
-    /// because three tabs blanked out is a worse account of an unplugged drive than the last reading
-    /// of it plus a line saying it is gone.</para>
+    /// because a window blanked out is a worse account of an unplugged drive than the last reading of
+    /// it plus a line saying it is gone.</para>
     /// </summary>
     private async Task RefreshAsync()
     {

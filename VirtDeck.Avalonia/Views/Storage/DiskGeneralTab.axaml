@@ -20,15 +20,29 @@
     </DockPanel>
 
     <!-- Two columns split by meaning and not by count: what the device is on the left, what is on it
-         and how it is doing on the right. -->
-    <Grid ColumnDefinitions="*,24,*">
-      <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
-        <ItemsControl Name="LeftFacts" />
-      </ScrollViewer>
-      <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-        <ItemsControl Name="RightFacts" />
-      </ScrollViewer>
+         and how it is doing on the right.
+
+         **They are docked rather than filling, and the table below them takes the slack.** The facts
+         are a fixed dozen short lines whose height is known before the window opens, and the stack
+         is the half that runs to whatever length the disk happens to have, so giving the fill to the
+         table is what makes the page grow in the direction its content does. It is also why the two
+         columns no longer carry a ScrollViewer each: a docked column is measured at its desired
+         height, so one there could never scroll, and a scroller wrapped around the table's own
+         scroller is the thing this layout most needs to avoid. -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,24,*" Margin="0,0,0,14">
+      <ItemsControl Name="LeftFacts" Grid.Column="0" />
+      <ItemsControl Name="RightFacts" Grid.Column="2" />
     </Grid>
+
+    <!-- **The stack is a group box on this page rather than a tab of its own**, which is what a
+         disk's identity block and the thing it holds being one subject asks for: the page reads as
+         one answer instead of putting half of it behind a click, and the Health tab is left as the
+         one thing that is genuinely a separate reading. Padding="0" because the whole content is a
+         table, so the rows run to the frame the box already draws instead of a second border sitting
+         a few pixels inside the first. -->
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Partitions" Padding="0">
+      <s:DiskPartitionsView Name="PartitionTable" />
+    </HeaderedContentControl>
 
   </DockPanel>
 </UserControl>

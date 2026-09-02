@@ -6,7 +6,7 @@
         Width="960" Height="620" MinWidth="720" MinHeight="460"
         WindowStartupLocation="CenterScreen">
 
-  <!-- Declared here rather than in each page, so the three of them cannot drift apart on what a
+  <!-- Declared here rather than in each page, so no two of them can drift apart on what a
        fact looks like. Styles and data templates on a Window reach its whole tree, tab content
        included. The pair is the Dashboard's; a storage fact is a label and a value and needs no
        section heading, which is why VmDetailsView's DetailSection/DetailRow are not used. -->
@@ -50,18 +50,20 @@
     </Border>
 
     <!-- Top-placed tabs rather than JbSideTabControl. The container editor and the answer-file
-         window use the side rail because they have five and seventeen pages; three short names do
-         not earn a 160px column of their own, and VmEditWindow is the precedent for a read-only
-         tabbed window with a bare TabControl picking up the theme's top-placed pair. -->
+         window use the side rail because they have five and seventeen pages; two short names do not
+         earn a 160px column of their own, and VmEditWindow is the precedent for a read-only tabbed
+         window with a bare TabControl picking up the theme's top-placed pair.
+
+         **Two pages, because there are two questions and not three.** What the disk is and what is
+         stacked on it are one subject read together, so the partition table is a group box on the
+         General page rather than a tab beside it; what SMART says is the other, and it is the half
+         that is a separate round trip, can be refused, and can ask to wake a parked drive. -->
     <TabControl Name="SectionTabs">
       <TabItem Header="General">
         <s:DiskGeneralTab />
       </TabItem>
       <TabItem Header="Health">
         <s:DiskHealthTab />
-      </TabItem>
-      <TabItem Header="Partitions">
-        <s:DiskPartitionsTab />
       </TabItem>
     </TabControl>
 
