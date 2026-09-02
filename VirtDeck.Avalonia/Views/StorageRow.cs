@@ -306,8 +306,9 @@ public sealed class StorageRow : INotifyPropertyChanged
 
     /// <summary>
     /// How much of the drive's rated write endurance is <b>left</b>, which is NVMe's
-    /// <c>percentage_used</c> flipped. ATA reports no comparable figure, which is why this column and
-    /// Reallocated are rarely both on screen.
+    /// <c>percentage_used</c> flipped, and on ATA the same figure out of the device statistics log
+    /// or a named wear attribute (see <c>StorageService.Endurance</c>). It is one column because it
+    /// is one reading; where it came from is a fact about the drive and lives in the tooltip.
     ///
     /// <para><b>The reading is drawn the way round a person thinks about it.</b> The drive counts
     /// upwards from nothing to its warranty limit, so its own figure is worst-at-the-top: 1% means a
@@ -339,11 +340,20 @@ public sealed class StorageRow : INotifyPropertyChanged
         {
             if (Health?.PercentageUsed is not { } used) return "";
 
-            var line = used >= 100
-                ? $"The drive has spent all of its rated write endurance, and reports {used}% of it " +
-                  "used."
-                : $"{100 - used}% of the drive's rated write endurance is left; it reports {used}% " +
-                  "used.";
+            // What the drive said, in the direction it said it. A percentage-used counter is quoted
+            // as one; a normalised wear attribute is quoted as the remaining figure it actually is,
+            // and named, because "it reports 4% used" would be a sentence no drive uttered.
+            var line = Health?.EnduranceAttribute is { Length: > 0 } attribute
+                ? used >= 100
+                    ? $"The drive has spent all of its rated write endurance: its {attribute} " +
+                      "attribute reads 0."
+                    : $"{100 - used}% of the drive's rated write endurance is left, read from its " +
+                      $"{attribute} attribute."
+                : used >= 100
+                    ? $"The drive has spent all of its rated write endurance, and reports {used}% of " +
+                      "it used."
+                    : $"{100 - used}% of the drive's rated write endurance is left; it reports " +
+                      $"{used}% used.";
 
             return line + " The rating is the manufacturer's warranty figure rather than a cliff: a " +
                    "drive at 0% left usually goes on working, and one with most of its life left can " +
@@ -374,8 +384,11 @@ public sealed class StorageRow : INotifyPropertyChanged
             if (Health?.ReallocatedSectors is not { } n) return "";
 
             var line = n == 0
-                ? "No sectors have been remapped."
-                : $"{n:N0} sector{(n == 1 ? " has" : "s have")} been remapped to the drive's spares.";
+                ? "No sectors have been remapped. A drive retires a sector it can no longer read or " +
+                  "write reliably and puts one of its spares in its place, so this is the count of " +
+                  "the bad ones it has found, and zero is what a healthy drive says."
+                : $"{n:N0} sector{(n == 1 ? " has" : "s have")} been remapped to the drive's spares, " +
+                  "which is what happens to a sector it can no longer read or write reliably.";
 
             return Health?.PendingSectors is { } pending
                 ? line + (pending == 0

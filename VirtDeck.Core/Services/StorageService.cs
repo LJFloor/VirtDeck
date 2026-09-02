@@ -321,6 +321,13 @@ namespace VirtDeck.Services
         // `-A` is what makes the summary exist. The client keeps the handful of numbers it draws and
         // discards the rest, so nothing is held that is not shown.
         //
+        // **`-l devstat` for the same reason, one log further out.** ACS-3 puts the "Percentage Used
+        // Endurance Indicator" in the device statistics log and nowhere else, and that field is the
+        // ATA spelling of the figure the Life left column already draws for NVMe. It is one more log
+        // read on a device that is awake and already being talked to. It is asked of everything
+        // except NVMe, which carries its own endurance counter in its health log and has no device
+        // statistics log to read.
+        //
         // **The device list is an argv**, through ShellScript.ArrayFrom with a literal `--`. These
         // names come off the host's own listing rather than from a user, but the rule is about the
         // vector and not the provenance, and it costs nothing.
@@ -347,6 +354,7 @@ namespace VirtDeck.Services
               a=()
               [ -n "$typ" ] && a+=(-d "$typ")
               [ -n "$noc" ] && a+=(-n "$noc")
+              [ "$typ" = nvme ] || a+=(-l devstat)
 
               out=$(smartctl -j "${a[@]}" -H -i -A -- "$dev" 2>/dev/null)
               [ -n "$out" ] || continue
@@ -509,6 +517,11 @@ namespace VirtDeck.Services
                     hours = Num(nvme, "power_on_hours") ?? hours;
                 }
 
+                // ATA keeps its endurance figure somewhere else entirely, and an NVMe drive that
+                // answered has nothing left to look for.
+                var (ataUsed, enduranceAttribute) = used is null ? Endurance(root) : (null, "");
+                used ??= ataUsed;
+
                 var exit = root.TryGetProperty("smartctl", out var meta) ? Num(meta, "exit_status") ?? 0 : 0;
                 var messages = Messages(root);
 
@@ -517,7 +530,8 @@ namespace VirtDeck.Services
 
                 return new DiskHealth(device, state, temperature, hours, reallocated, pending, used,
                     model, serial, firmware, Detail(state, messages, reallocated, pending,
-                        failingAttributes, criticalWarning, spare, spareThreshold, mediaErrors));
+                        failingAttributes, criticalWarning, spare, spareThreshold, mediaErrors),
+                    enduranceAttribute);
             }
         }
 
@@ -659,6 +673,101 @@ namespace VirtDeck.Services
             }
 
             return (reallocated, pending, failing);
+        }
+
+        /// <summary>
+        /// The attribute names whose normalised value is the percentage of rated life a drive has
+        /// <b>left</b>. Short and explicit on purpose: every name in it means "remaining", so none
+        /// of the inverted spellings (<c>Perc_Rated_Life_Used</c>, <c>Percent_Lifetime_Used</c>) can
+        /// be matched by accident and drawn upside down.
+        /// </summary>
+        private static readonly HashSet<string> LifeAttributes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "SSD_Life_Left",
+            "SSD_Life_Left_Perc",
+            "Percent_Lifetime_Remain",
+            "Perc_Rated_Life_Remain",
+            "Percent_Life_Remaining",
+            "Remaining_Lifetime_Perc",
+            "Media_Wearout_Indicator",
+            "Wear_Leveling_Count",
+        };
+
+        /// <summary>
+        /// How much of an ATA drive's rated write endurance is spent, as the same percentage-used
+        /// figure NVMe reports, and the attribute it was read from where it came from one. Null for
+        /// a drive that says nothing meaning it, which is every spinning disk and some SSDs.
+        ///
+        /// <para><b>Two sources, and the standardised one is preferred.</b> ACS-3 defines a
+        /// "Percentage Used Endurance Indicator" in the device statistics log (page 7, offset 8),
+        /// which is the same quantity as NVMe's <c>percentage_used</c> and is model-independent, so
+        /// where a drive fills it in nothing here has to know whose drive it is. That is what
+        /// <c>-l devstat</c> is fetched for. It is matched by its name <b>or</b> by where the spec
+        /// puts it, because either one alone would be a single point of failure in somebody else's
+        /// output format.</para>
+        ///
+        /// <para><b>The fallback is a vendor attribute, matched by name and never by id.</b> Plenty
+        /// of SSDs predate that field or leave it empty and put the same reading in an attribute
+        /// instead, which is the only place the user's own drive has it. An id-keyed table would be
+        /// a trap: 231 is <c>SSD_Life_Left</c> on one drive and <c>Temperature_Celsius</c> on the
+        /// next, so it would eventually draw a temperature as an endurance figure. The name is
+        /// smartctl's, resolved per model out of its own drive database, so it is the vendor-checked
+        /// reading; a drive smartctl does not recognise reports <c>Unknown_Attribute</c> and gets a
+        /// blank cell, which is the honest answer rather than a guess.</para>
+        ///
+        /// <para>What is taken is the <b>normalised current</b> value, which for every attribute in
+        /// the list counts down from 100 as the drive wears, so life left is that value and used is
+        /// 100 minus it. A normalised value above 100 is <b>refused rather than subtracted</b>: the
+        /// scale is the vendor's and some attributes run to 200 (<c>ECC_Error_Rate</c> does on the
+        /// drive this was written against), and 100 minus one of those is a negative endurance
+        /// figure drawn as a dying disk.</para>
+        /// </summary>
+        private static (int? Used, string Attribute) Endurance(JsonElement root)
+        {
+            if (root.TryGetProperty("ata_device_statistics", out var stats) &&
+                stats.TryGetProperty("pages", out var pages) &&
+                pages.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var page in pages.EnumerateArray())
+                {
+                    if (!page.TryGetProperty("table", out var entries) ||
+                        entries.ValueKind != JsonValueKind.Array)
+                        continue;
+
+                    var solidState = Num(page, "number") == 7;
+
+                    foreach (var entry in entries.EnumerateArray())
+                    {
+                        var named = Str(entry, "name").Equals(
+                            "Percentage Used Endurance Indicator", StringComparison.OrdinalIgnoreCase);
+
+                        if (!named && !(solidState && Num(entry, "offset") == 8)) continue;
+
+                        // An entry can be listed and carry nothing, which the log says for itself.
+                        if (entry.TryGetProperty("flags", out var flags) &&
+                            Bool(flags, "valid") == false)
+                            continue;
+
+                        if (Num(entry, "value") is >= 0 and <= 255 and { } used) return ((int)used, "");
+                    }
+                }
+            }
+
+            if (!root.TryGetProperty("ata_smart_attributes", out var block) ||
+                !block.TryGetProperty("table", out var table) ||
+                table.ValueKind != JsonValueKind.Array)
+                return (null, "");
+
+            foreach (var entry in table.EnumerateArray())
+            {
+                var name = Str(entry, "name");
+                if (!LifeAttributes.Contains(name)) continue;
+                if (Num(entry, "value") is not (>= 0 and <= 100 and { } left)) continue;
+
+                return (100 - (int)left, name);
+            }
+
+            return (null, "");
         }
 
         private static IReadOnlyList<string> Messages(JsonElement root)

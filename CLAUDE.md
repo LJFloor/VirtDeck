@@ -1029,9 +1029,17 @@ it to see.
 - **Four of the eight columns are drawn only where a disk on this host answered for them**
   (`SmartColumns`, `StorageModule.ApplyColumns`), which is the absent-tooling rule applied to a
   column rather than to a page: a column of blanks is not an answer. Temperature and Powered on are
-  near-universal; **Life left is NVMe's `percentage_used` and Reallocated is ATA's attribute 5**,
-  so a host with one kind of drive in it draws one of the two and never both, which is what
-  keeps the strip from growing past the window. The verdict stays **last and stays the fill column**, so the
+  near-universal and **Reallocated is ATA's attribute 5**, which has no NVMe counterpart. **Life
+  left is every drive that keeps an endurance figure**: NVMe's `percentage_used`, or on ATA the
+  ACS-3 "Percentage Used Endurance Indicator" out of the device statistics log (`-l devstat`), or
+  failing that a wear attribute matched **by name** out of a short list whose every entry means life
+  *remaining*, whose normalised value is subtracted from 100. An id-keyed list is the trap there,
+  231 being `SSD_Life_Left` on one drive and `Temperature_Celsius` on the next; a name is smartctl's
+  own per-model reading, and a drive it does not recognise gets a blank cell rather than a guess.
+  `StorageService.Endurance` is the whole of it, and `DiskHealth.EnduranceAttribute` is what lets
+  the tooltip quote the drive in the direction the drive spoke ("96% left, read from its
+  Wear_Leveling_Count attribute", not "it reports 4% used", which is a sentence no ATA drive
+  utters). The verdict stays **last and stays the fill column**, so the
   numbers behind it read left to right into it and the slack goes to the one cell with a sentence in
   it. The set is the union over the disks that answered, taken once per listing and put on the
   heading strip and on every row from the same field, because a row that disagreed with its
@@ -1042,7 +1050,9 @@ it to see.
   appearance the alarm. An unusable reading collapses the set to none rather than to four empty
   columns, since the Health cell already says so in a sentence beside them.
 - **Life left is `percentage_used` flipped, and the flip is the app's one deliberate rewriting of a
-  figure the host reported.** The drive counts upwards from nothing towards its warranty limit, so
+  figure the host reported** (an ATA wear attribute already reads as life left and is turned into a
+  used figure on the way in, so that one arrives the same way round as every other drive's). The
+  drive counts upwards from nothing towards its warranty limit, so
   its own number is worst-at-the-top: 1% means a nearly new SSD. Every other percentage in this app
   and every other figure in this table is better when it is higher, so an endurance column alone
   reading the other way is the one that gets misread, and it is misread in the dangerous direction.

@@ -258,6 +258,13 @@ namespace VirtDeck.Models
     /// The sentence behind the state, in smartctl's own words where there are any. What a cell too
     /// narrow for it says on hover, and the only account there is of an <see cref="SmartState.Unknown"/>.
     /// </param>
+    /// <param name="EnduranceAttribute">
+    /// The vendor attribute <see cref="PercentageUsed"/> was worked out from, empty where the drive
+    /// reported a percentage-used counter of its own (every NVMe drive, and an ATA one whose device
+    /// statistics log fills the standard indicator in). It is here so the tooltip can say what the
+    /// drive actually said rather than putting words in its mouth: a figure derived from a
+    /// normalised wear attribute is a reading of "96% left", not a report of "4% used".
+    /// </param>
     public sealed record DiskHealth(
         string Device,
         SmartState State,
@@ -269,7 +276,8 @@ namespace VirtDeck.Models
         string Model = "",
         string Serial = "",
         string Firmware = "",
-        string Detail = "");
+        string Detail = "",
+        string EnduranceAttribute = "");
 
     /// <summary>
     /// One row of an ATA drive's SMART attribute table, as <c>smartctl -A</c> reports it.
