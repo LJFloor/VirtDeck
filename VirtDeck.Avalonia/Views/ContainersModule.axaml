@@ -106,7 +106,10 @@
               <c:ColumnHeader DockPanel.Dock="Left" Text="Image"  SortKey="image"  Width="{StaticResource ColImage}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="Uptime" SortKey="uptime" Width="{StaticResource ColUptime}" />
-              <c:ColumnHeader Text="Ports"  SortKey="ports" />
+              <!-- Ports is the one heading in the app that carries no order. Its cell is a
+                   list rather than a value, so no ordering of it means anything; TableSort
+                   skips an empty SortKey and makes the cell inert, so it does not offer. -->
+              <c:ColumnHeader Text="Ports" />
             </DockPanel>
           </Border>
 
@@ -145,8 +148,11 @@
                     <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}"
                                ToolTip.Tip="{Binding Status}" />
                     <TextBlock Text="{Binding Uptime}" Width="{StaticResource ColUptime}" Opacity="0.75" />
+                    <!-- The cell is docker's phrase with the wildcard addresses, the duplicate
+                         IPv6 half and an implied /tcp taken out; the tooltip is what docker
+                         actually reported, the way the State cell carries its Status phrase. -->
                     <TextBlock Text="{Binding Ports}" Opacity="0.75"
-                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Ports}" />
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding PortsReported}" />
                   </StackPanel>
                 </DataTemplate>
               </ListBox.ItemTemplate>

@@ -131,6 +131,24 @@ public sealed class ColumnHeader : UserControl
         _button.Padding = new Thickness(
             Math.Max(_strip.Left, CellInset) + _indent, _strip.Top, _strip.Right, _strip.Bottom);
 
+    /// <summary>
+    /// Stops this cell behaving like a control, for a column that carries no order. It keeps its
+    /// theme, its label, its padding and the strip inset handed to it, so it is the same cell to the
+    /// pixel and still lines up with the ones beside it; what it loses is the hover and the click.
+    ///
+    /// <para>It exists because a heading cell is a <c>Button</c> whatever it heads, so without this an
+    /// unkeyed one would go on lighting up under the pointer and then do nothing, which is worse than
+    /// not offering at all. <see cref="TableSort"/> is the only caller, from the one place that knows
+    /// a column has no order; making it a plain <c>TextBlock</c> in the markup instead is the wrong
+    /// fix, since <c>TakeStripInset</c> reaches only <see cref="ColumnHeader"/>s and such a cell would
+    /// lose the inset the strip gives up and hand the edge to its neighbour.</para>
+    /// </summary>
+    internal void MakeInert()
+    {
+        _button.IsHitTestVisible = false;
+        _button.Focusable = false;
+    }
+
     /// <summary>What a column says when it is not obvious what it means. Hangs off the button.</summary>
     public string? Tip
     {

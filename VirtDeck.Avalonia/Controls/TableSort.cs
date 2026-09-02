@@ -51,7 +51,15 @@ public sealed class TableSort
         foreach (var header in strip.GetLogicalDescendants().OfType<ColumnHeader>())
         {
             _all.Add(header);
-            if (header.SortKey.Length == 0) continue; // a column with no order of its own
+            if (header.SortKey.Length == 0)
+            {
+                // A column with no order of its own. It stays a heading cell in every visible
+                // respect and keeps its place in _all, so the strip inset still reaches it; what
+                // it gives up is the hover and the click, because a heading that responds to a
+                // click by doing nothing is worse than one that does not offer.
+                header.MakeInert();
+                continue;
+            }
             _headers.Add(header);
             header.Clicked += OnHeaderClicked;
         }

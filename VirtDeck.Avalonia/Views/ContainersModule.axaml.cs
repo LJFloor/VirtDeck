@@ -722,6 +722,11 @@ public partial class ContainersModule : UserControl, IModule
     /// The containers table's own order is running first and then by name: a stopped container is
     /// rarely what somebody came to look at. Uptime sorts on the elapsed seconds rather than on the
     /// "3d 04:11:02" string, which does not sort once a run passes a day.
+    ///
+    /// <para>Ports has no arm because it has no order. Its cell holds a list of mappings rather
+    /// than a value, so there is nothing for a comparer to be about; sorted on its own text it put
+    /// 1433 above 3306 above 80 above 8002, which is not an order anybody asked for. Its heading
+    /// carries no <c>SortKey</c>, so this switch can never be handed one.</para>
     /// </summary>
     private IEnumerable<ContainerRow> OrderContainers(IEnumerable<ContainerRow> rows) => ContainerSort.Key switch
     {
@@ -731,8 +736,6 @@ public partial class ContainersModule : UserControl, IModule
         "state" => ContainerSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "uptime" => ContainerSort.By(rows, r => r.UptimeSeconds)
-            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
-        "ports" => ContainerSort.By(rows, r => r.Ports, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         _ => rows
             .OrderByDescending(r => r.State == "running")
