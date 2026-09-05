@@ -70,6 +70,7 @@ namespace VirtDeck.Services
         private const string VmName = "VM name";
         private const string TargetDev = "target device";
         private const string MediaPath = "media path";
+        private const string NetName = "network name";
 
         public async Task RefreshAsync()
         {
@@ -169,7 +170,7 @@ namespace VirtDeck.Services
         /// </summary>
         public (string host, int port) GetSpiceTarget(string vmName)
         {
-            var xml = _ssh.RunSudoCommand($"virsh dumpxml {vmName}");
+            var xml = RunArgv("virsh", "dumpxml", RequireName(vmName, VmName));
 
             // Isolate the SPICE <graphics> element (there may also be a VNC one).
             var g = Regex.Match(xml, @"<graphics\s+type='spice'.*?(?:/>|</graphics>)", RegexOptions.Singleline);
@@ -247,32 +248,32 @@ namespace VirtDeck.Services
 
         public async Task StartVmAsync(string name)
         {
-            await Task.Run(() => _ssh.RunSudoCommand($"virsh start {name}"));
+            await Task.Run(() => RunArgv("virsh", "start", RequireName(name, VmName)));
             await RefreshAsync();
         }
 
         public async Task StopVmAsync(string name)
         {
-            await Task.Run(() => _ssh.RunSudoCommand($"virsh shutdown {name}"));
+            await Task.Run(() => RunArgv("virsh", "shutdown", RequireName(name, VmName)));
             await RefreshAsync();
         }
 
         public async Task ForceStopVmAsync(string name)
         {
-            await Task.Run(() => _ssh.RunSudoCommand($"virsh destroy {name}"));
+            await Task.Run(() => RunArgv("virsh", "destroy", RequireName(name, VmName)));
             await RefreshAsync();
         }
 
         public async Task RebootVmAsync(string name)
         {
-            await Task.Run(() => _ssh.RunSudoCommand($"virsh reboot {name}"));
+            await Task.Run(() => RunArgv("virsh", "reboot", RequireName(name, VmName)));
             await RefreshAsync();
         }
 
         /// <summary>Current libvirt state of a single domain ("running" / "shut off" / "paused" / …), or "" on error.</summary>
         public string GetDomainState(string name)
         {
-            try { return _ssh.RunSudoCommand($"virsh domstate {name}").Trim(); }
+            try { return RunArgv("virsh", "domstate", RequireName(name, VmName)).Trim(); }
             catch { return string.Empty; }
         }
 
@@ -332,12 +333,12 @@ namespace VirtDeck.Services
         // ---- VM editing (offline, persistent config) -----------------------
 
         /// <summary>Raw domain XML from `virsh dumpxml` (running config when the VM is up).</summary>
-        public string GetDomainXml(string vmName) => _ssh.RunSudoCommand($"virsh dumpxml {vmName}");
+        public string GetDomainXml(string vmName) => RunArgv("virsh", "dumpxml", RequireName(vmName, VmName));
 
         /// <summary>Reads the full editable config from `virsh dumpxml` + `dominfo`.</summary>
         public VmConfig GetVmConfig(string vmName)
         {
-            var xml = _ssh.RunSudoCommand($"virsh dumpxml {vmName}");
+            var xml = RunArgv("virsh", "dumpxml", RequireName(vmName, VmName));
             var domain = XDocument.Parse(xml).Root
                 ?? throw new Exception("Empty domain XML.");
 
@@ -432,7 +433,7 @@ namespace VirtDeck.Services
         {
             try
             {
-                foreach (var line in _ssh.RunSudoCommand($"virsh dominfo {vmName}").Split('\n'))
+                foreach (var line in RunArgv("virsh", "dominfo", RequireName(vmName, VmName)).Split('\n'))
                     if (line.StartsWith("Autostart", StringComparison.OrdinalIgnoreCase))
                         return line.Contains("enable", StringComparison.OrdinalIgnoreCase)
                             ? "enable"
@@ -457,7 +458,7 @@ namespace VirtDeck.Services
         }
 
         public void SetVcpus(string vm, int n) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --vcpus {n},maxvcpus={n}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--vcpus", $"{n},maxvcpus={n}");
 
         public void SetCpuMode(string vm, string mode)
         {
@@ -467,21 +468,21 @@ namespace VirtDeck.Services
                 "host-model"       => "host-model",
                 _                  => "clearxml=yes",
             };
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --cpu {spec}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--cpu", spec);
         }
 
         public void SetMemoryMiB(string vm, long mib) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --memory {mib},maxmemory={mib}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--memory", $"{mib},maxmemory={mib}");
 
         public void SetBootOrder(string vm, IEnumerable<string> order) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --boot {string.Join(",", order)}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--boot", string.Join(",", order));
 
         public void SetVideoModel(string vm, string model) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --video model.type={model}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--video", $"model.type={model}");
 
         /// <summary>Adds a new <c>&lt;sound&gt;</c> device of the given model (no existing device required).</summary>
         public void AddSound(string vm, string model) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --add-device --sound model={model}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--add-device", "--sound", $"model={model}");
 
         /// <summary>Changes the model of the existing <c>&lt;sound&gt;</c> device (errors if none).</summary>
         /// <remarks>
@@ -491,17 +492,18 @@ namespace VirtDeck.Services
         /// <c>type='pci'</c> address and QEMU rejects it at start ("Device 'sb16' can't go on PCI bus").
         /// </remarks>
         public void SetSoundModel(string vm, string model) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --edit --sound clearxml=yes,model={model}");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--edit", "--sound", $"clearxml=yes,model={model}");
 
         /// <summary>Removes all <c>&lt;sound&gt;</c> devices from the domain.</summary>
         public void RemoveSound(string vm) =>
-            _ssh.RunSudoCommand($"virt-xml {vm} --remove-device --sound all");
+            RunArgv("virt-xml", RequireName(vm, VmName), "--remove-device", "--sound", "all");
 
         public void SetAutostart(string vm, bool on) =>
-            _ssh.RunSudoCommand($"virsh autostart {vm}{(on ? "" : " --disable")}");
+            RunArgv(on ? new[] { "virsh", "autostart", RequireName(vm, VmName) }
+                      : new[] { "virsh", "autostart", RequireName(vm, VmName), "--disable" });
 
         public void RenameVm(string oldName, string newName) =>
-            _ssh.RunSudoCommand($"virsh domrename {oldName} {newName}");
+            RunArgv("virsh", "domrename", RequireName(oldName, VmName), RequireName(newName, VmName));
 
         /// <summary>
         /// Defines a bare VM shell (no disks/NICs) via virt-install --print-xml + virsh define, so
@@ -567,22 +569,40 @@ namespace VirtDeck.Services
             if (string.IsNullOrWhiteSpace(soundModel) || !Regex.IsMatch(soundModel, @"^[A-Za-z0-9._-]+$"))
                 soundModel = "ich9"; // guard the shell command against unexpected input
             var tmp = $"/tmp/newvm-{Guid.NewGuid():N}.xml";
-            var bootFlags = useUefi ? "--boot uefi " : "";
-            var cmd =
-                $"virt-install --name {name} --vcpus {vcpus} --memory {memoryMiB} --os-variant {osVariant} " +
-                "--cpu host-passthrough " +
+            var argv = new List<string>
+            {
+                "virt-install",
+                "--name", RequireName(name, VmName),
+                "--vcpus", vcpus.ToString(),
+                "--memory", memoryMiB.ToString(),
+                "--os-variant", osVariant,
+                "--cpu", "host-passthrough",
                 // ich9 (Intel HD Audio) has broad guest driver support; with SPICE graphics, libvirt
                 // wires it to the spice audio backend so the console gets a playback channel for free.
                 // BIOS-only OSes (Windows XP and earlier) lack ich9 drivers, so they get ac97 instead.
-                $"--graphics spice,listen=127.0.0.1 --video virtio --sound model={soundModel} --disk none --network none --boot hd,cdrom " +
-                $"{bootFlags}" +
-                $"--print-xml > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc";
-            _ssh.RunSudoCommand(cmd);
+                "--graphics", "spice,listen=127.0.0.1",
+                "--video", "virtio",
+                "--sound", $"model={soundModel}",
+                "--disk", "none",
+                "--network", "none",
+                "--boot", "hd,cdrom",
+            };
+            if (useUefi) { argv.Add("--boot"); argv.Add("uefi"); }
+            argv.Add("--print-xml");
+
+            // The redirect and the exit-code capture are the reason this one is a script rather than
+            // a bare vector: the vector is rebuilt on the host as a bash array and run as "${a[@]}",
+            // so the arguments stay exact while the shell around them still gets to redirect. The
+            // temp path is this method's own GUID, so it is the one value safe to interpolate.
+            _ssh.RunSudoCommand(
+                ShellScript.ArrayFrom("a", argv) +
+                $"\"${{a[@]}}\" > {tmp} && virsh define {tmp}; rc=$?; rm -f {tmp}; exit $rc");
         }
 
         /// <summary>Removes the VM definition (and its nvram/snapshots/managed-save metadata). Storage is left untouched.</summary>
         public void UndefineVm(string name) =>
-            _ssh.RunSudoCommand($"virsh undefine {name} --nvram --snapshots-metadata --managed-save");
+            RunArgv("virsh", "undefine", RequireName(name, VmName),
+                    "--nvram", "--snapshots-metadata", "--managed-save");
 
         /// <summary>Deletes a file on the host (base64'd path to dodge shell quoting). Used to remove disk images.</summary>
         public void DeleteFile(string path)
@@ -621,7 +641,7 @@ namespace VirtDeck.Services
         // ---- Storage -------------------------------------------------------
 
         public void CreateQcow2(string path, int sizeGiB) =>
-            _ssh.RunSudoCommand($"qemu-img create -f qcow2 {path} {sizeGiB}G");
+            RunArgv("qemu-img", "create", "-f", "qcow2", RequireName(path, "disk path"), $"{sizeGiB}G");
 
         /// <summary>
         /// Builds a libvirt &lt;disk&gt; element for a data disk. qcow2 → file/qcow2 (libvirt-default
@@ -663,8 +683,18 @@ namespace VirtDeck.Services
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
             var tmp = $"/tmp/vmedit-{Guid.NewGuid():N}.xml";
+
+            // The XML was already base64'd; the domain name is what needed the same care. virsh runs
+            // from a rebuilt bash array so the name stays one argument whatever is in it, while the
+            // script around it keeps the redirect. `scope` is this file's own literal, one or two
+            // flags, and the temp path is this method's own GUID.
+            var argv = new List<string> { "virsh", verb, RequireName(vm, VmName), tmp };
+            argv.AddRange(scope.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
             // Capture the virsh exit code before rm so a rejected attach/update actually throws.
-            _ssh.RunSudoCommand($"echo {b64} | base64 -d > {tmp} && virsh {verb} {vm} {tmp} {scope}; rc=$?; rm -f {tmp}; exit $rc");
+            _ssh.RunSudoCommand(
+                ShellScript.ArrayFrom("a", argv) +
+                $"echo {b64} | base64 -d > {tmp} && \"${{a[@]}}\"; rc=$?; rm -f {tmp}; exit $rc");
         }
 
         public void AttachCdrom(string vm, string iso, string target, string bus) =>
@@ -987,7 +1017,7 @@ namespace VirtDeck.Services
         }
 
         public void CreateZvol(string name, int sizeGiB) =>
-            _ssh.RunSudoCommand($"zfs create -V {sizeGiB}G {name}");
+            RunArgv("zfs", "create", "-V", $"{sizeGiB}G", RequireName(name, "volume name"));
 
         // ---- Remote file browsing (over the sudo channel, so root-owned dirs are listable) ----
 
@@ -1003,10 +1033,12 @@ namespace VirtDeck.Services
         // ---- Network -------------------------------------------------------
 
         public void AttachNic(string vm, string type, string source, string model) =>
-            _ssh.RunSudoCommand($"virsh attach-interface {vm} --type {type} --source {source} --model {model} --config");
+            RunArgv("virsh", "attach-interface", RequireName(vm, VmName), "--type", type,
+                    "--source", RequireName(source, "network source"), "--model", model, "--config");
 
         public void DetachNic(string vm, string type, string mac) =>
-            _ssh.RunSudoCommand($"virsh detach-interface {vm} --type {type} --mac {mac} --config");
+            RunArgv("virsh", "detach-interface", RequireName(vm, VmName), "--type", type,
+                    "--mac", RequireName(mac, "MAC address"), "--config");
 
         /// <summary>
         /// Checks host CPU virtualization support, BIOS enablement, and libvirt state.
@@ -1062,13 +1094,14 @@ namespace VirtDeck.Services
         }
 
         public void StartNetwork(string name) =>
-            _ssh.RunSudoCommand($"virsh net-start {name}");
+            RunArgv("virsh", "net-start", RequireName(name, NetName));
 
         public void StopNetwork(string name) =>
-            _ssh.RunSudoCommand($"virsh net-destroy {name}");
+            RunArgv("virsh", "net-destroy", RequireName(name, NetName));
 
         public void SetNetworkAutostart(string name, bool on) =>
-            _ssh.RunSudoCommand($"virsh net-autostart {name}{(on ? "" : " --disable")}");
+            RunArgv(on ? new[] { "virsh", "net-autostart", RequireName(name, NetName) }
+                      : new[] { "virsh", "net-autostart", RequireName(name, NetName), "--disable" });
 
         public List<string> ListBridges()
         {
