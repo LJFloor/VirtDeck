@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.SecurityTab">
+
+  <DockPanel Margin="16">
+
+    <HeaderedContentControl DockPanel.Dock="Top" Margin="0,0,0,12"
+                            Theme="{StaticResource JbGroupBox}" Header="Confinement">
+      <StackPanel Classes="options">
+        <CheckBox Name="PrivilegedBox" Content="Privileged" />
+        <TextBlock Classes="subnote"
+                   Text="Gives the container every capability and reaches every device on the host." />
+
+        <CheckBox Name="ReadOnlyBox" Content="Read-only root filesystem" />
+        <TextBlock Classes="subnote"
+                   Text="Nothing may be written outside the volumes and bind mounts on the Volumes page." />
+      </StackPanel>
+    </HeaderedContentControl>
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Capabilities">
+      <Border Name="CapabilityHost" Background="Transparent">
+        <DockPanel Name="CapabilityPanel">
+
+          <!-- Fixed above the list rather than scrolling with it: with forty entries the count and
+               the three buttons are wanted from anywhere in the list, not only the top. -->
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+            <Button Name="SelectAllButton" Content="Select all" />
+            <Button Name="SelectDefaultsButton" Content="Docker's defaults" />
+            <Button Name="SelectNoneButton" Content="Select none" />
+            <TextBlock Name="SelectedCount" VerticalAlignment="Center" Opacity="0.7" />
+          </StackPanel>
+
+          <ScrollViewer>
+            <!-- Two columns of a fixed width, which is what makes forty checkboxes readable.
+                 ItemWidth sizes every row the same, so the columns line up without a Grid. -->
+            <ItemsControl Name="CapabilityList">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" ItemWidth="260" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+          </ScrollViewer>
+
+        </DockPanel>
+      </Border>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

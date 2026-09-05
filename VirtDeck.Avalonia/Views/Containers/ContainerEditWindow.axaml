@@ -31,10 +31,16 @@
          nothing else. -->
     <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
       <TabItem Header="General"><c:GeneralTab /></TabItem>
+      <TabItem Header="Command"><c:CommandTab /></TabItem>
       <TabItem Header="Volumes"><c:VolumesTab /></TabItem>
       <TabItem Header="Network"><c:NetworkTab /></TabItem>
       <TabItem Header="Environment"><c:EnvironmentTab /></TabItem>
+      <TabItem Header="Labels"><c:LabelsTab /></TabItem>
       <TabItem Header="Devices"><c:DevicesTab /></TabItem>
+      <TabItem Header="Resources"><c:ResourcesTab /></TabItem>
+      <TabItem Header="Security"><c:SecurityTab /></TabItem>
+      <TabItem Header="Health"><c:HealthTab /></TabItem>
+      <TabItem Header="Logging"><c:LoggingTab /></TabItem>
     </TabControl>
 
   </DockPanel>

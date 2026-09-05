@@ -10,6 +10,11 @@ namespace VirtDeck.Models
     /// computed from two host timestamps and client/host clock skew never enters the number, which
     /// is the reason <c>DockerService</c>'s listing emits elapsed seconds rather than a timestamp
     /// and the reason the pacman listing emits the age of its database the same way.</para>
+    ///
+    /// <para><see cref="Gpus"/> is the one deliberate exception to "raw and nothing else". A GPU
+    /// utilisation figure is a reading the tool states outright, not a counter, so it does exist in
+    /// one sample and deriving it from two would be wrong. It is therefore the one field the
+    /// dashboard draws straight off a sample rather than off <see cref="HostRates"/>.</para>
     /// </summary>
     public sealed record HostSample
     {
@@ -60,6 +65,71 @@ namespace VirtDeck.Models
 
         /// <summary>Sectors written, summed over the same disks.</summary>
         public long WriteSectors { get; init; }
+
+        /// <summary>
+        /// One reading per GPU that could report, keyed by PCI slot. Empty on a host with no GPU,
+        /// and empty is the honest answer rather than a list of zeroes.
+        /// </summary>
+        public IReadOnlyList<GpuReading> Gpus { get; init; } = [];
+    }
+
+    /// <summary>
+    /// A display-class PCI device, whatever driver owns it. Read from sysfs rather than from
+    /// <c>nvidia-smi</c>, so a card bound to <c>vfio-pci</c> for a guest is still named, and so is
+    /// an Intel or AMD card that no vendor tool on this host can be asked about.
+    /// </summary>
+    /// <param name="Slot">The PCI address, <c>0000:29:00.0</c>. The id a reading is matched on.</param>
+    /// <param name="VendorId">Four hex digits, <c>10de</c>.</param>
+    /// <param name="DeviceId">Four hex digits, <c>1e81</c>.</param>
+    /// <param name="Driver">The bound driver, or <c>none</c>. <c>vfio-pci</c> means it is a guest's.</param>
+    /// <param name="Name">What <c>lspci</c> called it, empty where pciutils is not installed.</param>
+    public sealed record GpuCard(
+        string Slot, string VendorId, string DeviceId, string Driver, string Name)
+    {
+        /// <summary>
+        /// What to call the card. <c>lspci</c>'s name where there is one, and the vendor plus the
+        /// raw ids where there is not, because a host without pciutils still has a graphics card
+        /// and "unknown" would be less true than the numbers the kernel already gave us.
+        /// </summary>
+        public string Label =>
+            Name.Length > 0 ? Name : $"{Vendor} device {VendorId}:{DeviceId}";
+
+        /// <summary>
+        /// The handful of vendors worth naming. Anything else keeps its id rather than being
+        /// guessed at: a full PCI id table is megabytes and is what <c>lspci</c> is for.
+        /// </summary>
+        public string Vendor => VendorId switch
+        {
+            "10de" => "NVIDIA",
+            "1002" or "1022" => "AMD",
+            "8086" => "Intel",
+            "1a03" => "ASPEED",
+            "102b" => "Matrox",
+            "15ad" => "VMware",
+            "1234" or "1b36" => "QEMU",
+            _ => "Unknown",
+        };
+
+        /// <summary>Whether the card is currently handed to a guest rather than to this host.</summary>
+        public bool PassedThrough => Driver == "vfio-pci";
+    }
+
+    /// <summary>
+    /// What one GPU said about itself this tick. Every figure is nullable, because the tools answer
+    /// <c>N/A</c> for a field a particular card does not keep and a real zero is a different
+    /// answer: an idle GPU reports 0% and a card with no power sensor reports nothing at all.
+    /// </summary>
+    /// <param name="Slot">The PCI address, normalised to match <see cref="GpuCard.Slot"/>.</param>
+    public sealed record GpuReading(
+        string Slot,
+        double? UtilPercent,
+        long? MemUsedMb,
+        long? MemTotalMb,
+        double? TempC,
+        double? PowerW)
+    {
+        public double? MemPercent =>
+            MemTotalMb is > 0 && MemUsedMb is { } used ? used * 100.0 / MemTotalMb.Value : null;
     }
 
     /// <summary>
@@ -128,6 +198,12 @@ namespace VirtDeck.Models
 
         /// <summary>The disks the IO graph counts, for the same reason.</summary>
         public IReadOnlyList<string> Disks { get; init; } = [];
+
+        /// <summary>
+        /// Every display-class card in the machine, in PCI order, whether or not anything on this
+        /// host can say what it is doing. The order is the one the GPU graph assigns its series in.
+        /// </summary>
+        public IReadOnlyList<GpuCard> Gpus { get; init; } = [];
 
         public IReadOnlyList<MountUsage> Filesystems { get; init; } = [];
 

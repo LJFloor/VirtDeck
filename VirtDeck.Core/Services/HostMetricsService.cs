@@ -68,6 +68,12 @@ namespace VirtDeck.Services
         /// alternative, a name blacklist, is wrong on the first host with an interface nobody
         /// thought of.
         ///
+        /// The GPU allow-lists are decided once, before the loop, for the same reason and with the
+        /// same payoff: a host with no GPU pays nothing per tick, not even a `command -v`. The
+        /// cards themselves are enumerated from PCI rather than from a vendor tool, so one bound to
+        /// vfio-pci for a guest is still named, and the readings are fenced so a wedged driver
+        /// cannot take the CPU and memory graphs down with it.
+        ///
         /// `printf` and `awk` are processes that exit each tick, so each flushes on the way out and
         /// nothing here needs stdbuf. Verified: samples arrive one per tick through a pipe.
         /// </summary>
@@ -86,6 +92,37 @@ namespace VirtDeck.Services
             awk '/^model name|^Model|^cpu model|^Hardware/ { sub(/^[^:]*:[ \t]*/, ""); print "q\t" $0; exit }' /proc/cpuinfo 2>/dev/null
             printf 'o\t%s\n' "${PRETTY_NAME:-${NAME:-}}"
 
+            # Every display-class PCI device, whatever driver owns it, so a card handed to a guest
+            # through vfio-pci is still named and so is one no vendor tool here can be asked about.
+            # Class 0x03 covers VGA (0300), 3D controllers (0302) and display controllers (0380).
+            # Enumerating from PCI rather than from nvidia-smi is the whole reason this is honest.
+            NVSLOTS=
+            for p in /sys/bus/pci/devices/*; do
+              c=$(cat "$p/class" 2>/dev/null) || continue
+              case "$c" in 0x03*) ;; *) continue ;; esac
+              sl=${p##*/}
+              vn=$(cat "$p/vendor" 2>/dev/null); dv=$(cat "$p/device" 2>/dev/null)
+              dr=$(readlink "$p/driver" 2>/dev/null); dr=${dr##*/}
+              nm=$(lspci -vmm -s "$sl" 2>/dev/null | awk -F'\t' '/^Device:/ { print $2; exit }')
+              printf 'x\t%s\t%s\t%s\t%s\t%s\n' "$sl" "${vn#0x}" "${dv#0x}" "${dr:-none}" "$nm"
+              [ "$dr" = nvidia ] && NVSLOTS="$NVSLOTS $sl"
+            done 2>/dev/null
+
+            # Asking the tool a question, not `command -v`: nvidia-smi is installed on a host whose
+            # driver is not loaded, and there it fails. Output is not the same as an answer.
+            NV=
+            nvidia-smi --query-gpu=index --format=csv,noheader >/dev/null 2>&1 && NV=1
+
+            # amdgpu states its own busy percent in sysfs, world readable, no package needed. The
+            # dash guard drops connector nodes (card1-DP-1), whose `device` link points at the card
+            # rather than at the PCI device and which would otherwise be read as cards of their own.
+            AMD=
+            for d in /sys/class/drm/card[0-9]*; do
+              b=${d##*/}; case "$b" in *-*) continue ;; esac
+              [ -r "$d/device/gpu_busy_percent" ] || continue
+              AMD="$AMD $b"
+            done
+
             i=0
             while :; do
               # The slow half, every thirtieth tick. `timeout` is load-bearing rather than tidy:
@@ -97,6 +134,46 @@ namespace VirtDeck.Services
                   awk 'NR>1 { m=$6; for (n=7; n<=NF; n++) m=m" "$n; print "f\t" $2 "\t" $3 "\t" m }'
                 printf 'g\n'
               fi
+
+              # A runtime-suspended card is not woken to read it: smartctl's -n standby argument,
+              # since a reading is not worth defeating the power management the user configured and
+              # an Optimus laptop would otherwise hold its dGPU awake for the whole session. NVML
+              # still initialises over every card it finds, so what this reliably buys is the
+              # all-suspended case. -i takes a PCI bus id and a comma list, so this stays one process.
+              if [ -n "$NV" ]; then
+                aw=
+                for sl in $NVSLOTS; do
+                  [ "$(cat "/sys/bus/pci/devices/$sl/power/runtime_status" 2>/dev/null)" = suspended ] && continue
+                  aw="$aw,$sl"
+                done
+                aw=${aw#,}
+                # No slot carried the nvidia driver, so trust the tool over our own enumeration.
+                [ -z "$NVSLOTS" ] && aw=all
+                if [ -n "$aw" ]; then
+                  [ "$aw" = all ] && set -- || set -- -i "$aw"
+                  timeout 3 nvidia-smi "$@" \
+                    --query-gpu=pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw \
+                    --format=csv,noheader,nounits 2>/dev/null |
+                    head -n 16 | sed 's|^|s\t|; s|, |\t|g'
+                fi
+              fi
+
+              for b in $AMD; do
+                dd=/sys/class/drm/$b
+                sl=$(readlink -f "$dd/device" 2>/dev/null); sl=${sl##*/}
+                vu=$(cat "$dd/device/mem_info_vram_used" 2>/dev/null)
+                vt=$(cat "$dd/device/mem_info_vram_total" 2>/dev/null)
+                tc=N/A; pw=N/A
+                for hw in "$dd/device/hwmon/hwmon"*; do
+                  [ -r "$hw/temp1_input" ] && tc=$(( $(cat "$hw/temp1_input") / 1000 ))
+                  [ -r "$hw/power1_average" ] && pw=$(( $(cat "$hw/power1_average") / 1000000 ))
+                  break
+                done
+                printf 's\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sl" \
+                  "$(cat "$dd/device/gpu_busy_percent" 2>/dev/null || echo N/A)" \
+                  "$([ -n "$vu" ] && echo $((vu / 1048576)) || echo N/A)" \
+                  "$([ -n "$vt" ] && echo $((vt / 1048576)) || echo N/A)" "$tc" "$pw"
+              done 2>/dev/null
 
               awk -v nets="$NETS" -v disks="$DISKS" '
                 BEGIN {
@@ -214,6 +291,7 @@ namespace VirtDeck.Services
             private readonly HostMetricsService _owner;
             private HostSample _sample = new();
             private List<MountUsage>? _mounts;
+            private List<GpuReading>? _gpus;
             private bool _identity;
 
             public bool Silent = true;
@@ -297,6 +375,22 @@ namespace VirtDeck.Services
                         break;
                     }
 
+                    case "s":
+                    {
+                        // slot, util, memory used, memory total, temperature, power. nvidia-smi
+                        // writes prose to stdout for some failures ("No devices were found"), and
+                        // the sed prefix would make that a record, so the field count and the slot
+                        // are both required rather than assumed.
+                        var f = rest.Split('\t');
+                        if (f.Length < 6) break;
+                        var slot = Slot(f[0]);
+                        if (slot.Length == 0) break;
+                        (_gpus ??= []).Add(new GpuReading(
+                            slot, MaybeNum(f[1]), MaybeInt(f[2]), MaybeInt(f[3]),
+                            MaybeNum(f[4]), MaybeNum(f[5])));
+                        break;
+                    }
+
                     // The identity half. Each record replaces its own field and then republishes,
                     // because they arrive one per line and a subscriber drawing after the first
                     // should not be left holding a half-named host.
@@ -306,6 +400,20 @@ namespace VirtDeck.Services
                     case "q": Identity(o => o with { CpuModel = rest }); break;
                     case "j": Identity(o => o with { Nics = Names(rest) }); break;
                     case "k": Identity(o => o with { Disks = Names(rest) }); break;
+
+                    case "x":
+                    {
+                        // slot, vendor, device, driver, name. The name is the unbounded field and
+                        // is last, so the cap keeps one containing a tab whole.
+                        var f = rest.Split('\t', 5);
+                        if (f.Length < 5) break;
+                        var card = new GpuCard(Slot(f[0]), f[1], f[2], f[3], f[4]);
+                        if (card.Slot.Length == 0) break;
+                        Identity(o => o.Gpus.Any(g => g.Slot == card.Slot)
+                            ? o
+                            : o with { Gpus = o.Gpus.Append(card).ToList() });
+                        break;
+                    }
 
                     case "r":
                     {
@@ -353,12 +461,21 @@ namespace VirtDeck.Services
                     _owner.OverviewChanged?.Invoke(_owner.Overview);
                 }
 
+                // The GPU list is the one field that IS reset, and the rule inverts for exactly the
+                // reason it holds for the others: carrying a scalar forward redraws the last known
+                // value, but carrying a list forward would go on redrawing a card that has stopped
+                // reporting, forever, from an entry nothing is refreshing. Accumulated per tick and
+                // swapped in here, the way the mounts are accumulated and swapped at `g`.
+                var gpus = _gpus;
+                _gpus = null;
+                _sample = _sample with { Gpus = gpus ?? [] };
+
                 _owner.SampleReceived?.Invoke(_sample);
 
-                // Deliberately not reset. Every field is rewritten every tick, and carrying the
-                // last one forward means a tick that lost a record redraws the old value rather
-                // than a zero, which on a monotonic counter would read as an enormous negative
-                // rate and be thrown away by Rates anyway.
+                // Every other field is deliberately not reset. They are rewritten every tick, and
+                // carrying the last one forward means a tick that lost a record redraws the old
+                // value rather than a zero, which on a monotonic counter would read as an enormous
+                // negative rate and be thrown away by Rates anyway.
             }
 
             private static IReadOnlyList<string> Names(string blob) =>
@@ -371,6 +488,37 @@ namespace VirtDeck.Services
             private static double Num(string s) =>
                 double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+
+            /// <summary>
+            /// A figure a tool may decline to state. `N/A` is what nvidia-smi writes for a field a
+            /// particular card does not keep, and it is not zero: an idle GPU reports 0% where a
+            /// card with no power sensor reports nothing at all, and drawing the second as the
+            /// first would invent a reading.
+            /// </summary>
+            private static double? MaybeNum(string s) =>
+                double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+            private static long? MaybeInt(string s) =>
+                long.TryParse(s.Trim(), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+            /// <summary>
+            /// One spelling of a PCI address. nvidia-smi writes an eight-digit domain
+            /// (<c>00000000:29:00.0</c>) where sysfs writes four (<c>0000:29:00.0</c>), so without
+            /// this every NVIDIA reading would fail to match the card it is about and each one
+            /// would draw as a GPU nothing had named. Measured, not guessed at.
+            /// </summary>
+            private static string Slot(string raw)
+            {
+                var text = raw.Trim().ToLowerInvariant();
+                var parts = text.Split(':');
+                if (parts.Length != 3) return text;
+                return int.TryParse(parts[0], System.Globalization.NumberStyles.HexNumber,
+                        System.Globalization.CultureInfo.InvariantCulture, out var domain)
+                    ? $"{domain:x4}:{parts[1]}:{parts[2]}"
+                    : text;
+            }
         }
 
         // ---- derived figures ---------------------------------------------------

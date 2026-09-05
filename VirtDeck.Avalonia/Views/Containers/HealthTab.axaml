@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.HealthTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Health check">
+        <StackPanel Classes="options">
+          <!-- GroupName is scoped to the window, not the page: every page of this window is
+               constructed at once, so two pages sharing a name would form one group. -->
+          <RadioButton Name="HealthInheritBox" GroupName="HealthMode"
+                       Content="Whatever the image declares" />
+          <RadioButton Name="HealthDisabledBox" GroupName="HealthMode"
+                       Content="None, even if the image declares one" />
+          <RadioButton Name="HealthCommandBox" GroupName="HealthMode"
+                       Content="Run this command" />
+
+          <StackPanel Name="HealthCommandPanel" Classes="under">
+            <TextBox Name="HealthCommandText" PlaceholderText="curl -f http://localhost/ || exit 1" />
+
+            <!-- Each box opens on docker's own default rather than on 0 meaning that default, so
+                 the number on screen is the number the container gets. The minimums are what keep
+                 the old reading unreachable: 0 in the two duration boxes wrote no flag and so
+                 silently meant 30, which is the one thing a box showing a figure must not do. The
+                 grace period keeps its 0, because there 0 is docker's default and not a blank. -->
+            <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6"
+                  Margin="0,6,0,0">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Every" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="IntervalBox" Width="120" Minimum="1" Maximum="86400"
+                               Value="30" Increment="5" FormatString="0" />
+                <TextBlock Text="seconds" VerticalAlignment="Center" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Giving up after" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="TimeoutBox" Width="120" Minimum="1" Maximum="86400"
+                               Value="30" Increment="5" FormatString="0" />
+                <TextBlock Text="seconds" VerticalAlignment="Center" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Grace period" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="StartPeriodBox" Width="120" Minimum="0" Maximum="86400"
+                               Value="0" Increment="5" FormatString="0" />
+                <TextBlock Text="seconds after it starts" VerticalAlignment="Center" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Unhealthy after" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <NumericUpDown Name="RetriesBox" Width="120" Minimum="1" Maximum="100"
+                               Value="3" Increment="1" FormatString="0" />
+                <TextBlock Text="consecutive failures" VerticalAlignment="Center" />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

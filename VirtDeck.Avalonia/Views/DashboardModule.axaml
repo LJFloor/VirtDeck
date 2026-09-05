@@ -69,6 +69,13 @@
                 <TextBlock Classes="factlabel" Text="Processor" />
                 <TextBlock Name="CpuModelText" Classes="factvalue" />
               </StackPanel>
+              <!-- Hidden until the host has said, the idiom every row only some hosts have
+                   follows. A machine with no display-class device at all says nothing here
+                   rather than saying it has no graphics. -->
+              <StackPanel Name="GpuRow" Orientation="Horizontal" IsVisible="False">
+                <TextBlock Classes="factlabel" Text="Graphics" />
+                <TextBlock Name="GpuModelText" Classes="factvalue" />
+              </StackPanel>
               <StackPanel Orientation="Horizontal">
                 <TextBlock Classes="factlabel" Text="Memory" />
                 <TextBlock Name="MemoryTotalText" Classes="factvalue" />
@@ -125,10 +132,14 @@
           </HeaderedContentControl>
         </Grid>
 
-        <!-- Four subjects, four graphs. CPU and memory are percentages of a known whole and so are
-             pinned to a 0-100 scale; network and disk throughput have no ceiling to pin them to and
-             autoscale to the window's own peak, which is what the figure on the left says. -->
-        <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,12,Auto">
+        <!-- Five subjects, five graphs. CPU, memory and GPU are percentages of a known whole and so
+             are pinned to a 0-100 scale; network and disk throughput have no ceiling to pin them to
+             and autoscale to the window's own peak, which is what the figure on the left says.
+             The GPU row is the odd one out twice over: it is the only graph carrying a line per
+             device rather than a fixed pair, which is why it takes the full width, and it is the
+             only one that is not always there, because a host with nothing that can report GPU
+             usage gets no box at all rather than an empty one. -->
+        <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,12,Auto,12,Auto">
 
           <HeaderedContentControl Grid.Row="0" Grid.Column="0"
                                   Theme="{StaticResource JbGroupBox}" Padding="0">
@@ -180,6 +191,17 @@
               </DockPanel>
             </HeaderedContentControl.Header>
             <c:MetricGraph Name="DiskGraph" Height="110" />
+          </HeaderedContentControl>
+
+          <HeaderedContentControl Name="GpuBox" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3"
+                                  Theme="{StaticResource JbGroupBox}" Padding="0" IsVisible="False">
+            <HeaderedContentControl.Header>
+              <DockPanel>
+                <TextBlock Name="GpuValue" DockPanel.Dock="Right" Classes="headervalue" />
+                <TextBlock Name="GpuTitle" Text="GPU" />
+              </DockPanel>
+            </HeaderedContentControl.Header>
+            <c:MetricGraph Name="GpuGraph" Height="110" />
           </HeaderedContentControl>
         </Grid>
 

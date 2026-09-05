@@ -1,0 +1,176 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.ResourcesTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Memory">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Limit" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <NumericUpDown Name="MemoryBox" Width="150" Minimum="0" Maximum="4194304"
+                             Value="0" Increment="256" FormatString="0" />
+              <TextBlock Text="MiB" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Reservation" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <NumericUpDown Name="ReservationBox" Width="150" Minimum="0" Maximum="4194304"
+                             Value="0" Increment="256" FormatString="0" />
+              <TextBlock Text="MiB" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Shared memory" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <NumericUpDown Name="ShmBox" Width="150" Minimum="0" Maximum="1048576"
+                             Value="0" Increment="64" FormatString="0" />
+              <TextBlock Text="MiB" VerticalAlignment="Center" />
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="CPU">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Limit" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <NumericUpDown Name="CpusBox" Width="150" Minimum="0" Maximum="1024"
+                             Value="0" Increment="0.5" FormatString="0.###" />
+              <TextBlock Text="CPUs" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Shares" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Row="1" Grid.Column="1" Name="SharesBox" Width="150"
+                           HorizontalAlignment="Left" Minimum="0" Maximum="262144"
+                           Value="0" Increment="256" FormatString="0" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Pinned to cores" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="CpusetBox" PlaceholderText="0-3, or 0,2,4" />
+          </Grid>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <!-- The whole group hangs off an enabled Border, because a disabled control is not
+           hit-testable in Avalonia and the reason it is disabled has to be readable on hover. -->
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="GPU (nvidia-only)">
+        <Border Name="GpuHost" Background="Transparent">
+          <StackPanel Name="GpuPanel" Classes="options">
+            <ComboBox Name="GpuModeBox" Width="260" HorizontalAlignment="Left">
+              <ComboBoxItem Tag="none" Content="None" />
+              <ComboBoxItem Tag="all" Content="Every GPU on the host" />
+              <ComboBoxItem Tag="count" Content="A number of them" />
+              <ComboBoxItem Tag="devices" Content="The ones ticked below" />
+            </ComboBox>
+
+            <StackPanel Name="GpuCountPanel" Orientation="Horizontal" Spacing="6"
+                        Margin="21,0,0,0" IsVisible="False">
+              <NumericUpDown Name="GpuCountBox" Width="110" Minimum="1" Maximum="64"
+                             Value="1" Increment="1" FormatString="0" />
+              <TextBlock Text="GPUs, docker picking which" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <ItemsControl Name="GpuList" Classes="under" IsVisible="False">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" ItemWidth="320" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+
+            <TextBlock Name="GpuEmptyNote" Classes="subnote" IsVisible="False"
+                       Text="The host reported no GPUs, so there is nothing to tick. Ask for all of them instead, or type the index into the compose file if you know it." />
+          </StackPanel>
+        </Border>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Runtime and processes">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Runtime" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="RuntimeBox" HorizontalAlignment="Stretch" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Process limit" VerticalAlignment="Center" />
+            <NumericUpDown Grid.Row="1" Grid.Column="1" Name="PidsBox" Width="150"
+                           HorizontalAlignment="Left" Minimum="0" Maximum="4194304"
+                           Value="0" Increment="64" FormatString="0" />
+          </Grid>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Resource limits (ulimit)" Padding="0">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="UlimitTools" Margin="8,6,8,6" />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="220,*,*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Limit" />
+              <TextBlock Grid.Column="1" Classes="columnheader" Text="Soft" />
+              <TextBlock Grid.Column="2" Classes="columnheader" Text="Hard" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="UlimitList" Background="Transparent" Padding="0" BorderThickness="0"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:UlimitRow">
+                <Grid ColumnDefinitions="220,*,*" ColumnSpacing="6">
+                  <AutoCompleteBox Grid.Column="0" PlaceholderText="nofile"
+                                   FilterMode="ContainsOrdinal" MinimumPrefixLength="0"
+                                   ItemsSource="{Binding Names}"
+                                   Text="{Binding Name, Mode=TwoWay}" />
+                  <TextBox Grid.Column="1" PlaceholderText="1024"
+                           Text="{Binding Soft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <TextBox Grid.Column="2" PlaceholderText="same as soft"
+                           Text="{Binding Hard, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Kernel parameters (sysctl)" Padding="0">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="SysctlTools" Margin="8,6,8,6" />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Parameter" />
+              <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="SysctlList" Background="Transparent" Padding="0" BorderThickness="0"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:SysctlRow">
+                <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" PlaceholderText="net.ipv4.ip_forward"
+                           Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <TextBox Grid.Column="1" PlaceholderText="1"
+                           Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

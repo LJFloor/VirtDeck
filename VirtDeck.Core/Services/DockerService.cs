@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -463,15 +464,36 @@ namespace VirtDeck.Services
 
         // ---- The edit window's pickers -------------------------------------
 
-        // Five listings in one round-trip, tagged in the first field exactly as ListScript is, with
+        // Nine listings in one round-trip, tagged in the first field exactly as ListScript is, with
         // real tab separators rather than docker's own \t escape. Each part is allowed to fail on
         // its own (2>/dev/null plus the closing exit 0), because a host with no networks worth
         // listing should still offer its images.
         //
-        // The last one is not a docker question at all: only the host filesystem can say which
-        // device nodes exist. /dev/pts is dropped because a pseudo terminal is never what somebody
-        // passes through, and the cap is there because the answer rides back on one command's
-        // stdout.
+        // Two of them are not docker questions at all. Only the host filesystem can say which device
+        // nodes exist: /dev/pts is dropped because a pseudo terminal is never what somebody passes
+        // through, and the cap is there because the answer rides back on one command's stdout. And
+        // only nvidia-smi can name a GPU, which it does un-elevated.
+        //
+        // The x record is the one worth reading twice. It answers whether the host can hand a GPU to
+        // a container, which is a different question from whether it has one. Without it the picker
+        // would go by nvidia-smi, and a machine with a GPU and no container toolkit would be offered
+        // a setting that builds a container failing at start.
+        //
+        // What it tests is nvidia-container-runtime-hook on the path, because that is the binary the
+        // daemon execs: --gpus is served by dockerd's own nvidia device driver, which it registers
+        // when it finds that hook. An <c>nvidia</c> entry in the Runtimes map is a different feature
+        // (it is what --runtime nvidia selects) and is neither necessary nor sufficient here, so the
+        // runtime list is gathered for the runtime picker and is not what this answers. A CDI spec
+        // naming nvidia counts too, since that is the other way the daemon can satisfy the flag.
+        //
+        // It runs through sudo like everything else in this file, which is right rather than
+        // incidental: it is the daemon's path, root's, that decides.
+        //
+        // Every list is walked with a shell for loop over an unquoted expansion rather than piped
+        // into read, because a Go template's last line carries no trailing newline and read drops
+        // it: that silently cost runc out of the runtime list the first time. None of these values
+        // can contain whitespace (a runtime key, a driver name, a directory docker chose), so word
+        // splitting is exact here.
         private const string CatalogScript =
             "docker image ls --format 'i\t{{.Repository}}:{{.Tag}}' 2>/dev/null\n" +
             "docker volume ls --format 'v\t{{.Name}}' 2>/dev/null\n" +
@@ -479,6 +501,20 @@ namespace VirtDeck.Services
             "docker ps --all --format 'c\t{{.Names}}' 2>/dev/null\n" +
             "find /dev -maxdepth 3 \\( -type c -o -type b \\) -not -path '/dev/pts/*' 2>/dev/null " +
             "| sort | head -n 400 | sed 's|^|d\t|'\n" +
+            "rt=$(docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' 2>/dev/null)\n" +
+            "for r in $rt; do echo \"r\t$r\"; done\n" +
+            "gpu=no\n" +
+            "command -v nvidia-container-runtime-hook >/dev/null 2>&1 && gpu=yes\n" +
+            "for dir in $(docker info --format '{{range .CDISpecDirs}}{{.}} {{end}}' 2>/dev/null); do\n" +
+            "  ls \"$dir\" 2>/dev/null | grep -qi nvidia && gpu=yes\n" +
+            "done\n" +
+            "echo \"x\t$gpu\"\n" +
+            "docker info --format 'y\t{{.DefaultRuntime}}\t{{.LoggingDriver}}' 2>/dev/null\n" +
+            "nvidia-smi --query-gpu=index,uuid,name --format=csv,noheader 2>/dev/null " +
+            "| head -n 32 | sed 's|, |\t|; s|, |\t|; s|^|g\t|'\n" +
+            "for l in $(docker info --format '{{range .Plugins.Log}}{{.}} {{end}}' 2>/dev/null); " +
+            "do echo \"l\t$l\"; done\n" +
+            "cat /proc/sys/kernel/cap_last_cap 2>/dev/null | sed 's|^|k\t|'\n" +
             "exit 0";
 
         /// <summary>An anonymous volume: docker names those after a 64-hex id, and nobody picks one on purpose.</summary>
@@ -502,10 +538,20 @@ namespace VirtDeck.Services
             var networks = new List<string> { "bridge", "host", "none" };
             var names = new List<string>();
             var devices = new List<string>();
+            var gpus = new List<GpuDevice>();
+            var runtimes = new List<string>();
+            var logDrivers = new List<string>();
+            var gpuPassthrough = false;
+            var defaultRuntime = string.Empty;
+            var defaultLogDriver = string.Empty;
+            var lastCapability = -1;
 
             foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                var f = line.TrimEnd('\r').Split('\t');
+                // Capped at the widest record, the g one, whose last field is a GPU's model
+                // name and so is the only unbounded field in this listing. Every other tag
+                // carries one value, so the cap changes nothing for them.
+                var f = line.TrimEnd('\r').Split('\t', 4);
                 if (f.Length < 2) continue;
                 var value = f[1].Trim();
                 if (value.Length == 0) continue;
@@ -530,11 +576,37 @@ namespace VirtDeck.Services
                     case "d":
                         devices.Add(value);
                         break;
+                    case "g" when f.Length >= 4:
+                        gpus.Add(new GpuDevice
+                        {
+                            Index = value,
+                            Uuid = f[2].Trim(),
+                            Name = f[3].Trim(),
+                        });
+                        break;
+                    case "r" when !runtimes.Contains(value):
+                        runtimes.Add(value);
+                        break;
+                    case "l" when !logDrivers.Contains(value):
+                        logDrivers.Add(value);
+                        break;
+                    case "x":
+                        gpuPassthrough = value == "yes";
+                        break;
+                    case "y":
+                        defaultRuntime = value;
+                        if (f.Length >= 3) defaultLogDriver = f[2].Trim();
+                        break;
+                    case "k" when int.TryParse(value, out var last):
+                        lastCapability = last;
+                        break;
                 }
             }
 
             images.Sort(StringComparer.OrdinalIgnoreCase);
             volumes.Sort(StringComparer.OrdinalIgnoreCase);
+            runtimes.Sort(StringComparer.OrdinalIgnoreCase);
+            logDrivers.Sort(StringComparer.OrdinalIgnoreCase);
 
             return new DockerCatalog
             {
@@ -543,34 +615,85 @@ namespace VirtDeck.Services
                 Networks = networks,
                 ContainerNames = names,
                 DeviceNodes = devices,
+                Gpus = gpus,
+                GpuPassthrough = gpuPassthrough,
+                Runtimes = runtimes,
+                DefaultRuntime = defaultRuntime,
+                LogDrivers = logDrivers,
+                DefaultLogDriver = defaultLogDriver,
+                // A host that would not answer keeps the default, which shows every row rather than
+                // none: a false negative here would hide a capability the kernel does have.
+                LastCapability = lastCapability >= 0 ? lastCapability : LinuxCapabilities.All.Count - 1,
             };
         }
 
         // ---- Reading a container back --------------------------------------
 
         /// <summary>
-        /// The editable half of an existing container, so the same window can edit one it did not
-        /// create. Everything comes out of one <c>docker inspect</c>.
+        /// Two inspects in one round trip: the container, and the image it came from.
+        ///
+        /// The second half is what makes the first readable. A container reports the image's entry
+        /// point, command, environment, labels, working directory and stop signal as its own, with
+        /// nothing to say which the user chose, so without the image there is no way to tell a
+        /// setting from an inheritance. Writing them all back as explicit flags would bake the
+        /// image's values into the container and a later image update would stop reaching it.
+        ///
+        /// Only the container half carries <c>|| exit $?</c>. The image half is best-effort and
+        /// fenced, because an image deleted out from under a running container must still leave that
+        /// container editable; the <c>i</c> record's absence is what
+        /// <see cref="ContainerSpec.ImageConfigKnown"/> reports.
+        ///
+        /// The id is interpolated because <see cref="RequireId"/> has already vetted it, which is
+        /// the rule <c>DefineVmShell</c> follows. <c>{{json .}}</c> prints one line and a JSON
+        /// encoder escapes a tab inside a string, so each record splits on its first tab with the
+        /// unbounded field last, exactly as the tagged-record idiom asks.
         /// </summary>
+        private static string InspectScript(string id) =>
+            $"docker inspect --type container {id} --format 'c\t{{{{json .}}}}' || exit $?\n" +
+            $"img=$(docker inspect --type container {id} --format '{{{{.Image}}}}' 2>/dev/null)\n" +
+            "[ -n \"$img\" ] && docker image inspect --format 'i\t{{json .Config}}' \"$img\" 2>/dev/null\n" +
+            "exit 0";
+
         public Task<ContainerSpec> InspectAsync(string id) => Task.Run(() => Inspect(id));
 
         private ContainerSpec Inspect(string id)
         {
             RequireId(id);
-            var raw = _ssh.RunSudoCommand($"docker inspect --type container {id}");
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(InspectScript(id)));
 
-            // RunSudoCommand merges stderr into stdout, so a daemon warning would sit in front of
-            // the array. Start at the bracket rather than trusting the first byte.
-            var start = raw.IndexOf('[');
-            if (start < 0) throw new Exception($"docker inspect returned no JSON: {raw.Trim()}");
+            JsonDocument? containerDoc = null;
+            JsonDocument? imageDoc = null;
 
-            using var doc = JsonDocument.Parse(raw[start..]);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
-                throw new Exception("docker inspect returned an empty result.");
+            // Tagged records rather than the whole document, so a daemon warning merged in from
+            // stderr is a line that matches no tag instead of something to seek past.
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = line.TrimEnd('\r').Split('\t', 2);
+                if (f.Length < 2) continue;
+                try
+                {
+                    if (f[0] == "c" && containerDoc is null) containerDoc = JsonDocument.Parse(f[1]);
+                    else if (f[0] == "i" && imageDoc is null) imageDoc = JsonDocument.Parse(f[1]);
+                }
+                catch (JsonException)
+                {
+                    // A record that will not parse is one record, not the read. The container half
+                    // missing is caught below; the image half missing is a stated answer.
+                }
+            }
 
-            var root = doc.RootElement[0];
+            using var container = containerDoc;
+            using var image = imageDoc;
+
+            if (container is null)
+                throw new Exception($"docker inspect returned no JSON: {output.Trim()}");
+
+            var root = container.RootElement;
             var config = Prop(root, "Config");
             var host = Prop(root, "HostConfig");
+            var imageConfig = image?.RootElement.ValueKind == JsonValueKind.Object
+                ? image.RootElement
+                : (JsonElement?)null;
 
             var spec = new ContainerSpec
             {
@@ -600,10 +723,19 @@ namespace VirtDeck.Services
                 foreach (var entry in bindings.EnumerateObject())
                     spec.Ports.AddRange(ParsePortBinding(entry));
 
+            // Anything the image already declares is skipped, or every edit would copy the image's
+            // own variables onto the container as explicit ones. A variable the container changed
+            // does not match and is kept, which is the whole point of comparing rather than
+            // comparing names.
+            var imageEnv = Items(imageConfig, "Env").Select(v => v.GetString())
+                                                    .Where(v => v is not null)
+                                                    .ToHashSet(StringComparer.Ordinal);
+
             foreach (var variable in Items(config, "Env"))
             {
                 var text = variable.GetString();
                 if (string.IsNullOrEmpty(text)) continue;
+                if (imageConfig is not null && imageEnv.Contains(text)) continue;
                 var eq = text.IndexOf('=');
                 spec.Env.Add(eq < 0
                     ? new EnvSpec { Key = text }
@@ -622,8 +754,331 @@ namespace VirtDeck.Services
                 });
             }
 
+            ReadResources(spec, host);
+            ReadSecurity(spec, host);
+            ReadProcess(spec, root, config, host, imageConfig);
+            ReadHealthAndLogging(spec, config, host, imageConfig);
+
             return spec;
         }
+
+        /// <summary>
+        /// What runs, and what the container is called: the read-back of
+        /// <see cref="AppendProcess"/>, with the image subtracted out of it.
+        ///
+        /// Six of these fields are reported on every container whether or not anybody set them,
+        /// because a container inherits them from its image, so each is compared against the image's
+        /// own answer and dropped when it matches. When the image could not be read nothing is
+        /// subtracted and <see cref="ContainerSpec.ImageConfigKnown"/> says so: keeping the image's
+        /// values means the container goes on doing exactly what it does now, at the cost of pinning
+        /// them, where dropping them unread could quietly take a <c>--user</c> off a container.
+        /// </summary>
+        private static void ReadProcess(ContainerSpec spec, JsonElement root, JsonElement? config,
+                                        JsonElement? host, JsonElement? imageConfig)
+        {
+            spec.ImageConfigKnown = imageConfig is not null;
+
+            var entrypoint = Strings(config, "Entrypoint");
+            var command = Strings(config, "Cmd");
+            var imageEntrypoint = Strings(imageConfig, "Entrypoint");
+            var imageCommand = Strings(imageConfig, "Cmd");
+
+            var ownEntrypoint = imageConfig is not null && !entrypoint.SequenceEqual(imageEntrypoint);
+            if (ownEntrypoint || (imageConfig is null && entrypoint.Count > 0))
+            {
+                // Both verbatim. The fold onto --entrypoint, which takes one element, happens at
+                // argv time, so the page draws what the container actually carries.
+                spec.Entrypoint = entrypoint;
+                spec.Command = command;
+            }
+            else
+            {
+                // The command is compared against the image only when the entry point was inherited
+                // too. Docker discards the image's CMD the moment an entry point is given, so a
+                // container with its own entry point keeps its command verbatim, empty included:
+                // re-emitting nothing is what reproduces it, and subtracting a command that happened
+                // to match the image's would turn it into null on the next save.
+                spec.Command = command.SequenceEqual(imageCommand) && imageConfig is not null
+                    ? new List<string>()
+                    : command;
+            }
+
+            spec.User = Inherited(Text(config, "User"), Text(imageConfig, "User"), imageConfig);
+            spec.WorkingDir = Inherited(Text(config, "WorkingDir"), Text(imageConfig, "WorkingDir"), imageConfig);
+            spec.StopSignal = Inherited(Text(config, "StopSignal"), Text(imageConfig, "StopSignal"), imageConfig);
+
+            // A container nobody named reports its own id's first twelve characters as its host
+            // name, so writing that back would give the replacement the old container's id to
+            // answer to.
+            var hostname = Text(config, "Hostname") ?? string.Empty;
+            var containerId = (Text(root, "Id") ?? string.Empty);
+            spec.Hostname = hostname.Length > 0 && containerId.StartsWith(hostname, StringComparison.Ordinal)
+                ? string.Empty
+                : hostname;
+
+            spec.Init = Prop(host, "Init") is { ValueKind: JsonValueKind.True };
+
+            var imageLabels = Prop(imageConfig, "Labels");
+            if (Prop(config, "Labels") is { ValueKind: JsonValueKind.Object } labels)
+                foreach (var label in labels.EnumerateObject())
+                {
+                    var value = label.Value.ValueKind == JsonValueKind.String
+                        ? label.Value.GetString() ?? string.Empty
+                        : label.Value.ToString();
+                    if (imageConfig is not null && Text(imageLabels, label.Name) == value) continue;
+                    spec.Labels.Add(new LabelSpec { Key = label.Name, Value = value });
+                }
+
+            foreach (var server in Items(host, "Dns"))
+                if (server.GetString() is { Length: > 0 } address)
+                    spec.Dns.Add(address);
+
+            foreach (var entry in Items(host, "ExtraHosts"))
+            {
+                var text = entry.GetString();
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                // name:address, and an IPv6 address has colons of its own, so split at the first.
+                var colon = text.IndexOf(':');
+                if (colon <= 0) continue;
+                spec.ExtraHosts.Add(new HostEntrySpec
+                {
+                    Name = text[..colon],
+                    Address = text[(colon + 1)..],
+                });
+            }
+        }
+
+        /// <summary>
+        /// The health check and the logging driver, both of which a container can inherit.
+        ///
+        /// The health check is compared against the image's as raw JSON, which is exact and needs no
+        /// field-by-field rule: both come from the same daemon and so are serialised the same way,
+        /// and anything that does not compare equal is simply kept, which is the safe direction.
+        /// </summary>
+        private static void ReadHealthAndLogging(ContainerSpec spec, JsonElement? config,
+                                                 JsonElement? host, JsonElement? imageConfig)
+        {
+            var health = Prop(config, "Healthcheck");
+            var imageHealth = Prop(imageConfig, "Healthcheck");
+            var inherited = imageConfig is not null &&
+                            health?.GetRawText() == imageHealth?.GetRawText();
+
+            if (health is { ValueKind: JsonValueKind.Object } && !inherited)
+            {
+                var test = Strings(health, "Test");
+
+                if (test.Count > 0 && test[0] == "NONE")
+                {
+                    spec.Health.Mode = HealthMode.Disabled;
+                }
+                else if (test.Count > 1)
+                {
+                    spec.Health.Mode = HealthMode.Command;
+                    // CMD-SHELL carries the whole command in one element. CMD is the exec form,
+                    // which docker's CLI cannot produce at all, so it is joined into a line and
+                    // written back as a shell command. See HealthSpec.Command.
+                    spec.Health.Command = test[0] == "CMD-SHELL"
+                        ? test[1]
+                        : string.Join(' ', test.Skip(1));
+
+                    const long Second = 1_000_000_000;
+                    spec.Health.IntervalSeconds = (int)((Number(health, "Interval") ?? 0) / Second);
+                    spec.Health.TimeoutSeconds = (int)((Number(health, "Timeout") ?? 0) / Second);
+                    spec.Health.StartPeriodSeconds = (int)((Number(health, "StartPeriod") ?? 0) / Second);
+                    spec.Health.Retries = (int)(Number(health, "Retries") ?? 0);
+                }
+            }
+
+            // Reported on every container whether or not anybody chose it, so the page compares it
+            // against the daemon's own default the way the runtime box does.
+            spec.LogDriver = Text(Prop(host, "LogConfig"), "Type") ?? string.Empty;
+
+            if (Prop(Prop(host, "LogConfig"), "Config") is { ValueKind: JsonValueKind.Object } options)
+                foreach (var option in options.EnumerateObject())
+                    spec.LogOptions.Add(new LogOptionSpec
+                    {
+                        Key = option.Name,
+                        Value = option.Value.ValueKind == JsonValueKind.String
+                            ? option.Value.GetString() ?? string.Empty
+                            : option.Value.ToString(),
+                    });
+        }
+
+        /// <summary>A string array property as a list, empty when it is absent or not an array.</summary>
+        private static List<string> Strings(JsonElement? element, string name) =>
+            Items(element, name).Select(i => i.GetString() ?? string.Empty).ToList();
+
+        /// <summary>
+        /// A field the container may have inherited: empty when it matches the image's, and
+        /// untouched when the image could not be read.
+        /// </summary>
+        private static string Inherited(string? own, string? fromImage, JsonElement? imageConfig)
+        {
+            var value = own ?? string.Empty;
+            if (imageConfig is null) return value;
+            return value == (fromImage ?? string.Empty) ? string.Empty : value;
+        }
+
+        /// <summary>
+        /// The confinement half of <c>HostConfig</c>: the read-back of
+        /// <see cref="AppendSecurity"/>.
+        ///
+        /// The capability set is rebuilt rather than stored as the two lists docker reports, because
+        /// the page draws a set. Docker applies drops and then adds, so this does the same, and
+        /// <c>ALL</c> in the drop list clears everything. The names arrive <c>CAP_</c>-prefixed and
+        /// go in bare: docker adds that prefix on the way out and takes any of the three spellings
+        /// back.
+        /// </summary>
+        private static void ReadSecurity(ContainerSpec spec, JsonElement? host)
+        {
+            spec.Privileged = Prop(host, "Privileged") is { ValueKind: JsonValueKind.True };
+            spec.ReadOnlyRootfs = Prop(host, "ReadonlyRootfs") is { ValueKind: JsonValueKind.True };
+
+            var capabilities = new HashSet<string>(LinuxCapabilities.DockerDefault, StringComparer.Ordinal);
+
+            foreach (var entry in Items(host, "CapDrop"))
+            {
+                var name = LinuxCapabilities.Normalise(entry.GetString() ?? string.Empty);
+                if (name.Length == 0) continue;
+                if (name == LinuxCapabilities.AllKeyword) capabilities.Clear();
+                else capabilities.Remove(name);
+            }
+
+            foreach (var entry in Items(host, "CapAdd"))
+            {
+                var name = LinuxCapabilities.Normalise(entry.GetString() ?? string.Empty);
+                if (name.Length == 0) continue;
+                if (name == LinuxCapabilities.AllKeyword)
+                    foreach (var known in LinuxCapabilities.All) capabilities.Add(known.Name);
+                else capabilities.Add(name);
+            }
+
+            spec.Capabilities = capabilities.ToList();
+
+            foreach (var entry in Items(host, "SecurityOpt"))
+            {
+                var text = (entry.GetString() ?? string.Empty).Trim();
+                if (text.Length == 0) continue;
+
+                // Docker writes label=disable itself for a privileged container, so carrying it back
+                // would re-emit a flag nobody set. It regenerates it either way.
+                if (spec.Privileged && text == "label=disable") continue;
+
+                var split = text.IndexOfAny(new[] { '=', ':' });
+                var key = split < 0 ? text : text[..split];
+                var value = split < 0 ? string.Empty : text[(split + 1)..];
+
+                switch (key)
+                {
+                    // Given bare, given :true or given =true, all mean the same thing, and inspect
+                    // answers the bare word for the first.
+                    case "no-new-privileges" when value.Length == 0 || value == "true":
+                        spec.NoNewPrivileges = true;
+                        break;
+                    case "seccomp":
+                        spec.Seccomp = value;
+                        break;
+                    case "apparmor":
+                        spec.Apparmor = value;
+                        break;
+                    default:
+                        spec.OtherSecurityOptions.Add(text);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The limits and the hardware off <c>HostConfig</c>: the read-back half of
+        /// <see cref="AppendResources"/>.
+        ///
+        /// Three fields here are reported whether or not anybody set them, and each one taken at
+        /// face value would turn docker's own default into the user's explicit choice on the next
+        /// save. <c>MemorySwap</c> is not read at all (docker writes it at twice the memory limit),
+        /// <c>ShmSize</c> is ignored at its default 64 MiB, and <c>Runtime</c> always names the
+        /// effective runtime, which is why <see cref="DockerCatalog.DefaultRuntime"/> exists and the
+        /// page rather than this method decides whether the answer was a choice.
+        /// </summary>
+        private static void ReadResources(ContainerSpec spec, JsonElement? host)
+        {
+            const long Mib = 1024 * 1024;
+            const long DefaultShmBytes = 64 * Mib;
+
+            spec.MemoryMib = (Number(host, "Memory") ?? 0) / Mib;
+            spec.MemoryReservationMib = (Number(host, "MemoryReservation") ?? 0) / Mib;
+
+            var shm = Number(host, "ShmSize") ?? 0;
+            spec.ShmSizeMib = shm == DefaultShmBytes ? 0 : shm / Mib;
+
+            spec.Cpus = (Number(host, "NanoCpus") ?? 0) / 1_000_000_000d;
+            spec.CpuShares = (int)(Number(host, "CpuShares") ?? 0);
+            spec.PidsLimit = (int)(Number(host, "PidsLimit") ?? 0);
+            spec.CpusetCpus = Text(host, "CpusetCpus") ?? string.Empty;
+            spec.Runtime = Text(host, "Runtime") ?? string.Empty;
+
+            foreach (var limit in Items(host, "Ulimits"))
+            {
+                var name = Text(limit, "Name");
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var soft = Number(limit, "Soft");
+                var hard = Number(limit, "Hard");
+                spec.Ulimits.Add(new UlimitSpec
+                {
+                    Name = name,
+                    Soft = soft?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    // Docker expands one number into both halves, so a pair that matches is written
+                    // back as the single number it was typed as.
+                    Hard = hard is null || hard == soft
+                        ? string.Empty
+                        : hard.Value.ToString(CultureInfo.InvariantCulture),
+                });
+            }
+
+            if (Prop(host, "Sysctls") is { ValueKind: JsonValueKind.Object } sysctls)
+                foreach (var entry in sysctls.EnumerateObject())
+                    spec.Sysctls.Add(new SysctlSpec
+                    {
+                        Key = entry.Name,
+                        Value = entry.Value.ValueKind == JsonValueKind.String
+                            ? entry.Value.GetString() ?? string.Empty
+                            : entry.Value.ToString(),
+                    });
+
+            // --gpus lands in DeviceRequests, one entry per --gpus given. Only the gpu capability is
+            // ours to read: another driver's request is somebody else's and is left alone rather
+            // than redrawn as a GPU setting.
+            foreach (var request in Items(host, "DeviceRequests"))
+            {
+                if (!RequestsGpus(request)) continue;
+
+                var ids = Items(request, "DeviceIDs").Select(i => i.GetString())
+                                                     .Where(i => !string.IsNullOrWhiteSpace(i))
+                                                     .Select(i => i!).ToList();
+                if (ids.Count > 0)
+                {
+                    spec.Gpu.Mode = GpuMode.Devices;
+                    spec.Gpu.DeviceIds = ids;
+                }
+                else
+                {
+                    // Count is -1 for "all" and a positive number for "any N of them".
+                    var count = Number(request, "Count") ?? 0;
+                    spec.Gpu.Mode = count < 0 ? GpuMode.All : GpuMode.Count;
+                    if (count > 0) spec.Gpu.Count = (int)count;
+                }
+                break;
+            }
+        }
+
+        /// <summary>
+        /// Whether one <c>DeviceRequests</c> entry is asking for GPUs. The capabilities field is an
+        /// array of arrays, an OR of ANDs, so this looks for the word anywhere inside it.
+        /// </summary>
+        private static bool RequestsGpus(JsonElement request) =>
+            Items(request, "Capabilities")
+                .Any(set => set.ValueKind == JsonValueKind.Array &&
+                            set.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String &&
+                                                          c.GetString() == "gpu"));
 
         /// <summary>
         /// One entry of <c>HostConfig.Binds</c>: <c>source:target[:options]</c>. The host is Linux,
@@ -687,6 +1142,20 @@ namespace VirtDeck.Services
         private static string? Text(JsonElement? element, string name) =>
             Prop(element, name) is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
 
+        /// <summary>
+        /// A numeric property, tolerating the string form too: docker's own output is a JSON number
+        /// here, but a ulimit or a sysctl read off an older daemon can arrive quoted, and a throw in
+        /// the middle of a read-back would cost the whole container rather than one field.
+        /// </summary>
+        private static long? Number(JsonElement? element, string name) => Prop(element, name) switch
+        {
+            { ValueKind: JsonValueKind.Number } value when value.TryGetInt64(out var n) => n,
+            { ValueKind: JsonValueKind.String } value
+                when long.TryParse(value.GetString(), NumberStyles.Integer,
+                                   CultureInfo.InvariantCulture, out var n) => n,
+            _ => null,
+        };
+
         private static IEnumerable<JsonElement> Items(JsonElement? element, string name) =>
             Prop(element, name) is { ValueKind: JsonValueKind.Array } value
                 ? value.EnumerateArray()
@@ -713,6 +1182,9 @@ namespace VirtDeck.Services
 
             var network = spec.Network.Trim();
             if (network.Length > 0) { argv.Add("--network"); argv.Add(network); }
+
+            AppendAddressing(argv, spec, network);
+            AppendResources(argv, spec);
 
             foreach (var m in spec.Mounts)
             {
@@ -760,10 +1232,311 @@ namespace VirtDeck.Services
                 argv.Add($"{hostPath}:{(containerPath.Length > 0 ? containerPath : hostPath)}:{permissions}");
             }
 
+            AppendSecurity(argv, spec);
+            AppendHealthAndLogging(argv, spec);
+            AppendProcess(argv, spec);
+
             // -- so an image reference that starts with a hyphen is still an image reference.
             argv.Add("--");
             argv.Add(spec.Image.Trim());
+
+            // The one thing that may ever follow the image, and the reason --entrypoint is the last
+            // flag before it: these words are its arguments. An entry point of more than one element
+            // lands here from its second element on, which is the fold AppendProcess describes.
+            foreach (var word in spec.Entrypoint.Skip(1)) argv.Add(word);
+            foreach (var word in spec.Command) argv.Add(word);
+
             return argv;
+        }
+
+        /// <summary>
+        /// What the container is called on the network and what it can resolve.
+        ///
+        /// All three are refused outright under <c>container:</c> networking, where the container
+        /// joins another one's namespace and has no host name, resolver or hosts file of its own. So
+        /// they are dropped here as well as hidden on the page, the way published ports already are,
+        /// and a container inspected back with both can still be saved. Note that <c>host</c>
+        /// networking is <b>not</b> one of those cases: measured on docker 29, it refuses a
+        /// published port and accepts all three of these.
+        /// </summary>
+        private static void AppendAddressing(List<string> argv, ContainerSpec spec, string network)
+        {
+            if (!SharesNetworkNamespace(network))
+            {
+                var hostname = spec.Hostname.Trim();
+                if (hostname.Length > 0) { argv.Add("--hostname"); argv.Add(hostname); }
+
+                foreach (var server in spec.Dns)
+                {
+                    var address = server.Trim();
+                    if (address.Length == 0) continue;
+                    argv.Add("--dns");
+                    argv.Add(address);
+                }
+
+                foreach (var entry in spec.ExtraHosts)
+                {
+                    var name = entry.Name.Trim();
+                    var address = entry.Address.Trim();
+                    if (name.Length == 0 || address.Length == 0) continue;
+                    argv.Add("--add-host");
+                    argv.Add($"{name}:{address}");
+                }
+            }
+
+            foreach (var label in spec.Labels)
+            {
+                var key = label.Key.Trim();
+                if (key.Length == 0) continue;
+                argv.Add("--label");
+                argv.Add($"{key}={label.Value}");
+            }
+        }
+
+        /// <summary>
+        /// Whether the container reports itself well, and where its output goes.
+        ///
+        /// <c>--no-healthcheck</c> is emitted alone, because docker's CLI refuses it together with
+        /// any other <c>--health-*</c>, and Inherit emits nothing at all. Every duration is written
+        /// in docker's own <c>30s</c> spelling; 0 leaves docker's default rather than asking for
+        /// zero, which docker would refuse.
+        /// </summary>
+        private static void AppendHealthAndLogging(List<string> argv, ContainerSpec spec)
+        {
+            switch (spec.Health.Mode)
+            {
+                case HealthMode.Disabled:
+                    argv.Add("--no-healthcheck");
+                    break;
+
+                case HealthMode.Command when spec.Health.Command.Trim().Length > 0:
+                    argv.Add("--health-cmd");
+                    argv.Add(spec.Health.Command.Trim());
+                    AppendSeconds(argv, "--health-interval", spec.Health.IntervalSeconds);
+                    AppendSeconds(argv, "--health-timeout", spec.Health.TimeoutSeconds);
+                    AppendSeconds(argv, "--health-start-period", spec.Health.StartPeriodSeconds);
+                    if (spec.Health.Retries > 0)
+                    {
+                        argv.Add("--health-retries");
+                        argv.Add(spec.Health.Retries.ToString(CultureInfo.InvariantCulture));
+                    }
+                    break;
+            }
+
+            var driver = spec.LogDriver.Trim();
+            if (driver.Length > 0) { argv.Add("--log-driver"); argv.Add(driver); }
+
+            foreach (var option in spec.LogOptions)
+            {
+                var key = option.Key.Trim();
+                if (key.Length == 0) continue;
+                argv.Add("--log-opt");
+                argv.Add($"{key}={option.Value.Trim()}");
+            }
+        }
+
+        private static void AppendSeconds(List<string> argv, string flag, int seconds)
+        {
+            if (seconds <= 0) return;
+            argv.Add(flag);
+            argv.Add($"{seconds.ToString(CultureInfo.InvariantCulture)}s");
+        }
+
+        /// <summary>
+        /// What runs. Written last of the flags, because <c>--entrypoint</c> changes what the words
+        /// after the image mean and reads better beside them.
+        ///
+        /// <c>--entrypoint</c> takes one argv element where the spec carries a list, so a longer
+        /// entry point is folded: the first element is the flag and the rest go on the front of the
+        /// words after the image, which <c>BuildCreateArgv</c> does. <c>entrypoint [a,b] + cmd [c]</c>
+        /// execs exactly what <c>entrypoint [a] + cmd [b,c]</c> does, so nothing about the container
+        /// changes and the next edit shows what will actually run.
+        /// </summary>
+        private static void AppendProcess(List<string> argv, ContainerSpec spec)
+        {
+            var user = spec.User.Trim();
+            if (user.Length > 0) { argv.Add("--user"); argv.Add(user); }
+
+            var workingDir = spec.WorkingDir.Trim();
+            if (workingDir.Length > 0) { argv.Add("--workdir"); argv.Add(workingDir); }
+
+            var stopSignal = spec.StopSignal.Trim();
+            if (stopSignal.Length > 0) { argv.Add("--stop-signal"); argv.Add(stopSignal); }
+
+            if (spec.Init) argv.Add("--init");
+
+            if (spec.Entrypoint.Count > 0)
+            {
+                argv.Add("--entrypoint");
+                argv.Add(spec.Entrypoint[0]);
+            }
+        }
+
+        /// <summary>
+        /// How confined the container is: the capability set turned back into docker's own pair of
+        /// override lists, and the four confinement switches.
+        ///
+        /// <see cref="ContainerSpec.Capabilities"/> is the whole set, so the arithmetic is here
+        /// rather than on the page: an add is a capability docker would not have given, a drop is one
+        /// it would. Dropping every default is written <c>ALL</c>, which is docker's own idiom and is
+        /// also the only spelling that reaches a capability this build's table does not name.
+        ///
+        /// Capabilities are suppressed entirely under <c>--privileged</c>, which is the one
+        /// cross-page rule this file resolves for them: privileged means the full set, the page greys
+        /// the list out to say so, and emitting drops beside it would be asking docker for two
+        /// different things at once.
+        /// </summary>
+        private static void AppendSecurity(List<string> argv, ContainerSpec spec)
+        {
+            if (spec.Privileged)
+            {
+                argv.Add("--privileged");
+            }
+            else
+            {
+                var ticked = new HashSet<string>(spec.Capabilities.Select(LinuxCapabilities.Normalise),
+                                                 StringComparer.Ordinal);
+                var anyDropped = LinuxCapabilities.DockerDefault.Any(c => !ticked.Contains(c));
+
+                // Nothing dropped is the ordinary case, and there the adds alone say it. The moment
+                // anything is dropped the whole set is spelled out instead, ALL and then every tick,
+                // rather than a drop per unticked default. Two reasons, and the second is the one
+                // that matters: ALL is the only spelling that also reaches a capability this build's
+                // table does not name, so a daemon whose default set is not the fourteen measured
+                // here still ends up with exactly what the list says. It is docker's own idiom too.
+                if (anyDropped)
+                {
+                    argv.Add("--cap-drop");
+                    argv.Add(LinuxCapabilities.AllKeyword);
+                }
+
+                var wanted = anyDropped
+                    ? ticked
+                    : ticked.Where(c => !LinuxCapabilities.DockerDefault.Contains(c));
+
+                foreach (var capability in wanted.OrderBy(c => c, StringComparer.Ordinal))
+                {
+                    argv.Add("--cap-add");
+                    argv.Add(capability);
+                }
+            }
+
+            if (spec.ReadOnlyRootfs) argv.Add("--read-only");
+
+            // no-new-privileges:true is the spelling docker's own documentation uses, and inspect
+            // answers the bare word for either.
+            if (spec.NoNewPrivileges)
+            {
+                argv.Add("--security-opt");
+                argv.Add("no-new-privileges:true");
+            }
+
+            var seccomp = spec.Seccomp.Trim();
+            if (seccomp.Length > 0) { argv.Add("--security-opt"); argv.Add($"seccomp={seccomp}"); }
+
+            var apparmor = spec.Apparmor.Trim();
+            if (apparmor.Length > 0) { argv.Add("--security-opt"); argv.Add($"apparmor={apparmor}"); }
+
+            foreach (var option in spec.OtherSecurityOptions)
+            {
+                var text = option.Trim();
+                if (text.Length == 0) continue;
+                argv.Add("--security-opt");
+                argv.Add(text);
+            }
+        }
+
+        /// <summary>
+        /// The limits and the hardware: what the host gives the container, written between what the
+        /// container is called and what is mounted into it.
+        ///
+        /// Every number here is 0 for "say nothing", so a page nobody touched adds no flags at all
+        /// and the container gets docker's own defaults rather than VirtDeck's opinion of them.
+        ///
+        /// Nothing writes <c>--memory-swap</c>, and that is deliberate. Docker sets it to twice
+        /// <c>--memory</c> by itself, so reading it back and re-emitting it would pin, as an explicit
+        /// choice, a number the user never made, and it would stay pinned after they later changed
+        /// the memory limit.
+        /// </summary>
+        private static void AppendResources(List<string> argv, ContainerSpec spec)
+        {
+            if (spec.MemoryMib > 0) { argv.Add("--memory"); argv.Add($"{spec.MemoryMib}m"); }
+            if (spec.MemoryReservationMib > 0)
+            {
+                argv.Add("--memory-reservation");
+                argv.Add($"{spec.MemoryReservationMib}m");
+            }
+            if (spec.ShmSizeMib > 0) { argv.Add("--shm-size"); argv.Add($"{spec.ShmSizeMib}m"); }
+
+            // Invariant culture throughout: a decimal comma is this machine's own locale, and docker
+            // would refuse "1,5" as a number of CPUs.
+            if (spec.Cpus > 0)
+            {
+                argv.Add("--cpus");
+                argv.Add(spec.Cpus.ToString("0.###", CultureInfo.InvariantCulture));
+            }
+            if (spec.CpuShares > 0)
+            {
+                argv.Add("--cpu-shares");
+                argv.Add(spec.CpuShares.ToString(CultureInfo.InvariantCulture));
+            }
+            if (spec.PidsLimit > 0)
+            {
+                argv.Add("--pids-limit");
+                argv.Add(spec.PidsLimit.ToString(CultureInfo.InvariantCulture));
+            }
+
+            var cpuset = spec.CpusetCpus.Trim();
+            if (cpuset.Length > 0) { argv.Add("--cpuset-cpus"); argv.Add(cpuset); }
+
+            var runtime = spec.Runtime.Trim();
+            if (runtime.Length > 0) { argv.Add("--runtime"); argv.Add(runtime); }
+
+            foreach (var u in spec.Ulimits)
+            {
+                var name = u.Name.Trim();
+                var soft = u.Soft.Trim();
+                if (name.Length == 0 || soft.Length == 0) continue;
+                var hard = u.Hard.Trim();
+                argv.Add("--ulimit");
+                // One number means both halves to docker, so an empty hard limit is left off rather
+                // than echoed as the soft one.
+                argv.Add(hard.Length > 0 ? $"{name}={soft}:{hard}" : $"{name}={soft}");
+            }
+
+            foreach (var c in spec.Sysctls)
+            {
+                var key = c.Key.Trim();
+                if (key.Length == 0) continue;
+                argv.Add("--sysctl");
+                argv.Add($"{key}={c.Value.Trim()}");
+            }
+
+            // --gpus takes three spellings, and on the argv path none of them needs quoting: the
+            // shell never sees the comma in device=0,1. None emits nothing at all, so a host that
+            // cannot pass a GPU through is never asked to.
+            switch (spec.Gpu.Mode)
+            {
+                case GpuMode.All:
+                    argv.Add("--gpus");
+                    argv.Add("all");
+                    break;
+
+                case GpuMode.Count when spec.Gpu.Count > 0:
+                    argv.Add("--gpus");
+                    argv.Add(spec.Gpu.Count.ToString(CultureInfo.InvariantCulture));
+                    break;
+
+                case GpuMode.Devices:
+                    var ids = spec.Gpu.DeviceIds.Select(i => i.Trim())
+                                                .Where(i => i.Length > 0).ToList();
+                    if (ids.Count > 0)
+                    {
+                        argv.Add("--gpus");
+                        argv.Add($"device={string.Join(',', ids)}");
+                    }
+                    break;
+            }
         }
 
         /// <summary>
@@ -773,6 +1546,20 @@ namespace VirtDeck.Services
         /// </summary>
         public static bool PublishesPorts(string network) =>
             network != "host" && network != "none" && !network.StartsWith("container:", StringComparison.Ordinal);
+
+        /// <summary>
+        /// Whether a network mode joins another container's namespace, and so has no host name,
+        /// resolver or hosts file of its own to set.
+        ///
+        /// Deliberately narrower than <see cref="PublishesPorts"/>, and measured rather than assumed:
+        /// docker 29 refuses <c>--hostname</c>, <c>--dns</c> and <c>--add-host</c> under
+        /// <c>container:</c> with "conflicting options: hostname and the network mode", and accepts
+        /// all three under <c>host</c>. Under <c>none</c> it writes both files as usual. Having no
+        /// namespace to publish a port into is a different question from having no files of one's
+        /// own, so the two predicates are two.
+        /// </summary>
+        public static bool SharesNetworkNamespace(string network) =>
+            network.StartsWith("container:", StringComparison.Ordinal);
 
         // ---- Saving --------------------------------------------------------
 

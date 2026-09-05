@@ -5,7 +5,7 @@ using VirtDeck.Models;
 namespace VirtDeck.Avalonia.Views.Containers;
 
 /// <summary>
-/// The four add/remove list rows of <see cref="ContainerEditWindow"/>, together because they are one
+/// The add/remove list rows of <see cref="ContainerEditWindow"/>, together because they are one
 /// idea repeated: unlike <c>VmEditRows</c>, which renders a model, each of these <b>is</b> the form
 /// field, written to as well as read from, exactly as the answer-file window's rows are.
 ///
@@ -356,4 +356,210 @@ public sealed class DeviceRow : EditRow
         ContainerPath = _containerPath.Trim(),
         Permissions = Permissions,
     };
+}
+
+/// <summary>
+/// One <c>--ulimit</c>. Both numbers are text rather than a spinner, because <c>unlimited</c> is a
+/// value a ulimit takes and a spinner cannot hold it.
+/// </summary>
+public sealed class UlimitRow : EditRow
+{
+    private string _name = string.Empty;
+    private string _soft = string.Empty;
+    private string _hard = string.Empty;
+
+    public UlimitRow() { }
+
+    public UlimitRow(UlimitSpec limit)
+    {
+        _name = limit.Name;
+        _soft = limit.Soft;
+        _hard = limit.Hard;
+    }
+
+    /// <summary>
+    /// The names worth suggesting. Not a closed list: the kernel has more and docker takes any of
+    /// them, so this seeds an AutoCompleteBox rather than filling a picker.
+    /// </summary>
+    public IReadOnlyList<string> Names { get; } = new[]
+    {
+        "core", "cpu", "data", "fsize", "locks", "memlock", "msgqueue", "nice",
+        "nofile", "nproc", "rss", "rtprio", "sigpending", "stack",
+    };
+
+    public string Name
+    {
+        get => _name;
+        set => Set(ref _name, value ?? string.Empty);
+    }
+
+    public string Soft
+    {
+        get => _soft;
+        set => Set(ref _soft, value ?? string.Empty);
+    }
+
+    public string Hard
+    {
+        get => _hard;
+        set => Set(ref _hard, value ?? string.Empty);
+    }
+
+    /// <summary>A limit with no name is not a limit, so the name alone decides.</summary>
+    public override bool IsEmpty => _name.Trim().Length == 0;
+
+    public UlimitSpec ToUlimit() => new()
+    {
+        Name = _name.Trim(),
+        Soft = _soft.Trim(),
+        Hard = _hard.Trim(),
+    };
+}
+
+/// <summary>One <c>--sysctl</c>: a namespaced kernel parameter.</summary>
+public sealed class SysctlRow : EditRow
+{
+    private string _key = string.Empty;
+    private string _value = string.Empty;
+
+    public SysctlRow() { }
+
+    public SysctlRow(SysctlSpec sysctl)
+    {
+        _key = sysctl.Key;
+        _value = sysctl.Value;
+    }
+
+    public string Key
+    {
+        get => _key;
+        set => Set(ref _key, value ?? string.Empty);
+    }
+
+    public string Value
+    {
+        get => _value;
+        set => Set(ref _value, value ?? string.Empty);
+    }
+
+    public override bool IsEmpty => _key.Trim().Length == 0;
+
+    public SysctlSpec ToSysctl() => new() { Key = _key.Trim(), Value = _value.Trim() };
+}
+
+/// <summary>
+/// One string, for a list whose rows are single values: a command argument, a DNS server. The
+/// property is called Value rather than Text so a DataTemplate binding it cannot be confused with
+/// the TextBox's own Text.
+/// </summary>
+public sealed class TextRow : EditRow
+{
+    private string _value = string.Empty;
+
+    public TextRow() { }
+
+    public TextRow(string value) => _value = value;
+
+    public string Value
+    {
+        get => _value;
+        set => Set(ref _value, value ?? string.Empty);
+    }
+
+    public override bool IsEmpty => _value.Trim().Length == 0;
+
+    public string ToText() => _value.Trim();
+}
+
+/// <summary>One <c>--label</c>.</summary>
+public sealed class LabelRow : EditRow
+{
+    private string _key = string.Empty;
+    private string _value = string.Empty;
+
+    public LabelRow() { }
+
+    public LabelRow(LabelSpec label)
+    {
+        _key = label.Key;
+        _value = label.Value;
+    }
+
+    public string Key
+    {
+        get => _key;
+        set => Set(ref _key, value ?? string.Empty);
+    }
+
+    public string Value
+    {
+        get => _value;
+        set => Set(ref _value, value ?? string.Empty);
+    }
+
+    public override bool IsEmpty => _key.Trim().Length == 0;
+
+    public LabelSpec ToLabel() => new() { Key = _key.Trim(), Value = _value.Trim() };
+}
+
+/// <summary>One <c>--add-host</c>: a line docker writes into the container's /etc/hosts.</summary>
+public sealed class HostEntryRow : EditRow
+{
+    private string _name = string.Empty;
+    private string _address = string.Empty;
+
+    public HostEntryRow() { }
+
+    public HostEntryRow(HostEntrySpec entry)
+    {
+        _name = entry.Name;
+        _address = entry.Address;
+    }
+
+    public string Name
+    {
+        get => _name;
+        set => Set(ref _name, value ?? string.Empty);
+    }
+
+    public string Address
+    {
+        get => _address;
+        set => Set(ref _address, value ?? string.Empty);
+    }
+
+    public override bool IsEmpty => _name.Trim().Length == 0 && _address.Trim().Length == 0;
+
+    public HostEntrySpec ToEntry() => new() { Name = _name.Trim(), Address = _address.Trim() };
+}
+
+/// <summary>One <c>--log-opt</c>.</summary>
+public sealed class LogOptionRow : EditRow
+{
+    private string _key = string.Empty;
+    private string _value = string.Empty;
+
+    public LogOptionRow() { }
+
+    public LogOptionRow(LogOptionSpec option)
+    {
+        _key = option.Key;
+        _value = option.Value;
+    }
+
+    public string Key
+    {
+        get => _key;
+        set => Set(ref _key, value ?? string.Empty);
+    }
+
+    public string Value
+    {
+        get => _value;
+        set => Set(ref _value, value ?? string.Empty);
+    }
+
+    public override bool IsEmpty => _key.Trim().Length == 0;
+
+    public LogOptionSpec ToOption() => new() { Key = _key.Trim(), Value = _value.Trim() };
 }

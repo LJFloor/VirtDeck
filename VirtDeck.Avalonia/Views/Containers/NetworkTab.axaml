@@ -11,6 +11,82 @@
       <ComboBox Grid.Column="1" Name="NetworkBox" HorizontalAlignment="Stretch" />
     </Grid>
 
+    <!-- Everything docker refuses under container: networking, where the container joins another
+         one's namespace and has no host name, resolver or hosts file of its own. Note this is a
+         narrower rule than the ports one below: measured on docker 29, host networking refuses a
+         published port and accepts all three of these. -->
+    <StackPanel Name="AddressingSection" DockPanel.Dock="Top" Margin="0,0,0,12" Spacing="6">
+      <Grid ColumnDefinitions="110,*" Margin="0,0,0,6">
+        <TextBlock Grid.Column="0" Text="Host name" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" Name="HostnameBox"
+                 PlaceholderText="the container's own id" />
+      </Grid>
+
+      <HeaderedContentControl Padding="0" Theme="{StaticResource JbGroupBox}" Header="DNS servers">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="DnsTools" Margin="8,6,8,6" ShowMove="True" />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Address" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="DnsList" Background="Transparent" Padding="0" BorderThickness="0"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:TextRow">
+                <Grid ColumnDefinitions="*" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" PlaceholderText="1.1.1.1"
+                           Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Padding="0" Theme="{StaticResource JbGroupBox}" Header="Extra hosts">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="HostEntryTools" Margin="8,6,8,6" />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Name" />
+              <TextBlock Grid.Column="1" Classes="columnheader" Text="Address" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="HostEntryList" Background="Transparent" Padding="0" BorderThickness="0"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:HostEntryRow">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" PlaceholderText="db"
+                           Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <TextBox Grid.Column="1" PlaceholderText="10.0.0.5"
+                           Text="{Binding Address, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <TextBlock Classes="note"
+                 Text="A host name left empty leaves docker's own, which is the container's id. The DNS servers replace what the container would otherwise inherit from the host, in order; the extra hosts are lines written into its /etc/hosts." />
+    </StackPanel>
+
     <HeaderedContentControl Name="PortsSection" Padding="0"
                             Theme="{StaticResource JbGroupBox}" Header="Port mappings">
       <DockPanel>

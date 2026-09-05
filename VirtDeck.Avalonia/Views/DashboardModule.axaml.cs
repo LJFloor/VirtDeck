@@ -57,6 +57,18 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
     /// </summary>
     private IReadOnlyList<MountUsage> _filesystems = [];
 
+    /// <summary>The cards the host reported, in PCI order. UI thread only.</summary>
+    private IReadOnlyList<GpuCard> _cards = [];
+
+    /// <summary>
+    /// The slots that have a line on the GPU graph, in card order. A series index belongs to a
+    /// card and not to a position in the tick's list: the readings arrive as an nvidia-smi run
+    /// followed by an AMD sysfs walk, so a card that misses one tick would otherwise shift every
+    /// card after it onto its neighbour's line and redraw one GPU's history as another's. A card
+    /// earns a line the first tick it reports and keeps it, so the mapping settles and stays.
+    /// </summary>
+    private readonly List<string> _gpuSeries = [];
+
     private TableSort? _mountSortOrNull;
     private TableSort MountSort => _mountSortOrNull!;
 
@@ -79,12 +91,16 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
 
         // No ceiling to pin a throughput to, so both autoscale, with a 1 KiB/s floor so an idle
         // host reads as idle rather than having its noise amplified to full height.
-        NetworkGraph.TwoSeries = true;
         NetworkGraph.MinScale = 1024;
         NetworkGraph.Format = Rate;
-        DiskGraph.TwoSeries = true;
         DiskGraph.MinScale = 1024;
         DiskGraph.Format = Rate;
+
+        // A utilisation figure is a percentage of a known whole, so it pins like the CPU one. How
+        // many lines it carries is not set here: the graph takes that off the widest sample it is
+        // given, which is how one line per card works without knowing the count in advance.
+        GpuGraph.FixedMax = 100;
+        GpuGraph.Format = Percent;
 
         foreach (var graph in Graphs())
         {
@@ -112,7 +128,8 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         PaintSamplerState();
     }
 
-    private IEnumerable<MetricGraph> Graphs() => [CpuGraph, MemoryGraph, NetworkGraph, DiskGraph];
+    private IEnumerable<MetricGraph> Graphs() =>
+        [CpuGraph, MemoryGraph, NetworkGraph, DiskGraph, GpuGraph];
 
     private HostMetricsService Metrics =>
         _metrics ?? throw new InvalidOperationException("Module not attached.");
@@ -216,6 +233,12 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
     {
         var previous = _previous;
         _previous = sample;
+
+        // Above both early returns below, and deliberately. They exist only because a rate needs
+        // two samples; a GPU states its utilisation outright, so gating it behind them would throw
+        // the first reading away and blank the graph through a counter wrap the GPU had no part in.
+        DrawGpu(sample);
+
         if (previous is null) { PaintSamplerState(); return; }
 
         var rates = HostMetricsService.Rates(previous, sample);
@@ -303,9 +326,100 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         NetworkTitle.SetValue(ToolTip.TipProperty, Counted("interface", overview.Nics));
         DiskTitle.SetValue(ToolTip.TipProperty, Counted("disk", overview.Disks));
 
+        _cards = overview.Gpus;
+        DrawCards();
+
         _filesystems = overview.Filesystems;
         _mountOrder = _filesystems.Select(f => f.Mount).ToList();
         PopulateMounts();
+    }
+
+    /// <summary>
+    /// Names what is in the machine. Every display-class card is listed, whatever driver owns it,
+    /// so one handed to a guest through vfio-pci is stated rather than quietly missing, and so is
+    /// an Intel card nothing here can ask about. That is the whole reason the cards are enumerated
+    /// from PCI rather than from a vendor tool.
+    /// </summary>
+    private void DrawCards()
+    {
+        GpuRow.IsVisible = _cards.Count > 0;
+        if (_cards.Count == 0) return;
+
+        // Two of the same card is the ordinary multi-GPU box, and "2 x <name>" is shorter and
+        // easier to read than the name written out twice.
+        var labels = _cards.Select(c => c.Label).ToList();
+        GpuModelText.Text = labels.Distinct(StringComparer.Ordinal).Count() == 1 && labels.Count > 1
+            ? $"{labels.Count} x {labels[0]}"
+            : string.Join(", ", labels);
+
+        var lines = _cards.Select(c =>
+        {
+            var note = c.PassedThrough ? " - passed through to a guest"
+                     : c.Driver == "none" ? " - no driver bound"
+                     : $" - {c.Driver}";
+            return $"{c.Slot}  {c.Label}{note}";
+        });
+        GpuModelText.SetValue(ToolTip.TipProperty, string.Join("\n", lines));
+    }
+
+    /// <summary>
+    /// One line per card that can report, and no box at all where nothing can. The graph is hidden
+    /// rather than drawn empty for the reason the module tabs are: nobody goes looking for a graph,
+    /// and a graph of nothing is a worse answer than no graph. The Host box above still names the
+    /// card, so a GPU that cannot be measured is stated somewhere rather than nowhere.
+    /// </summary>
+    private void DrawGpu(HostSample sample)
+    {
+        // A card earns its line the first tick it reports and keeps it thereafter, in card order
+        // rather than arrival order, so a line never changes which GPU it is about.
+        foreach (var card in _cards)
+            if (!_gpuSeries.Contains(card.Slot) && sample.Gpus.Any(g => g.Slot == card.Slot))
+                _gpuSeries.Add(card.Slot);
+
+        GpuBox.IsVisible = _gpuSeries.Count > 0;
+        if (_gpuSeries.Count == 0) return;
+
+        // NaN is "this card said nothing this tick", which the graph draws as a break. A zero
+        // there would be a reading nobody took, and an idle GPU genuinely reporting 0% has to stay
+        // a different answer from a card that has gone quiet.
+        var values = new double[_gpuSeries.Count];
+        var header = new List<string>();
+        var tips = new List<string>();
+
+        for (var i = 0; i < _gpuSeries.Count; i++)
+        {
+            var slot = _gpuSeries[i];
+            var reading = sample.Gpus.FirstOrDefault(g => g.Slot == slot);
+            values[i] = reading?.UtilPercent ?? double.NaN;
+
+            var name = _cards.FirstOrDefault(c => c.Slot == slot)?.Label ?? slot;
+            var util = reading?.UtilPercent is { } u ? Percent(u) : "-";
+
+            header.Add(_gpuSeries.Count == 1 ? Sentence(reading) : $"GPU{i} {util}");
+            tips.Add($"GPU{i}  {name}  {Sentence(reading)}");
+        }
+
+        GpuGraph.Push(sample.Uptime, values);
+        GpuValue.Text = string.Join(" · ", header);
+        GpuTitle.SetValue(ToolTip.TipProperty, string.Join("\n", tips));
+    }
+
+    /// <summary>
+    /// Everything one card is saying, in one line. Each figure is dropped where the card declined
+    /// to state it, rather than drawn as a zero: a GPU with no power sensor is not a GPU drawing
+    /// no power.
+    /// </summary>
+    private static string Sentence(GpuReading? reading)
+    {
+        if (reading is null) return "not reporting";
+
+        var parts = new List<string>();
+        if (reading.UtilPercent is { } u) parts.Add(Percent(u));
+        if (reading.MemUsedMb is { } used && reading.MemTotalMb is { } total && total > 0)
+            parts.Add($"{MountRow.Bytes(used * 1024 * 1024)} of {MountRow.Bytes(total * 1024 * 1024)}");
+        if (reading.TempC is { } t) parts.Add($"{t:0} C");
+        if (reading.PowerW is { } p) parts.Add($"{p:0} W");
+        return parts.Count > 0 ? string.Join(" · ", parts) : "no figures";
     }
 
     /// <summary>

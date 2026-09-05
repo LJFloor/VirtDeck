@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.LabelsTab">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12" Spacing="6">
+      <TextBlock Classes="note"
+                 Text="Metadata carried on the container for whatever reads it: an orchestrator, a reverse proxy picking up routing rules, a backup script. Unlike an environment variable it is not visible to the process inside." />
+      <TextBlock Name="ComposeWarning" Classes="error" IsVisible="False"
+                 Text="This container carries docker compose's own labels, which is how the Stacks tab knows it belongs to a project. Removing them takes it out of that stack." />
+      <TextBlock Name="InheritedWarning" Classes="error" IsVisible="False"
+                 Text="The image this container came from could not be read, so labels the image itself declares are listed here too and saving writes them on as if they had been chosen." />
+    </StackPanel>
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Labels" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="LabelTools" Margin="8,6,8,6" />
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="Name" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+          </Grid>
+        </Border>
+
+        <ListBox Name="LabelList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="rows:LabelRow">
+              <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+                <TextBox Grid.Column="0" PlaceholderText="com.example.role"
+                         Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Grid.Column="1" PlaceholderText="web"
+                         Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

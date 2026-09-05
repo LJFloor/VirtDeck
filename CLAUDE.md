@@ -463,10 +463,11 @@ The console can redirect a physical USB device into the guest (the SPICE **usbre
 
 ## Dashboard
 
-`DashboardModule` is the host itself: who it is, what it is made of, how full its disks are, how
-many VMs and containers it is running, whether it has updates pending, over live CPU, memory,
-network and disk IO graphs. `Views/DashboardModule`, `Views/MountRow`, `Controls/MetricGraph`,
-`Core/Services/HostMetricsService`, `Core/Models/HostSample`.
+`DashboardModule` is the host itself: who it is, what it is made of, what graphics cards are in
+it, how full its disks are, how many VMs and containers it is running, whether it has updates
+pending, over live CPU, memory, network, disk IO and GPU graphs. `Views/DashboardModule`,
+`Views/MountRow`, `Controls/MetricGraph`, `Core/Services/HostMetricsService`,
+`Core/Models/HostSample`.
 
 It is the module the shell lands on, and **being first in the side menu is the whole of how**.
 `ApplyRelevance` settles the first selection onto the first *visible* tab, and a module naming no
@@ -530,12 +531,86 @@ different landing page per host.
   ten so the figure on the left is readable and does not twitch every sample, and a 1 KiB/s floor
   stops an idle host having its noise amplified to full height. **The figure drawn on the graph is
   the scale, not the reading**; the reading is in the group box header, where it can be a sentence
-  and can wear its series colour, which is the whole legend the two-series graphs need.
-- **The two series colours are `JbCodeNumber` and `JbCodeString`**, the code editor's blue and
-  green. They are the app's only palette already chosen to read on both faces, so a graph needs no
-  brush key of its own, and the order is the same in all four, so receive and read are always the
-  colour transmit and write are not. Gridlines are the `JbGroupBoxBorder` alpha-grey for the same
-  reason that brush sits outside the theme dictionaries.
+  and can wear its series colour, which is the whole legend a multi-series graph needs.
+- **The series colours are the `JbCode*` palette in one fixed order**, beginning `JbCodeNumber` and
+  `JbCodeString`, the code editor's blue and green. They are the app's only palette already chosen
+  to read on both faces, so a graph needs no brush key of its own, and the order is the same in
+  every graph, so receive and read are always the colour transmit and write are not. `MetricGraph`
+  takes **as many series as the widest sample it has been pushed**, rather than a count declared up
+  front: two for the throughput pair, one each for CPU and memory, and one per GPU, which is a
+  number only the host can say. Past the end of the palette the colours cycle, which is the honest
+  failure for a machine with seven graphics cards in it. Gridlines are the `JbGroupBoxBorder`
+  alpha-grey for the same reason that brush sits outside the theme dictionaries.
+- **What graphics cards are in the machine is read off PCI, not off a vendor tool.** The preamble
+  walks `/sys/bus/pci/devices/*/class` for anything beginning `0x03` and states each card once as
+  an `x` record, which covers VGA (`0300`),
+  3D controllers (`0302`) and display controllers (`0380`), so a compute card with no output is
+  listed and, more to the point, so is a card **bound to `vfio-pci` for a guest**: it is named, with
+  its driver saying why it reports nothing. Asking `nvidia-smi` instead would name the cards that
+  answer and silently drop the rest, which on a passthrough host is the interesting half.
+  Grepping `lspci` for `vga|3d|display` is the trap and was tried: it matched an AMD **USB
+  controller** whose device id is `43d5`. The model name comes from `lspci -vmm -s <slot>`, whose
+  tab-separated `Key:\tValue` lines make `Device:` unambiguous, where `lspci -mm`'s quoted
+  positional form has an unquoted `-ra1 -p00` run in the middle of it that a field split swallows
+  the subsystem vendor on. A host with no pciutils still gets the vendor and the raw ids off sysfs,
+  because the numbers the kernel already gave us are more true than "unknown".
+- **The GPU allow-lists are decided once before the loop, exactly as `NETS` and `DISKS` are**, and
+  that is what makes this proportionate rather than a standing tax: a host with no GPU pays
+  **nothing** per tick, not even a `command -v`. `nvidia-smi` is asked a **question** rather than
+  looked up on the path, because the binary is present on a host whose driver is not loaded and
+  there it fails, which is `DockerService.ProbeCompose`'s rule that output is not the same as an
+  answer. AMD is `amdgpu`'s own sysfs (`gpu_busy_percent`, the `mem_info_vram_*` pair and the
+  hwmon nodes beside them), which is world-readable and needs no package on the host, so the whole
+  sampler stays un-elevated. `/sys/class/drm/card[0-9]*` **also matches connector nodes**
+  (`card1-DP-1`), whose `device` symlink resolves to the card rather than to the PCI device, so a
+  dash guard is required. **Intel is named and not graphed**, because there is no un-elevated
+  source for its utilisation, which is the absent-tooling rule as it applies to one series.
+- **A runtime-suspended card is not woken to read it.** Each tick the NVIDIA slots are filtered on
+  `power/runtime_status` and the query runs restricted to the awake ones with `-i` (verified that
+  it takes a PCI bus id and a comma list, so it is one process and not one per card); with every
+  card suspended it is skipped outright. That is `smartctl -n standby`'s argument: a reading is not
+  worth defeating the power management the user configured, and an unguarded two-second poll would
+  hold an Optimus laptop's dGPU awake for the whole session. **The limit is stated rather than
+  hidden**: NVML initialises over every card it finds, so on a multi-GPU box reading one awake card
+  may still touch a suspended one, and what the guard reliably buys is the all-suspended case,
+  which is the laptop.
+- **A GPU reading is not a rate, and that is the one place this module departs from its own model.**
+  Every other figure the Dashboard draws is a delta between two samples, which is why `HostSample`
+  is raw and nothing else; a utilisation percentage is a reading the tool states outright, so it
+  exists in one sample and deriving it from two would be wrong. Three things follow. It rides
+  `HostSample.Gpus` rather than `HostRates`, which is left untouched. It is drawn **above**
+  `OnSample`'s two early returns, which exist only because a rate needs two samples, so gating it
+  behind them would throw the first reading away and blank the graph through a counter wrap the GPU
+  had no part in. And it is the one field `Publish` **resets**: that method deliberately keeps the
+  last sample so a tick which lost a record redraws its previous value rather than a zero, and for
+  a *list* that rule inverts, since a card that stopped reporting would otherwise be redrawn from a
+  stale entry forever.
+- **`N/A` is null and never 0.** `nvidia-smi` writes that literal for a field a particular card
+  does not keep, and a missing sysfs node is the same answer, so every figure on a reading is
+  nullable: an idle GPU reports 0% and a card with no power sensor reports nothing at all, and
+  drawing the second as the first invents a number. Same rule and same reason as ZFS's `-`. A
+  malformed `s` record is **dropped rather than parsed**, because `nvidia-smi` writes prose to
+  stdout for some failures (`No devices were found`, measured) and the record's own `sed` prefix
+  would otherwise turn that into a reading.
+- **A series index belongs to a card, by PCI slot, and never to a position in the tick's list.**
+  That list is the concatenation of an `nvidia-smi` run and an AMD sysfs walk, so a card that
+  stopped reporting for one tick would shift every card after it onto its neighbour's line and
+  colour, silently redrawing one GPU's history as another's. It is the merge-by-id rule the tables
+  already follow, and the slot is the id. It is also where a measured mismatch bites:
+  `nvidia-smi`'s `pci.bus_id` writes an **eight-digit domain** (`00000000:29:00.0`) where sysfs
+  writes four (`0000:29:00.0`), so without normalising it every NVIDIA reading joins no card at
+  all. A card with no reading this tick is pushed as `NaN`, which the graph reads as absence and
+  breaks the line across, rather than as a real 0. The readings themselves are the `s` records, one
+  per card per tick, emitted **above** the `/proc` awk whose `END` prints the `e` that closes the
+  sample.
+- **The graph is utilisation only, always one line per card, and the rest is in the header.** VRAM,
+  temperature and power are a sentence per card in the group box header and its tooltip, because
+  they are four different units and a second series per GPU would double the lines to say something
+  the header says better. The box spans the full width, being the one graph carrying N lines, and a
+  host where nothing reported **draws no box at all** rather than an empty graph: nobody goes
+  looking for a graph, so this is the page-level half of the absent-tooling rule, the call the
+  Status box already makes for its own rows. The Host box still names the card either way, which is
+  what keeps an Intel or a vfio-bound card stated rather than silently missing.
 - **The update tile is read once per host, not once per page, and Refresh is how somebody asks
   again.** `PackageService.ListAsync` is seconds of work holding the shared lock, and this is the
   page the shell lands on at connect, so it runs in the background after the first paint and the
@@ -688,7 +763,7 @@ The fourth tab: docker **compose projects**. It lists every project on the host,
 - **Save replaces, and the order is what makes that safe.** `DockerService.SaveAsync` stops the old container, **renames it out of the way**, creates the new one under the wanted name, and only then removes the old; a rejected `docker create` renames the old back and restarts it if it was running. The obvious order (stop, remove, create) leaves the user with nothing when docker refuses the new container, which it does for something as ordinary as a host port somebody else holds. `docker create` plus a separate `docker start` rather than `docker run -d`, so "and start" is a real branch. No `-v` on the `docker rm`, so named volumes outlive the container, and the confirmation says so.
 - **Three buttons, not two.** Cancel, Save, and a primary that also runs it ("Save and start" on a new one, "Save and restart" on an existing one, because saving replaced it). Which button was pressed is the only thing that decides it. The replace confirmation is keyed on there **being** an existing container, not on which button was pressed.
 - **The pull is written out longhand** because `RunSudoCommandStreaming` neither escapes nor wraps. It is worth the streaming call: its own connection keeps the list refreshing while a large image comes down, and docker's output is what the dialog shows. Pulling only happens when `docker image inspect` says the image is absent, so re-saving never re-pulls.
-- **Reading a container back uses `HostConfig.Binds`, not `.Mounts`.** `Binds` is exactly what `-v` put there; `.Mounts` also lists the anonymous volumes the image's own `VOLUME` directive created, which the user never asked for and which `docker create` produces again by itself. `InspectAsync` parses one `docker inspect` with `System.Text.Json` rather than Go templates, because env, mounts, ports and devices are all multi-valued; it starts at the first `[`, since `RunSudoCommand` merges stderr in.
+- **Reading a container back uses `HostConfig.Binds`, not `.Mounts`.** `Binds` is exactly what `-v` put there; `.Mounts` also lists the anonymous volumes the image's own `VOLUME` directive created, which the user never asked for and which `docker create` produces again by itself. `InspectAsync` parses with `System.Text.Json` rather than Go templates, because env, mounts, ports and devices are all multi-valued, and it reads tagged records rather than seeking to the first `[`, so a daemon warning merged in from stderr is a line matching no tag instead of something to skip past.
 - **The image field is an `AutoCompleteBox`, not a `ComboBox`.** Avalonia's `ComboBox` has no editable mode, and the field must list what the host has *and* accept a reference that is not there yet. The volume picker is the opposite case and is a plain `ComboBox`. Either way the window opens before `LoadCatalogAsync` answers, so a picker holds its own value whether or not the catalog arrives; `MountRow.RebuildVolumes` keeps whatever the mount already says among its items.
 - **`DockerCatalog` is what the pickers need, not what docker was asked.** Its device nodes come off the host filesystem (`find /dev`, pseudo terminals dropped, capped, in the same tagged-record round trip), because nothing else can say what is plugged in and `/dev/ttyUSB0` typed from memory is how that field goes wrong. Device permissions are three check boxes rather than a box holding `rwm`, which makes the two ways of writing nonsense unrepresentable instead of validated.
 - **The network decides whether ports exist.** On `host`, `none` or `container:x` there is no namespace to publish into and docker refuses the pair, so the Network page takes the mappings off screen and `BuildCreateArgv` drops them, while the spec **keeps** them. `PortRow` also carries a **host address the page does not show**, because docker can bind a published port to one interface and dropping the field would quietly move a port off loopback onto every interface.
@@ -696,6 +771,48 @@ The fourth tab: docker **compose projects**. It lists every project on the host,
 - **Those lists are `ListBox`es, where the answer-file window's tables are `ItemsControl`s**, and the difference is the minus button: a row there is only typed into, here one has to be *pointed at*. That brings a trap: a `ListBox` selects on pointer press, but a `TextBox` marks the press handled, so clicking into a cell would leave the minus aimed at the previous selection. `RowList.Bind` therefore selects a row when **anything inside it takes focus**.
 - **A typed-into table needs `JbFormRow`, not `JbTableRow`.** A selector is one tab stop by design, which is wrong for a grid of text boxes, so the derived theme sets `TabNavigation=Continue` and `IsTabStop=False`. The rows are also **not virtualised**: an unrealised row has no cells for Tab to reach.
 - **Validation is per page and selects the page.** `IContainerTab.Validate` answers the first thing the user has to change, and the window walks `TabItem`s rather than their contents so it can select the page that said so.
+
+#### The image half of the read-back
+
+**A container reports the image's settings as its own, and telling the two apart is why `Inspect` is two inspects.** Measured against `nginx:alpine` on docker 29.1.3: a container created with nothing but a name reports `Config.Entrypoint` `["/docker-entrypoint.sh"]`, `Config.Cmd` `["nginx","-g","daemon off;"]`, the image's seven `Env` entries, its `maintainer` label, `WorkingDir` `/` and `StopSignal` `SIGQUIT`. Nothing on the container says which of those anybody chose. Since **editing recreates**, writing them back as explicit flags would bake the image's values into the container permanently and a later image update would stop reaching it.
+
+So `InspectScript` runs `docker inspect` on the container and then, best-effort, `docker image inspect` on its resolved `.Image`, two tagged records in one round trip. `Entrypoint`, `Cmd`, `Env`, `Labels`, `WorkingDir`, `StopSignal` and `User` are dropped where they equal the image's. Only the container half carries `|| exit $?`; the image half is fenced, because an image deleted out from under a running container must still leave it editable, and its absence is carried as `ContainerSpec.ImageConfigKnown` rather than guessed at. **When the image could not be read nothing is subtracted**, which keeps the container doing exactly what it does now at the cost of pinning those values, and the Command and Labels pages draw a `JbErrorForeground` line saying so: dropping them unread could quietly take a `--user` off a container. This also fixed a wart that predated it, the Environment page importing the image's own variables on every edit.
+
+**`Cmd` is subtracted only when the entry point was inherited too.** Docker discards the image's `CMD` the moment an entry point is given (measured: `--entrypoint /bin/sh` against `nginx:alpine` yields `Cmd null`, not the image's). So a container carrying its own entry point keeps its command verbatim, empty included, because re-emitting nothing is what reproduces it, while subtracting a command that happened to match the image's would turn it into `null` on the next save.
+
+**`--entrypoint` takes one argv element and an entry point may have several**, so a multi-element one is **folded**, at argv time rather than on the way in: the first element becomes the flag and the rest go on the front of the words after the image. `entrypoint [a,b] + cmd [c]` execs exactly what `entrypoint [a] + cmd [b,c]` does, so nothing about the container changes and the next edit shows what will actually run. The read-back therefore stores both lists verbatim, and `BuildCreateArgv` is the one place that knows about the fold.
+
+**Six fields are reported whether or not anybody set them, and each one taken at face value would turn a docker default into the user's choice.** `MemorySwap` is never modelled, read or emitted, because docker writes it at twice `--memory` by itself. `ShmSize` is ignored at exactly 64 MiB. `Runtime` and `LogConfig.Type` always name the effective one, which is why `DockerCatalog.DefaultRuntime` and `DefaultLogDriver` exist and the pages rather than `Inspect` decide whether the answer was a choice. Those two also name the first entry of each picker, **`Host default (json-file)`, never "Docker default"**: the entry means write no flag at all, and what a container then gets is whatever that daemon is configured for, so a label claiming docker's own default would be wrong on exactly the host somebody has configured. A host that would not say gets the bare `Host default`. `Config.Hostname` is a container's own id prefix when nobody named it, so writing it back would give the replacement the **old container's id** to answer to. And `Config.Healthcheck` is `null` for inherited, `{"Test":["NONE"]}` for explicitly disabled and a real test otherwise, which is three states and not a bool.
+
+#### The six newer pages
+
+Eleven pages now: General, **Command**, Volumes, Network, Environment, **Labels**, Devices, **Resources**, **Security**, **Health**, **Logging**. The five existing ones keep their relative order so nothing moved under anybody's hand, and each new one is still a `TabItem` plus a `UserControl`. **Logging is Health's other half, split off**: both were put together on the reading that each is about what a container says about itself, and they are not one subject, a check being something the container runs and a driver being where its output is written. It takes the Network page's shape, the one field that decides the page standing outside any box and the options table it governs being the box.
+
+- **What runs is two text boxes over two argv lists, and the encoding between them is exactly reversible.** A command is `["/bin/sh","-c","a && b"]` and never a line, so plain whitespace splitting would destroy it, and destroy it **silently**: editing recreates, so a box that read an argument back wrong writes that wrong argument into the replacement. `ContainerConsoleDialog` refuses word splitting for the same reason and can afford to, because nothing it types has to survive. So `CommandTab.Split`/`Join` are a defined little encoding rather than half a shell: whitespace separates, a single or double quote groups and is removed, a backslash escapes the character after it, an argument holding any of those is written quoted, an empty one is written `""`, and nothing else means anything, so a `$HOME` or an `&&` reaches the container as those characters. The one thing `Split` cannot answer is a quote that is never closed, so `Validate` refuses that first.
+- **The entry point is the same shape and the same box, which costs one state.** `--entrypoint ""` removes an image's entry point where an empty box inherits it, and two text boxes cannot hold three states; the tick that used to carry it is gone with the list it sat above. A container created elsewhere with an emptied entry point therefore gets the image's back if it is edited here.
+- **Labels get a page rather than a second list on Environment.** A label is metadata *about* the container for other tools, where a variable is input *to* the process, and their validators genuinely differ. The real reason is narrower: this list is the only place a container's `com.docker.compose.*` membership is visible, and editing a compose container from this window could silently take it out of its stack, so the page says so in `JbErrorForeground` when it sees those labels.
+- **The capability list is the whole setting, not a pair of overrides.** The answer-file window's bloatware page applied to a different table: a tick means the container will have it, docker's own fourteen start ticked, and `BuildCreateArgv` computes the delta. Both halves of `Core/Models/LinuxCapabilities.cs` are **measured rather than copied from documentation**, the 41 names in kernel bit order read back through a container's `CapBnd` and the default 14 read out of that same mask. The table was checked by decoding that mask against it (docker's default set is `0xa80425fb`, and the names at those bits are exactly the fourteen), which is the check to repeat if a name is ever added: a transcription slip in a bit-ordered list is otherwise invisible.
+- **The moment anything is dropped, the whole set is spelled `--cap-drop ALL` plus every tick**, rather than a drop per unticked default. It is docker's own idiom, and it is the only spelling that also reaches a capability this build's table does not name, so a daemon whose default set is not the fourteen measured here still ends up with exactly what the list says. Verified byte-identical: `--cap-drop MKNOD` and the ALL rewrite both give `CapBnd` `00000000a00425fb`.
+- **A capability past the host's `/proc/sys/kernel/cap_last_cap` is drawn disabled with that as its reason**, not left off the list, because the list is the whole setting and a name silently missing from it would read as a capability that does not exist. A capability read back that the table does not name is kept as an extra row for the same reason. A host that could not be asked shows every row rather than none, which is the call the shell's own module probe makes when its probe fails.
+- **Privileged greys the capability list out but the spec keeps what was ticked**, exactly as the Network page keeps its port mappings under host networking, and `BuildCreateArgv` is what drops the flags. Docker records both anyway. It also writes `label=disable` itself for a privileged container, which is why the security-option passthrough skips that one entry rather than re-emitting a flag nobody set.
+- **Any other `--security-opt` is kept and written back untouched although nothing draws it**, which is `PortSpec.HostIp`'s rule: a setting this window does not model is still a setting.
+- **The DNS list is now the one list in this window whose order is the answer**, resolvers being tried in the order they are given, so it is the sole user of `RowToolbar.ShowMove` and `RowList.Bind(..., move: true)`.
+- **Host name, DNS and extra hosts hide under a narrower predicate than ports do.** `DockerService.SharesNetworkNamespace` is true only for `container:x`. Measured: docker refuses all three there with "conflicting options: hostname and the network mode", and **accepts all three under `host`**, which refuses only a published port. Having no namespace to publish into is a different question from having no `/etc/hosts` of one's own, so the two predicates are two.
+- **Every number is 0 for "say nothing"**, so a Resources page nobody touched writes no flags and the container gets docker's own defaults rather than VirtDeck's opinion of them. `--cpus` is written with `CultureInfo.InvariantCulture`, because a decimal comma is this machine's own locale and docker would refuse `1,5`.
+- **`--no-healthcheck` is emitted alone**, because docker's CLI refuses it beside any other `--health-*`. Durations are read back from **nanoseconds** and written in docker's `30s` spelling. Docker's CLI can only produce the shell form (`--health-cmd` always writes `CMD-SHELL`), so an image's exec-form check is shown as a line and written back as a shell command; there is no flag that would reproduce the exec form, so there is nothing to model. The four boxes are the one place on these pages where **0 does not mean "say nothing"**: they open on docker's own 30, 30, 0 and 3, and their minimums put the old reading out of reach, because a box showing a figure that silently means a different figure is worse than a box showing the figure. The grace period keeps 0, that being docker's answer there and not a blank. The note that used to explain all of this is gone with it, and so is the logging one.
+
+#### GPU passthrough
+
+**A GPU being present is not proof it can be passed through, and that is the whole shape of this feature.** Measured on the development machine: an RTX 2080 SUPER, a working un-elevated `nvidia-smi`, `/dev/nvidia0` present, `docker info` Runtimes holding only `io.containerd.runc.v2` and `runc`, and **no NVIDIA container toolkit**. There, `docker create --gpus all` **succeeds** and `docker start` then fails with `could not select device driver "" with capabilities: [[gpu]]`. So create-time refusal cannot be used as validation and the picker has to be gated before the fact.
+
+- **The probe is `nvidia-container-runtime-hook` on the path, because that is the binary the daemon execs.** `--gpus` is served by dockerd's own nvidia device driver, which it registers when it finds that hook; an `nvidia` entry in the Runtimes map is a *different* feature, the one `--runtime nvidia` selects, and is neither necessary nor sufficient. A CDI spec naming nvidia counts too. The runtime list is gathered for the runtime picker and is deliberately not what answers this. It runs through sudo like everything else here, which is right rather than incidental: it is the daemon's path, root's, that decides.
+- **The GPU group is disabled with its reason on hover, never hidden**, the tooltip hanging off an enabled `Border` because a disabled control is not hit-testable. The reason names the missing toolkit, which is the one thing that turns the feature on.
+- **AMD and Intel are not `--gpus` at all** and the page says so: they are `/dev/dri` device nodes, which the Devices page already does correctly.
+- `--gpus` reads back out of `HostConfig.DeviceRequests`, where `Count: -1` is all, a positive `Count` is a number of them and a non-empty `DeviceIDs` is particular ones. Only a request whose `Capabilities` mention `gpu` is read, so another driver's request is left alone rather than redrawn as a GPU setting. On the argv path `device=0,1` needs no quoting, since the shell never sees the comma.
+- **A Go template's last line carries no trailing newline**, so feeding one to `while read` silently drops the last entry: that cost `runc` out of the runtime list the first time. Every list in `CatalogScript` is walked with a `for` loop over an unquoted expansion instead, which is exact here because none of these values can contain whitespace.
+
+
+**Not here yet:** `--memory-swap` and `--memory-swappiness`, for the round-trip reason above, which is the one measured case where reading a value back is worse than not having it; `--tmpfs` and `--mount`, a third mount syntax on a window that already has two, where a read-only root filesystem's writable path is what the Volumes page already answers; `--pid`, `--ipc` and `--uts` namespace modes, which are about joining another container and would belong beside the network mode; `--cgroup-parent`, `--userns`, `--storage-opt` and the block IO family, each needing a conversation about the host's cgroup and storage drivers that nothing in this window is placed to have; CDI devices such as `nvidia.com/gpu=all`, a device that is not a path and so a different field from the Devices page's; `--env-file` and `--label-file`, which are files on the host read at create time and invisible here afterwards; `--dns-search`, `--dns-option`, `--mac-address` and `--link`; and a second network, since `docker create` takes one and the Networks tab's Connect is how a container gets the rest. Editing still **recreates**, so `docker update` is not used even for the handful of settings it reaches: the replace is one shape, and an in-place path for some fields and a replace for the rest would mean diffing a spec against an inspect to decide which, in a window whose whole point is that there is nothing to diff.
 
 ### Reading a container's log
 

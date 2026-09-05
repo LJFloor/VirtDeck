@@ -7,7 +7,10 @@ using Avalonia.Media;
 namespace VirtDeck.Avalonia.Controls;
 
 /// <summary>
-/// A time series or two over the last couple of minutes, drawn as a line with a wash under it.
+/// A time series or several over the last couple of minutes, each drawn as a line with a wash
+/// under it. How many there are is read off the data rather than declared: a graph carries as many
+/// series as the widest sample pushed into it, which is what lets the GPU graph take one line per
+/// card without knowing how many cards there will be until the host says.
 /// The app's third custom-drawn control, after <c>SpiceDisplay</c> and <c>TerminalControl</c>, and
 /// written to match them: primitives out of <see cref="DrawingContext"/>, brushes resolved from the
 /// theme with a literal fallback, nothing hardcoded that a face could change.
@@ -52,19 +55,38 @@ public sealed class MetricGraph : Control
     /// <summary>How the scale figure is written. Percent and byte rate are the two in use.</summary>
     public Func<double, string> Format { get; set; } = v => v.ToString("0.#", CultureInfo.InvariantCulture);
 
-    /// <summary>Whether this graph carries a second series. Set before the first <see cref="Push"/>.</summary>
-    public bool TwoSeries { get; set; }
-
     private readonly List<Sample> _samples = [];
 
-    private IBrush _seriesA = Brushes.SteelBlue;
-    private IBrush _seriesB = Brushes.SeaGreen;
-    private IBrush _fillA = Brushes.Transparent;
-    private IBrush _fillB = Brushes.Transparent;
+    /// <summary>
+    /// How many lines are drawn: the widest sample this graph has been given. Derived rather than
+    /// declared, so a series that appears part way through a session (a GPU the host only now
+    /// reported) starts being drawn without anything having to be told first.
+    /// </summary>
+    private int _series;
+
+    private IReadOnlyList<IBrush> _lines = [Brushes.SteelBlue, Brushes.SeaGreen];
+    private IReadOnlyList<IBrush> _washes = [Brushes.Transparent, Brushes.Transparent];
     private IBrush _grid = new SolidColorBrush(Color.FromArgb(0x33, 0x80, 0x80, 0x80));
     private IBrush _label = Brushes.Gray;
 
-    private readonly record struct Sample(double Time, double A, double B);
+    /// <summary>
+    /// The palette, in order. Six themed keys already chosen to read on both faces, cycled past
+    /// six. No brush key of this control's own: taking the code editor's colours is what
+    /// <see cref="ResolveBrushes"/> has always done and the reason is unchanged.
+    /// </summary>
+    private static readonly string[] SeriesKeys =
+        ["JbCodeNumber", "JbCodeString", "JbCodeConstant", "JbCodeKey", "JbCodeAnchor", "JbCodeComment"];
+
+    private static readonly IBrush[] SeriesFallback =
+        [Brushes.SteelBlue, Brushes.SeaGreen, Brushes.Chocolate,
+         Brushes.MediumPurple, Brushes.DarkGoldenrod, Brushes.Gray];
+
+    /// <summary>
+    /// One reading. <c>Values</c> is as long as the series that reported, which is not always every
+    /// series: a sample shorter than another, or one carrying NaN, means that series said nothing
+    /// that tick, and both are drawn as a break rather than as a zero.
+    /// </summary>
+    private readonly record struct Sample(double Time, double[] Values);
 
     public MetricGraph()
     {
@@ -76,7 +98,16 @@ public sealed class MetricGraph : Control
     /// Adds one reading. <paramref name="time"/> is the host's own clock for that sample, which is
     /// what keeps a rate honest across a client whose clock disagrees.
     /// </summary>
-    public void Push(double time, double a, double b = 0)
+    public void Push(double time, double a) => Push(time, [a]);
+
+    /// <summary>Two series, the pairing the network and disk graphs draw.</summary>
+    public void Push(double time, double a, double b) => Push(time, [a, b]);
+
+    /// <summary>
+    /// Adds one reading across any number of series. <paramref name="values"/> is taken as given:
+    /// a short array is a tick some series did not report, not a tick they reported zero.
+    /// </summary>
+    public void Push(double time, double[] values)
     {
         if (_samples.Count > 0 && time <= _samples[^1].Time)
         {
@@ -87,7 +118,8 @@ public sealed class MetricGraph : Control
             else return;
         }
 
-        _samples.Add(new Sample(time, a, b));
+        _samples.Add(new Sample(time, values));
+        if (values.Length > _series) _series = values.Length;
 
         // Trim to a little more than the window, so the segment entering from the left edge still
         // has the point it comes from.
@@ -103,6 +135,7 @@ public sealed class MetricGraph : Control
     public void Reset()
     {
         _samples.Clear();
+        _series = 0;
         InvalidateVisual();
     }
 
@@ -132,10 +165,10 @@ public sealed class MetricGraph : Control
     /// </summary>
     private void ResolveBrushes()
     {
-        _seriesA = Brush("JbCodeNumber", Brushes.SteelBlue);
-        _seriesB = Brush("JbCodeString", Brushes.SeaGreen);
-        _fillA = Wash(_seriesA);
-        _fillB = Wash(_seriesB);
+        var lines = new IBrush[SeriesKeys.Length];
+        for (var i = 0; i < SeriesKeys.Length; i++) lines[i] = Brush(SeriesKeys[i], SeriesFallback[i]);
+        _lines = lines;
+        _washes = lines.Select(Wash).ToArray();
         _grid = Brush("JbGroupBoxBorder", new SolidColorBrush(Color.FromArgb(0x33, 0x80, 0x80, 0x80)));
         _label = Brush("JbCodeLineNumber", Brushes.Gray);
     }
@@ -173,8 +206,10 @@ public sealed class MetricGraph : Control
             var right = _samples[^1].Time;
             var left = right - WindowSeconds;
 
-            if (TwoSeries) Draw(context, s => s.B, left, right, max, w, h, _seriesB, _fillB);
-            Draw(context, s => s.A, left, right, max, w, h, _seriesA, _fillA);
+            // Backwards, so series 0 ends up on top. Two series always drew B before A for the
+            // same reason and the order of the pair is unchanged by generalising it.
+            for (var i = _series - 1; i >= 0; i--)
+                Draw(context, i, left, max, w, h, _lines[i % _lines.Count], _washes[i % _washes.Count]);
         }
 
         var text = new FormattedText(Format(max), CultureInfo.CurrentCulture,
@@ -191,12 +226,13 @@ public sealed class MetricGraph : Control
     {
         if (FixedMax is { } fixedMax) return fixedMax;
 
+        // NaN is a series that said nothing, and it has to be skipped rather than compared:
+        // Math.Max propagates NaN, so one absent reading would make the whole scale NaN and the
+        // graph would draw nothing at all.
         var peak = 0.0;
         foreach (var s in _samples)
-        {
-            peak = Math.Max(peak, s.A);
-            if (TwoSeries) peak = Math.Max(peak, s.B);
-        }
+            foreach (var v in s.Values)
+                if (!double.IsNaN(v)) peak = Math.Max(peak, v);
 
         if (peak <= MinScale) return MinScale;
 
@@ -206,8 +242,8 @@ public sealed class MetricGraph : Control
         return step * magnitude;
     }
 
-    private void Draw(DrawingContext context, Func<Sample, double> pick,
-                      double left, double right, double max, double w, double h,
+    private void Draw(DrawingContext context, int series,
+                      double left, double max, double w, double h,
                       IBrush line, IBrush wash)
     {
         // A run is an unbroken stretch of samples. A gap wider than a couple of intervals ends one,
@@ -226,6 +262,18 @@ public sealed class MetricGraph : Control
         {
             var s = _samples[i];
 
+            // A sample that does not reach this series, or that carries NaN for it, is one this
+            // series said nothing in. That is a hole in its record exactly as a missed tick is, so
+            // it ends the run rather than being drawn as a zero, which would be a reading nobody
+            // took. The two spellings are the same fact: a short array is a trailing absence and a
+            // NaN is one in the middle.
+            if (s.Values.Length <= series || double.IsNaN(s.Values[series]))
+            {
+                Flush(context, run, h, w, line, wash);
+                run.Clear();
+                continue;
+            }
+
             if (run.Count > 0 && s.Time - _samples[i - 1].Time > gap)
             {
                 Flush(context, run, h, w, line, wash);
@@ -236,7 +284,7 @@ public sealed class MetricGraph : Control
             // negative x, or the leftmost segment is drawn with the wrong slope. The trim in Push
             // bounds how far outside it can be, and ClipToBounds does the rest.
             var x = w * (s.Time - left) / WindowSeconds;
-            var y = h - h * Math.Clamp(pick(s) / max, 0, 1);
+            var y = h - h * Math.Clamp(s.Values[series] / max, 0, 1);
             run.Add(new Point(x, y));
         }
 

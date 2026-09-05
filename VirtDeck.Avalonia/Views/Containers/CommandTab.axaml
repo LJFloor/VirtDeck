@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Containers.CommandTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page">
+
+      <!-- Only drawn when the image could not be read, where nothing below has been separated from
+           what the image itself declares. -->
+      <TextBlock Name="InheritedWarning" Classes="error" IsVisible="False"
+                 Text="The image this container came from could not be read, so anything below may be the image's own setting rather than one somebody chose here. Saving writes all of it into the new container as if it had been chosen." />
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="What runs">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Command" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="EntrypointBox"
+                     PlaceholderText="the image's own entry point" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Arguments" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="ArgumentsBox"
+                     PlaceholderText="the image's own command" />
+          </Grid>
+
+          <TextBlock Classes="note"
+                     Text="Command is the program, docker's --entrypoint, and arguments are the words that follow it. Either left empty keeps the image's own. Giving a command discards the image's arguments, so anything it needs has to be spelled out here too." />
+          <TextBlock Classes="note"
+                     Text="Both are split on spaces. Quote an argument that has to hold one: /bin/sh -c &quot;a &amp;&amp; b&quot; is three arguments, and the quotes group the words rather than being passed on. A quote the container is meant to see is written \&quot;." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Process">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Run as" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="UserBox"
+                     PlaceholderText="the image's own user" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Working directory" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="WorkingDirBox"
+                     PlaceholderText="the image's own" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Stop signal" VerticalAlignment="Center" />
+            <AutoCompleteBox Grid.Row="2" Grid.Column="1" Name="StopSignalBox"
+                             FilterMode="ContainsOrdinal" MinimumPrefixLength="0"
+                             PlaceholderText="the image's own, or SIGTERM" />
+          </Grid>
+
+          <CheckBox Name="InitBox" Content="Run an init process as pid 1" />
+          <TextBlock Classes="subnote"
+                     Text="Reaps orphaned child processes and forwards signals, which is what a program never written to be pid 1 needs." />
+
+          <TextBlock Classes="note"
+                     Text="Run as takes a user name or a numeric id, either on its own or with a group after a colon. A numeric id always works; a name has to exist inside the container." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

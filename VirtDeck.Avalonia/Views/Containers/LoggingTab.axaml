@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+             x:Class="VirtDeck.Avalonia.Views.Containers.LoggingTab">
+
+  <!-- The Network page's shape: the one field that decides the page stands outside any box, and
+       the list it governs is a box of its own that takes the rest of the height. -->
+  <DockPanel Margin="16">
+
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,12" ColumnDefinitions="110,*">
+      <TextBlock Grid.Column="0" Text="Driver" VerticalAlignment="Center" />
+      <ComboBox Grid.Column="1" Name="LogDriverBox" HorizontalAlignment="Stretch" />
+    </Grid>
+
+    <HeaderedContentControl Padding="0" Theme="{StaticResource JbGroupBox}" Header="Driver options">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="LogOptionTools" Margin="8,6,8,6" />
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="Option" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+          </Grid>
+        </Border>
+
+        <ListBox Name="LogOptionList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="rows:LogOptionRow">
+              <Grid ColumnDefinitions="280,*" ColumnSpacing="6">
+                <TextBox Grid.Column="0" PlaceholderText="max-size"
+                         Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Grid.Column="1" PlaceholderText="10m"
+                         Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>
