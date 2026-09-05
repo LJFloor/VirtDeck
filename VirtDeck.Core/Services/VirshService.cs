@@ -30,6 +30,47 @@ namespace VirtDeck.Services
             _files = new RemoteFileService(ssh);
         }
 
+        // ---- Running one command -------------------------------------------
+
+        // Every name, path and URL in this file reaches the host through one of the two helpers
+        // below rather than through interpolation, and the reason is what RunSudoCommand does with
+        // what it is handed: it wraps the whole string in a single-quoted `sudo bash -c '...'` and
+        // escapes the apostrophes in it, which protects that outer layer and nothing else. The
+        // inner bash still reads the string as shell syntax, so a `$(...)`, a backtick, a `;` or a
+        // newline sitting inside an interpolated value is executed, as root, and needs no quote
+        // character to get there. DockerService.RunArgv and SystemdService.RunArgv are the same
+        // pair for the same reason; see ShellScript for the encoding all three ride on.
+
+        /// <summary>One command built from an argument vector, with nothing quoted and nothing interpolated.</summary>
+        private string RunArgv(params string[] argv) => _ssh.RunSudoCommand(ShellScript.Argv(argv));
+
+        /// <summary>
+        /// Guards the one thing an argument vector cannot. A value passed as a real argument can
+        /// still be read by virsh as an option when it begins with a hyphen, and a NUL or a newline
+        /// has no business in a domain name or a device path either.
+        ///
+        /// It belongs in the service rather than in the window that happens to be calling, because
+        /// the values are not all typed in this app: a domain defined by virt-manager, restored from
+        /// an import or created by another member of the libvirt group brings its own name, and a
+        /// media path is whatever the host's filesystem holds. <c>SystemdService.RequireUnit</c>
+        /// guards a unit name in the same place and for the same reason.
+        /// </summary>
+        private static string RequireName(string value, string what)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                throw new ArgumentException($"No {what} was given.");
+            if (value[0] == '-')
+                throw new ArgumentException($"A {what} cannot start with a hyphen.");
+            if (value.IndexOfAny(new[] { '\0', '\n', '\r' }) >= 0)
+                throw new ArgumentException($"A {what} cannot contain a line break.");
+            return value;
+        }
+
+        /// <summary>The wording <see cref="RequireName"/> uses for each kind of value it guards.</summary>
+        private const string VmName = "VM name";
+        private const string TargetDev = "target device";
+        private const string MediaPath = "media path";
+
         public async Task RefreshAsync()
         {
             var vms = await Task.Run(FetchAllVms);
@@ -627,7 +668,9 @@ namespace VirtDeck.Services
         }
 
         public void AttachCdrom(string vm, string iso, string target, string bus) =>
-            _ssh.RunSudoCommand($"virsh attach-disk {vm} {iso} {target} --type cdrom --targetbus {bus} --mode readonly --config");
+            RunArgv("virsh", "attach-disk", RequireName(vm, VmName), RequireName(iso, MediaPath),
+                    RequireName(target, TargetDev), "--type", "cdrom", "--targetbus", bus,
+                    "--mode", "readonly", "--config");
 
         /// <summary>
         /// Attaches a network CD-ROM (NBD URL) so QEMU streams the ISO over its built-in NBD client.
@@ -683,18 +726,23 @@ namespace VirtDeck.Services
             // Idempotent: if the disk is already gone (e.g. an OK retry after a partial failure,
             // which re-runs every pending op), libvirt says "No disk found"; the drive is already
             // removed, which is the goal, so treat it as success.
-            try { _ssh.RunSudoCommand($"virsh detach-disk {vm} {target} --config"); }
+            try { RunArgv("virsh", "detach-disk", RequireName(vm, VmName), RequireName(target, TargetDev), "--config"); }
             catch (Exception ex) when (IsBenign(ex, "No disk found")) { }
         }
 
         public void ChangeMedia(string vm, string target, string iso, bool live = false) =>
-            _ssh.RunSudoCommand($"virsh change-media {vm} {target} {iso} --update {(live ? "--live" : "--config")}");
+            RunArgv("virsh", "change-media", RequireName(vm, VmName), RequireName(target, TargetDev),
+                    RequireName(iso, MediaPath), "--update", live ? "--live" : "--config");
 
         public void EjectMedia(string vm, string target, bool live = false)
         {
             // Idempotent: ejecting an already-empty drive errors with "doesn't have media" (or "tray
             // is already open"). An empty drive is exactly the requested state, so swallow it.
-            try { _ssh.RunSudoCommand($"virsh change-media {vm} {target} --eject {(live ? "--live" : "--config")}"); }
+            try
+            {
+                RunArgv("virsh", "change-media", RequireName(vm, VmName), RequireName(target, TargetDev),
+                        "--eject", live ? "--live" : "--config");
+            }
             catch (Exception ex) when (IsBenign(ex, "doesn't have media", "tray is already open")) { }
         }
 
