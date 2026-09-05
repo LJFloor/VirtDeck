@@ -352,12 +352,15 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
             ? $"{labels.Count} x {labels[0]}"
             : string.Join(", ", labels);
 
+        // The tooltip draws the whole of what lspci said, die name and all, where the row draws
+        // only the half the card is sold under. The row says less and the tooltip says what the
+        // tool said, which is the containers module's Ports column rule.
         var lines = _cards.Select(c =>
         {
             var note = c.PassedThrough ? " - passed through to a guest"
                      : c.Driver == "none" ? " - no driver bound"
                      : $" - {c.Driver}";
-            return $"{c.Slot}  {c.Label}{note}";
+            return $"{c.Slot}  {(c.Name.Length > 0 ? c.Name : c.Label)}{note}";
         });
         GpuModelText.SetValue(ToolTip.TipProperty, string.Join("\n", lines));
     }

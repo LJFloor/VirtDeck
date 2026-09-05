@@ -87,12 +87,40 @@ namespace VirtDeck.Models
         string Slot, string VendorId, string DeviceId, string Driver, string Name)
     {
         /// <summary>
-        /// What to call the card. <c>lspci</c>'s name where there is one, and the vendor plus the
-        /// raw ids where there is not, because a host without pciutils still has a graphics card
-        /// and "unknown" would be less true than the numbers the kernel already gave us.
+        /// What to call the card, which is the <b>bracketed half</b> of what <c>lspci</c> said.
+        /// That tool names the die and then the card, <c>GP107 [GeForce GTX 1050]</c>, and only
+        /// the second half is what the thing was sold as, which is what somebody reading a fact
+        /// row means by the name of their GPU. The whole string stays in <see cref="Name"/> and is
+        /// what the tooltip draws, which is the rule the containers module's Ports column already
+        /// follows: the cell says less, never something else, and the tooltip says what the tool
+        /// said. Where <c>lspci</c> answered nothing at all it is the vendor plus the raw ids,
+        /// because a host without pciutils still has a graphics card and "unknown" would be less
+        /// true than the numbers the kernel already gave us.
         /// </summary>
-        public string Label =>
-            Name.Length > 0 ? Name : $"{Vendor} device {VendorId}:{DeviceId}";
+        public string Label
+        {
+            get
+            {
+                if (Name.Length == 0) return $"{Vendor} device {VendorId}:{DeviceId}";
+
+                // A name with no brackets is already the whole answer (Intel writes
+                // "AlderLake-S GT1"), and one whose brackets are empty or the wrong way round is
+                // left exactly as it was rather than cut into something the host never said.
+                var open = Name.IndexOf('[');
+                var close = Name.LastIndexOf(']');
+                var model = open >= 0 && close > open + 1 ? Name[(open + 1)..close] : Name;
+
+                // The Device field is the model on its own, so the vendor is what makes the row a
+                // whole name. It is tested for first rather than prefixed unconditionally, because
+                // a card that carries it already would otherwise read "NVIDIA NVIDIA GeForce ...",
+                // and a vendor id the table above does not name is left off entirely rather than
+                // drawn as the word Unknown in front of a model the host stated perfectly well.
+                return Vendor == "Unknown"
+                       || model.StartsWith(Vendor, StringComparison.OrdinalIgnoreCase)
+                    ? model
+                    : $"{Vendor} {model}";
+            }
+        }
 
         /// <summary>
         /// The handful of vendors worth naming. Anything else keeps its id rather than being

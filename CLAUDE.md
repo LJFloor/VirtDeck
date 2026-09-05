@@ -552,8 +552,17 @@ different landing page per host.
   controller** whose device id is `43d5`. The model name comes from `lspci -vmm -s <slot>`, whose
   tab-separated `Key:\tValue` lines make `Device:` unambiguous, where `lspci -mm`'s quoted
   positional form has an unquoted `-ra1 -p00` run in the middle of it that a field split swallows
-  the subsystem vendor on. A host with no pciutils still gets the vendor and the raw ids off sysfs,
-  because the numbers the kernel already gave us are more true than "unknown".
+  the subsystem vendor on. What that field holds is the **die and then the card**, `GP107 [GeForce
+  GTX 1050]`, so the fact row draws the bracketed half under the vendor, `NVIDIA GeForce GTX
+  1050`, which is what the thing was sold as and what somebody reading it means by the name of
+  their GPU; the whole string is the row's tooltip, the Ports column's rule that the cell says less
+  and never something else. A name with no brackets at all is already the whole answer (Intel
+  writes `AlderLake-S GT1`) and is left alone. The vendor is **tested for before it is prefixed**,
+  or a card carrying it already would read `NVIDIA NVIDIA GeForce ...`, and a vendor id the table
+  does not name prefixes nothing rather than putting the word Unknown in front of a model the host
+  stated perfectly well. A
+  host with no pciutils still gets the vendor and the raw ids off sysfs, because the numbers the
+  kernel already gave us are more true than "unknown".
 - **The GPU allow-lists are decided once before the loop, exactly as `NETS` and `DISKS` are**, and
   that is what makes this proportionate rather than a standing tax: a host with no GPU pays
   **nothing** per tick, not even a `command -v`. `nvidia-smi` is asked a **question** rather than
