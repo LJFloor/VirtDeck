@@ -10,7 +10,6 @@ namespace VirtDeck.Avalonia.Views;
 public partial class AddDiskDialog : Window
 {
     private const string CreateZvolItem = "➕  Create new ZVOL";
-    private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
     // A zvol name is pool[/dataset]+/name: at least one slash, ZFS-legal characters only.
     private static readonly Regex ZvolNameRegex =
         new(@"^[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)+$");
@@ -154,9 +153,9 @@ public partial class AddDiskDialog : Window
         else
         {
             var path = PathPicker.Path.Trim();
-            if (!PathRegex.IsMatch(path))
+            if (!HostPath.IsUsable(path))
             {
-                await Warn("Path contains invalid characters.");
+                await Warn(HostPath.Unusable);
                 return;
             }
             if (Qcow2Radio.IsChecked == true)

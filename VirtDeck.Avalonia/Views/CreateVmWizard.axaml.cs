@@ -540,6 +540,15 @@ public partial class CreateVmWizard : Window
             await Warn($"A VM named '{name}' already exists.");
             return false;
         }
+        // Install media on the server, where it is a path this app did not write. Media streamed
+        // from this PC is not checked here: it never becomes a path on the host at all, only an NBD
+        // URL this app builds itself.
+        var (mode, source) = CurrentMedia();
+        if (mode == "file" && source.Length > 0 && !HostPath.IsUsable(source))
+        {
+            await Warn(HostPath.Unusable);
+            return false;
+        }
         return true;
     }
 

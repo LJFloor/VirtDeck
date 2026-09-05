@@ -563,6 +563,11 @@ public partial class ConsoleWindow : Window
             cdrom ? "Select ISO on the server" : "Select floppy on the server",
             cdrom ? MediaLocations.IsoFilter : MediaLocations.FloppyFilter);
         if (picked is not { } path) return;
+        if (!HostPath.IsUsable(path))
+        {
+            await MessageDialog.Info(this, cdrom ? "Insert media" : "Insert floppy", HostPath.Unusable);
+            return;
+        }
 
         await RunMediaActionAsync(cdrom ? "Insert media" : "Insert floppy",
             () => _virsh.ChangeMedia(VmName, t, path, live: true),

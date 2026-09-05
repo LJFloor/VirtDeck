@@ -38,7 +38,6 @@ public partial class VmEditWindow : Window
     private readonly ObservableCollection<BootItem> _bootRows = new();
 
     private static readonly Regex NameRegex = new("^[a-zA-Z0-9_.-]+$");
-    private static readonly Regex PathRegex = new("^[a-zA-Z0-9_./@:-]+$");
     private static readonly (string dev, string label)[] AllBootDevs =
     {
         ("hd", "Hard disk"), ("cdrom", "CD-ROM"), ("network", "Network (PXE)"), ("fd", "Floppy")
@@ -370,7 +369,7 @@ public partial class VmEditWindow : Window
         if (picked is not { } iso) return;
 
         iso = iso.Trim();
-        if (!PathRegex.IsMatch(iso)) { await Warn("Path contains invalid characters."); return; }
+        if (!HostPath.IsUsable(iso)) { await Warn(HostPath.Unusable); return; }
         ClearStream(d.Target);
         _mediaChanges[d.Target] = iso;
         RebuildDiskList();
