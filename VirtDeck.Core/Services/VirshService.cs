@@ -647,19 +647,28 @@ namespace VirtDeck.Services
         /// Builds a libvirt &lt;disk&gt; element for a data disk. qcow2 → file/qcow2 (libvirt-default
         /// driver); zvol → block/raw with cache='none' io='native' discard='unmap'. Empty tuning
         /// attributes are omitted so libvirt keeps its defaults.
+        ///
+        /// <para>Every value goes through <see cref="XmlAttr"/>, as the network sibling's already
+        /// did. The XML is base64'd on its way to the host so the shell never sees it, but that says
+        /// nothing about the XML itself: a path holding an apostrophe closes the attribute it sits
+        /// in and the rest of the filename becomes markup in a document libvirt then defines as
+        /// root, which is a device element an attacker gets to choose. The quiet half of the same
+        /// bug is a path holding an ampersand, which simply produces a malformed document and an
+        /// error nobody can read.</para>
         /// </summary>
         public static string BuildDiskXml(DiskInfo d)
         {
             string type = string.IsNullOrEmpty(d.SourceType) ? "file" : d.SourceType;
             string srcAttr = type == "block" ? "dev" : "file";
             var driver = new StringBuilder("<driver name='qemu'");
-            if (!string.IsNullOrEmpty(d.DriverType)) driver.Append($" type='{d.DriverType}'");
-            if (!string.IsNullOrEmpty(d.Cache)) driver.Append($" cache='{d.Cache}'");
-            if (!string.IsNullOrEmpty(d.Io)) driver.Append($" io='{d.Io}'");
-            if (!string.IsNullOrEmpty(d.Discard)) driver.Append($" discard='{d.Discard}'");
+            if (!string.IsNullOrEmpty(d.DriverType)) driver.Append($" type='{XmlAttr(d.DriverType)}'");
+            if (!string.IsNullOrEmpty(d.Cache)) driver.Append($" cache='{XmlAttr(d.Cache)}'");
+            if (!string.IsNullOrEmpty(d.Io)) driver.Append($" io='{XmlAttr(d.Io)}'");
+            if (!string.IsNullOrEmpty(d.Discard)) driver.Append($" discard='{XmlAttr(d.Discard)}'");
             driver.Append("/>");
-            return $"<disk type='{type}' device='{d.Device}'>{driver}" +
-                   $"<source {srcAttr}='{d.Source}'/><target dev='{d.Target}' bus='{d.Bus}'/></disk>";
+            return $"<disk type='{XmlAttr(type)}' device='{XmlAttr(d.Device)}'>{driver}" +
+                   $"<source {srcAttr}='{XmlAttr(d.Source)}'/>" +
+                   $"<target dev='{XmlAttr(d.Target)}' bus='{XmlAttr(d.Bus)}'/></disk>";
         }
 
         public void AttachDataDisk(string vm, DiskInfo d) => RunDeviceXml("attach-device", vm, BuildDiskXml(d));
@@ -737,7 +746,7 @@ namespace VirtDeck.Services
         {
             var uri = new Uri(url);
             string name = (uri.AbsolutePath + uri.Query).TrimStart('/');
-            var src = new StringBuilder($"<source protocol='{uri.Scheme}'");
+            var src = new StringBuilder($"<source protocol='{XmlAttr(uri.Scheme)}'");
             if (name.Length > 0) src.Append($" name='{XmlAttr(name)}'");
             src.Append('>');
             src.Append($"<host name='{XmlAttr(uri.Host)}'");
