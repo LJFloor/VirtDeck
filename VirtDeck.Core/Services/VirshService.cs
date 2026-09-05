@@ -962,8 +962,17 @@ namespace VirtDeck.Services
         /// </summary>
         public void StartHostDownload(string url, string destPath)
         {
+            // Both values are carried in base64 and decoded into a variable on the host, the same
+            // way GetUrlContentLength and PollHostDownload carry theirs. Base64ing the finished
+            // script, which is what this did and still does, protects the trip through SSH and
+            // sudo's rewrap; it does nothing for a value that was already breaking out of its
+            // quotes before the encoding happened, and an apostrophe in either of these was enough
+            // to do that. Only the hardcoded guest-agent ISO reaches here today, so this was a
+            // trap set for the next caller rather than a live hole.
+            var destB64 = ShellScript.B64(destPath);
+            var urlB64 = ShellScript.B64(url);
             var script =
-                $"dest='{destPath}'; url='{url}'\n" +
+                $"dest=$(echo {destB64} | base64 -d); url=$(echo {urlB64} | base64 -d)\n" +
                 "mkdir -p \"$(dirname \"$dest\")\"; rm -f \"$dest.dlstatus\" \"$dest.part\"\n" +
                 "if curl -fL --retry 2 -o \"$dest.part\" \"$url\"; then mv -f \"$dest.part\" \"$dest\"; echo 0 > \"$dest.dlstatus\"; " +
                 "else echo 1 > \"$dest.dlstatus\"; rm -f \"$dest.part\"; fi\n";
