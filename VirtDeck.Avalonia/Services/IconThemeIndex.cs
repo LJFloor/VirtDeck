@@ -207,27 +207,38 @@ internal sealed class IconThemeIndex
     }
 
     /// <summary>
-    /// The configured icon theme. GTK's own settings files come first because they are what a GTK
-    /// application would obey, then the dconf value behind them, and a KDE session is asked about
-    /// itself before either, since its GNOME keys are typically untouched defaults.
+    /// The configured icon theme. The running session is asked about itself first, through whatever
+    /// holds its live setting: KDE's <c>kdeglobals</c>, Cinnamon's and MATE's own GSettings schemas,
+    /// Xfce's xsettings channel, GNOME's <c>org.gnome.desktop.interface</c>. That comes before the
+    /// GTK settings files deliberately. Every one of those desktops but GNOME on Wayland publishes
+    /// the value over XSettings, which overrides <c>settings.ini</c> inside GTK itself, and the file
+    /// is routinely left behind by other software: a Mint box with KDE applications installed has
+    /// <c>gtk-icon-theme-name=breeze-dark</c> written into it by kde-gtk-config while the desktop is
+    /// showing Papirus. The files stay the answer for a session we cannot name.
     /// </summary>
     private static string DetectThemeName()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var config = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         if (string.IsNullOrEmpty(config)) config = Path.Combine(home, ".config");
+        var kdeglobals = Path.Combine(config, "kdeglobals");
 
         var desktop = Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") ?? "";
-        if (desktop.Contains("KDE", StringComparison.OrdinalIgnoreCase) &&
-            FromIni(Path.Combine(config, "kdeglobals"), "Icons", "Theme") is { } kde)
-            return kde;
+        bool Running(string name) => desktop.Contains(name, StringComparison.OrdinalIgnoreCase);
+
+        if (Running("KDE") && FromIni(kdeglobals, "Icons", "Theme") is { } kde) return kde;
+        if (Running("Cinnamon") && FromGSettings("org.cinnamon.desktop.interface") is { } cinnamon) return cinnamon;
+        if (Running("MATE") && FromGSettings("org.mate.interface") is { } mate) return mate;
+        if (Running("XFCE") && FromXfconf() is { } xfce) return xfce;
+        if ((Running("GNOME") || Running("Unity") || Running("Budgie") || Running("Pantheon")) &&
+            FromGSettings("org.gnome.desktop.interface") is { } gnome) return gnome;
 
         foreach (var gtk in new[] { "gtk-4.0", "gtk-3.0" })
             if (FromIni(Path.Combine(config, gtk, "settings.ini"), "Settings", "gtk-icon-theme-name") is { } v)
                 return v;
 
-        if (FromGSettings() is { } dconf) return dconf;
-        if (FromIni(Path.Combine(config, "kdeglobals"), "Icons", "Theme") is { } kde2) return kde2;
+        if (FromGSettings("org.gnome.desktop.interface") is { } dconf) return dconf;
+        if (FromIni(kdeglobals, "Icons", "Theme") is { } kde2) return kde2;
 
         // Adwaita before hicolor: it is the only theme with a full set of mimetype icons that is
         // present on essentially every desktop install.
@@ -235,22 +246,35 @@ internal sealed class IconThemeIndex
     }
 
     /// <summary>
-    /// Reads the dconf value GTK actually follows. The database is binary, so the tool that owns it
-    /// is the only reliable reader; it is spawned once per process and a failure just means the
-    /// next source is tried.
+    /// Reads a value GTK follows out of dconf. The database is binary, so the tool that owns it is
+    /// the only reliable reader; a missing tool or an uninstalled schema just means the next source
+    /// is tried.
     /// </summary>
-    private static string? FromGSettings()
+    private static string? FromGSettings(string schema, string key = "icon-theme") =>
+        Run("gsettings", "get", schema, key);
+
+    /// <summary>Xfce keeps the live value on its xsettings channel rather than in dconf.</summary>
+    private static string? FromXfconf() =>
+        Run("xfconf-query", "-c", "xsettings", "-p", "/Net/IconThemeName");
+
+    /// <summary>
+    /// What a settings tool prints, unquoted, or null when it is absent, has nothing to say, or
+    /// hangs. Each one is spawned at most once per process, behind the <see cref="Current"/> lock.
+    /// </summary>
+    private static string? Run(string file, params string[] args)
     {
         try
         {
-            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            var start = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "gsettings",
-                ArgumentList = { "get", "org.gnome.desktop.interface", "icon-theme" },
+                FileName = file,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-            });
+            };
+            foreach (var arg in args) start.ArgumentList.Add(arg);
+
+            using var p = System.Diagnostics.Process.Start(start);
             if (p == null) return null;
             var value = p.StandardOutput.ReadToEnd().Trim().Trim('\'', '"');
             if (!p.WaitForExit(3000)) { try { p.Kill(true); } catch { /* gone already */ } return null; }
@@ -258,7 +282,7 @@ internal sealed class IconThemeIndex
         }
         catch
         {
-            return null; // no gsettings, or no schema
+            return null; // tool not installed
         }
     }
 

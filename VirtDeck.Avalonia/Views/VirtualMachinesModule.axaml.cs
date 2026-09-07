@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using VirtDeck.Avalonia.Controls;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Imaging;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -745,6 +746,6 @@ public partial class VirtualMachinesModule : UserControl, IModule
             if (_consoles.TryGetValue(vmName, out var c) && ReferenceEquals(c, console))
                 _consoles.Remove(vmName);
         };
-        console.Show();
+        console.ShowCenteredOn(Owner);
     }
 }

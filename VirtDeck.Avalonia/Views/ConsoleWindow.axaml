@@ -4,7 +4,7 @@
         x:Class="VirtDeck.Avalonia.Views.ConsoleWindow"
         Title="Console"
         Width="1024" Height="768"
-        WindowStartupLocation="CenterScreen"
+        WindowStartupLocation="CenterOwner"
         Background="#FF1E1F22">
 
   <Window.Styles>

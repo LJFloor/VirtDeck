@@ -261,7 +261,12 @@ public partial class FileExplorerModule : UserControl, IModule
             // and the home directory is a round trip; neither belongs on the UI thread.
             var files = _files;
             var (iconSize, home) = await Task.Run(() =>
-                (FileIcons.Available(wanted) ? wanted : 0, files.HomeDirectory()));
+            {
+                // Bytes a run that never reached Shutdown left behind. Here because it is the one
+                // thread this module already has going before it draws anything.
+                DragOutStaging.Sweep();
+                return (FileIcons.Available(wanted) ? wanted : 0, files.HomeDirectory());
+            });
             _iconSize = iconSize;
             await NavigateTo(home, record: true);
             return;
@@ -281,15 +286,24 @@ public partial class FileExplorerModule : UserControl, IModule
     public void Deactivate() { }
 
     /// <summary>
-    /// Nothing to tear down but a paste, a delete, an upload or a download still on the wire. This
-    /// module owns no window and no NBD server, and every listing rides the shell's shared
-    /// connection; those four are the only things here that hold a connection of their own, and the
-    /// shell disposes the shared one, with the auth material every second client borrows, straight
-    /// after this.
+    /// Nothing to tear down but a paste, a delete, an upload or a download still on the wire, and
+    /// whatever a drag out left in the temp directory. This module owns no window and no NBD server,
+    /// and every listing rides the shell's shared connection; those four and a staging fetch are the
+    /// only things here that hold a connection of their own, and the shell disposes the shared one,
+    /// with the auth material every second client borrows, straight after this.
+    ///
+    /// <para>The staging root goes wholesale rather than stage by stage, because a fetch cancelled a
+    /// moment ago may not have let go of its files yet and there is nobody left to wait for it.</para>
     /// </summary>
     public void Shutdown()
     {
         try { _opCts?.Cancel(); } catch { }
+
+        _dragOut?.Dispose();
+        _handedOver?.Dispose();
+        _dragOut = null;
+        _handedOver = null;
+        DragOutStaging.DeleteRoot();
     }
 
     // ---- Navigation ----------------------------------------------------
@@ -1182,20 +1196,23 @@ public partial class FileExplorerModule : UserControl, IModule
 
     // ---- Drag and drop ---------------------------------------------------
     //
-    // Two gestures share the plumbing and mean different things:
+    // Three gestures share the plumbing and mean different things:
     //
     //   files dragged in from the desktop  -> upload into the folder under the pointer
     //   rows dragged onto a folder row     -> move on the host (copy with Ctrl held)
+    //   rows dragged out to the desktop    -> fetch into a staging directory and hand that over
     //
-    // There is deliberately no third one. Dragging a row OUT to the desktop would need the bytes to
-    // exist locally at the moment the drop target asks for them: Avalonia's drag source takes the
-    // synchronous IDataTransfer, and DataFormat.File wants a real local IStorageItem, so there is no
-    // promised-file hook to hang a download off. On a host whose files are routinely disk images
-    // that is a freeze rather than a feature, so downloading is a command instead.
+    // The third one is a promise, and DragOutStaging is the whole argument for why it can be one:
+    // the value behind a format is fetched lazily, at the drop rather than when the drag starts, so
+    // the bytes have from the press to the drop to arrive. What it can never be is a stream, because
+    // neither platform lets a drag source promise one, and it cannot be finished after the drop
+    // either, because the source is never told where the target is putting things. So the bounds are
+    // the size and the clock, and both of them live over there.
     //
-    // That is also why the internal payload is an in-process format carrying host paths and nothing
-    // else, no text and no files: an in-process format cannot leave the app, so a drag can never be
-    // accepted somewhere that would imply a transfer this module is not going to do.
+    // The internal payload stays an in-process format carrying host paths and nothing else. It is
+    // what tells a drop back into this module that the rows never left, it is tested first so an
+    // internal move never looks at the staged files, and it cannot leave the app, so a move on the
+    // host can never be accepted somewhere that would imply a transfer.
 
     private static readonly DataFormat<string[]> RemotePathsFormat =
         DataFormat.CreateInProcessFormat<string[]>("VirtDeck.RemotePaths");
@@ -1218,6 +1235,19 @@ public partial class FileExplorerModule : UserControl, IModule
 
     /// <summary>The row currently painted as the folder a drop would land in.</summary>
     private RemoteFileRow? _dropRow;
+
+    /// <summary>The bytes being fetched for the drag in the air, or null when nothing is being
+    /// dragged out. Held so <see cref="OnDragLeave"/> can start the fetch the moment the pointer
+    /// takes the drag off the module.</summary>
+    private DragOutStage? _dragOut;
+
+    /// <summary>
+    /// The last drag that actually handed files over. Kept rather than dropped at the end of its own
+    /// drag because the desktop may still be reading out of the staging directory when
+    /// <c>DoDragDropAsync</c> returns; it goes when the <b>next drag starts</b>, by which time it
+    /// cannot be, and <see cref="Shutdown"/> takes it if no next drag ever comes.
+    /// </summary>
+    private DragOutStage? _handedOver;
 
     private void SetUpDragDrop()
     {
@@ -1271,10 +1301,29 @@ public partial class FileExplorerModule : UserControl, IModule
         if (paths.Length == 0) return;
 
         _dragging = true;
+
+        // The drag before this one is now certainly over at the other end too, so whatever it handed
+        // the desktop can go. This is the "one drag longer" in SettleStage.
+        _handedOver?.Dispose();
+        _handedOver = null;
+
+        var stage = NewStage(paths);
         try
         {
             var transfer = new DataTransfer();
             transfer.Add(DataTransferItem.Create(RemotePathsFormat, paths));
+
+            // One item per entry, because File is the one format Windows and X11 both take several
+            // of. Nothing is asked of the host here: each getter runs at the drop, and what it may
+            // spend waiting there is DragOutStaging's to bound.
+            if (stage is not null)
+                for (var i = 0; i < paths.Length; i++)
+                {
+                    var at = i;
+                    transfer.Add(DataTransferItem.Create(DataFormat.File, () => stage.Wait(at)));
+                }
+
+            _dragOut = stage;
             // The system disposes the transfer when the drag ends; it must not be disposed here.
             await DragDrop.DoDragDropAsync(press, transfer, DragDropEffects.Move | DragDropEffects.Copy);
         }
@@ -1282,8 +1331,86 @@ public partial class FileExplorerModule : UserControl, IModule
         finally
         {
             _dragging = false;
+            _dragOut = null;
             ClearDropTarget();
+            SettleStage(stage);
         }
+    }
+
+    /// <summary>
+    /// The fetch behind a drag out, or null when this module has nothing to fetch with. Built for
+    /// every drag, including one that turns out to be a move onto a folder row: it costs nothing
+    /// until something starts it, and which of the two a drag is going to be is not knowable here.
+    /// </summary>
+    private DragOutStage? NewStage(IReadOnlyList<string> paths)
+    {
+        if (_files is null || _transfers is null) return null;
+
+        // One pass over the listing rather than a scan per dragged path: a selection of a few hundred
+        // out of a directory of a few thousand is not far-fetched here, and this runs on the UI
+        // thread in the middle of a gesture.
+        var kinds = new Dictionary<string, bool>(_entries.Count, StringComparer.Ordinal);
+        foreach (var entry in _entries) kinds[entry.Name] = entry.IsDir;
+
+        var items = new List<(string Name, bool IsDir)>(paths.Count);
+        foreach (var path in paths)
+        {
+            // Every path here was built as CombinePath(_currentDir, name) out of the listing on
+            // screen, so the basename is exactly the row's name and the entry is in _entries.
+            var name = path[(path.LastIndexOf('/') + 1)..];
+            if (name.Length == 0) return null;
+            items.Add((name, kinds.TryGetValue(name, out var isDir) && isDir));
+        }
+
+        return new DragOutStage(_files, _transfers, TopLevel.GetTopLevel(this)?.StorageProvider,
+                                _currentDir, items, _shownElevated);
+    }
+
+    /// <summary>
+    /// What becomes of a drag's fetch once the drag is over. One nothing asked for is dropped there
+    /// and then, which is every internal move and every drag that went nowhere. One the drop
+    /// actually took is held over until the next drag begins, because the desktop may still be
+    /// reading out of it, and it is also the only one that may have something to say.
+    /// </summary>
+    private void SettleStage(DragOutStage? stage)
+    {
+        if (stage is null) return;
+
+        if (!stage.Used)
+        {
+            stage.Dispose();
+            return;
+        }
+
+        _handedOver = stage;
+
+        if (RefusalText(stage) is { } why) SetStatus(why);
+    }
+
+    /// <summary>
+    /// Why a drag out handed nothing over, or null when it did. It goes in the status slot rather
+    /// than a dialog: the drop is long gone by the time anybody reads it, and the desktop has already
+    /// said no in its own way. Nothing can be said during the drag itself, which is the one thing a
+    /// disabled command with its reason on hover would otherwise have done here.
+    /// </summary>
+    private static string? RefusalText(DragOutStage stage) => stage.Refusal switch
+    {
+        StageRefusal.TooLarge =>
+            $"{FormatBytes(stage.MeasuredBytes)} is too much to drag out; use Download instead",
+        StageRefusal.TooSlow =>
+            "Too slow to drag out; use Download instead",
+        // First line only, the rule the delete already follows: tar reports the member it could not
+        // open and then reports itself exiting, and the status slot is one line.
+        StageRefusal.Failed =>
+            $"Cannot drag out: {FirstLine(stage.Error)}",
+        _ => null,
+    };
+
+    private static string FirstLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "the transfer failed";
+        var end = text.IndexOfAny(new[] { '\r', '\n' });
+        return (end < 0 ? text : text[..end]).Trim();
     }
 
     private void ClearPress()
@@ -1340,6 +1467,12 @@ public partial class FileExplorerModule : UserControl, IModule
     {
         ClearDropTarget();
         e.Handled = true;
+
+        // Our own drag has just taken the pointer off the module, so the desktop is where it is
+        // heading. Fetching starts here rather than at the press, which is what makes a move onto a
+        // folder row free: that one never leaves, so it never costs a byte. Only ever a head start,
+        // though, never the correctness, since the getter starts it too.
+        _dragOut?.Start();
     }
 
     private async void OnDrop(object? sender, DragEventArgs e)

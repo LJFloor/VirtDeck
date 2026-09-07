@@ -69,6 +69,24 @@ public partial class HostManagerWindow : Window
     private bool _rememberAvailable;
     private string? _rememberReason;
 
+    /// <summary>
+    /// Whether <c>~/.ssh</c> may be read for this window's lifetime: the stored answer when there
+    /// is one, else what the user said the first time it came up here. Null until either. Scoped to
+    /// the window so that toggling back to SSH key, or filling in a second host, does not re-ask
+    /// somebody who has already answered once without ticking "Don't ask again".
+    /// </summary>
+    private bool? _mayScan;
+
+    /// <summary>Set once the scan has run, so a second trigger does not repeat it.</summary>
+    private bool _keysLoaded;
+
+    /// <summary>
+    /// Set while the scan question is on screen. Opening it takes focus off the host box, which is
+    /// itself one of the two things that put it there, so without this the second trigger would
+    /// raise a second dialog behind the first.
+    /// </summary>
+    private bool _asking;
+
     /// <summary>Design-time only; the app always names the selection and what to do with a connection.</summary>
     public HostManagerWindow() : this(null, null, null) { }
 
@@ -82,7 +100,7 @@ public partial class HostManagerWindow : Window
                              Action<SshConnectionManager>? onConnected)
     {
         InitializeComponent();
-        _onConnected = onConnected ?? (ssh => new MainWindow(ssh).Show());
+        _onConnected = onConnected ?? (ssh => new MainWindow(ssh).ShowCenteredOn(this));
         _originals = AppSettings.Current.Hosts.Select(h => h.Clone()).ToList();
 
         foreach (var profile in AppSettings.Current.Hosts)
@@ -100,7 +118,15 @@ public partial class HostManagerWindow : Window
         _rows.CollectionChanged += (_, _) => PaintList();
 
         PasswordAuthRadio.IsCheckedChanged += (_, _) => OnAuthModeChanged();
-        KeyAuthRadio.IsCheckedChanged += (_, _) => OnAuthModeChanged();
+        // Ticking SSH key is what asks for the list of keys on this PC, and so the moment the scan
+        // behind it is worth a question. Filling the form in ticks this radio too, which is what
+        // _loading is read for here: selecting a saved key host is not the user asking for anything.
+        KeyAuthRadio.IsCheckedChanged += async (_, _) =>
+        {
+            bool ticked = !_loading && KeyAuthRadio.IsChecked == true;
+            OnAuthModeChanged();
+            if (ticked) await LoadKeysAsync(ask: true);
+        };
         BrowseKeyButton.Click += async (_, _) => await BrowseForKeyAsync();
         KeyCombo.SelectionChanged += (_, _) => WriteThrough();
         RememberCheck.IsCheckedChanged += (_, _) => OnRememberChanged();
@@ -108,6 +134,13 @@ public partial class HostManagerWindow : Window
 
         foreach (var box in new[] { NameBox, HostBox, PortBox, UserBox })
             box.TextChanged += (_, _) => WriteThrough();
+        // Typing the address is the other half of what makes the key question askable, so a row
+        // switched to key auth before it had one gets its chance here rather than never. LostFocus
+        // rather than TextChanged: nobody wants a dialog after the first letter of a hostname.
+        HostBox.LostFocus += async (_, _) =>
+        {
+            if (KeyAuthRadio.IsChecked == true) await LoadKeysAsync(ask: true);
+        };
         foreach (var box in new[] { PasswordBox, PassphraseBox, SudoPasswordBox })
             box.TextChanged += (_, _) => OnSecretTyped();
 
@@ -137,7 +170,10 @@ public partial class HostManagerWindow : Window
             // blocks) does not queue behind a keyring that might.
             await InitRememberAsync();
             if (_current is { } row) _secretsLoad = LoadSecretsAsync(row);
-            await LoadKeysAsync();
+            // ask: false, so opening the front door is never itself a question, and nothing at all
+            // happens for a blank row. A host that already has a key shows it either way; what a
+            // standing yes adds is the rest of ~/.ssh beside it.
+            await LoadKeysAsync(ask: false);
             FocusFirstEmptyField();
         };
 
@@ -316,13 +352,68 @@ public partial class HostManagerWindow : Window
 
     // ---- The key file ----------------------------------------------------
 
-    private async Task LoadKeysAsync()
+    /// <summary>
+    /// Fills the dropdown with the private keys already on this PC, once, and only with the user's
+    /// say-so. Without it the box holds what the selected host was saved with and nothing else,
+    /// which is enough to connect and to see what a host uses; the scan is what turns it into a
+    /// list to pick from.
+    /// </summary>
+    /// <param name="ask">
+    /// Whether an unanswered question may be put now. False on the way in, where the user has done
+    /// nothing to invite it; true from the SSH key radio and from the host box being finished with,
+    /// which are the two gestures that want the list.
+    /// </param>
+    private async Task LoadKeysAsync(bool ask)
     {
+        // An unaddressed row is not scanned for and not asked about. The question names the host it
+        // would auto-fill a key for, so it cannot be put before there is one, and running the scan
+        // anyway would be reading somebody's key directory for a row that is not yet a host.
+        if (_keysLoaded || _current is not { } row || row.Profile.Host.Length == 0) return;
+        if (!await MayScanAsync(ask, row.Profile.Host)) return;
+        _keysLoaded = true;
+
         var keys = await Task.Run(SshKeyDiscovery.Discover);
         var selected = (KeyCombo.SelectedItem as SshKeyCandidate)?.Path
                        ?? _current?.Profile.PrivateKeyPath ?? "";
         KeyCombo.ItemsSource = keys.ToList();
         SelectKeyFile(selected);
+    }
+
+    /// <summary>
+    /// Whether <c>~/.ssh</c> may be read, asking the first time it matters. Reading somebody's key
+    /// directory is not something to do quietly on the way past, so it is opt-in and the default,
+    /// including for anyone who dismisses the question, is not to.
+    ///
+    /// "Don't ask again" applies to both answers, which is what makes it an answer to the question
+    /// on screen rather than a second way of saying yes; without it the answer holds for this
+    /// window only. The stored one is global rather than per host, because it is a question about
+    /// this PC's home directory and not about any machine being connected to.
+    /// </summary>
+    /// <param name="host">The address on screen, which the question names as what it would fill in for.</param>
+    private async Task<bool> MayScanAsync(bool ask, string host)
+    {
+        if (_mayScan is { } answered) return answered;
+        if (AppSettings.Current.SshKeyScanAllowed is { } stored) return (_mayScan = stored).Value;
+        if (!ask || _asking) return false;
+
+        _asking = true;
+        bool yes, ticked;
+        try
+        {
+            (yes, ticked) = await MessageDialog.Ask(this, "Look for SSH keys",
+                $"May VirtDeck look in {SshKeyDiscovery.SshDirectory} for private keys, so it can " +
+                $"auto-fill one for {host}?\n\n" +
+                "It reads the file names and the first line of each file, which is what tells a key " +
+                "from the rest of that directory. Nothing is sent anywhere, and no key is read until " +
+                "you pick one and connect with it.\n\n" +
+                "Say no and you can still browse to a key, or drop one on this window.",
+                "Don't ask again");
+        }
+        finally { _asking = false; }
+
+        _mayScan = yes;
+        if (ticked) AppSettings.Current.RememberSshKeyScan(yes);
+        return yes;
     }
 
     /// <summary>

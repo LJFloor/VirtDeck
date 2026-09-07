@@ -1149,7 +1149,7 @@ public partial class ContainersModule : UserControl, IModule
             if (_logs.TryGetValue(row.Id, out var w) && ReferenceEquals(w, window))
                 _logs.Remove(row.Id);
         };
-        window.Show();
+        window.ShowCenteredOn(Owner);
     }
 
     /// <summary>
@@ -1215,7 +1215,7 @@ public partial class ContainersModule : UserControl, IModule
             if (_consoles.TryGetValue(row.Id, out var w) && ReferenceEquals(w, window))
                 _consoles.Remove(row.Id);
         };
-        window.Show();
+        window.ShowCenteredOn(Owner);
     }
 
     /// <summary>

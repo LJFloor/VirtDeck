@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Hosts;
 using VirtDeck.Services;
 
@@ -120,6 +121,6 @@ public partial class MainWindow : Window
             _shell.RefreshProfile();
             _shell.PaintHosts();
         };
-        _manager.Show();
+        _manager.ShowCenteredOn(this);
     }
 }

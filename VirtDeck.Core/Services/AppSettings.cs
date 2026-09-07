@@ -73,6 +73,37 @@ namespace VirtDeck.Services
         public bool RememberPasswords { get; set; }
 
         /// <summary>
+        /// Whether VirtDeck may read <c>~/.ssh</c> to offer the private keys already on this PC:
+        /// <see cref="ScanAllowed"/>, <see cref="ScanDenied"/>, or empty for "ask the next time it
+        /// comes up". One answer for the whole app rather than one per saved host, because it is a
+        /// question about this PC's home directory and not about any machine being connected to.
+        ///
+        /// A string rather than an enum or a pair of bools, for the reason <see cref="AuthMode"/>
+        /// is one: an unknown value has to read as "not answered yet" instead of throwing and
+        /// costing the user the rest of the file. The unset default is what keeps a scan from
+        /// happening before anyone has been asked about it.
+        /// </summary>
+        public string SshKeyScan { get; set; } = "";
+
+        public const string ScanAllowed = "allow";
+        public const string ScanDenied = "deny";
+
+        /// <summary>
+        /// The stored answer, or null when there is none to honour. Anything the file does not
+        /// recognise is "no answer", which asks rather than assumes.
+        /// </summary>
+        [JsonIgnore]
+        public bool? SshKeyScanAllowed =>
+            SshKeyScan == ScanAllowed ? true : SshKeyScan == ScanDenied ? false : null;
+
+        /// <summary>Records a "don't ask again" answer. Only ever called with one.</summary>
+        public void RememberSshKeyScan(bool allowed)
+        {
+            SshKeyScan = allowed ? ScanAllowed : ScanDenied;
+            Save();
+        }
+
+        /// <summary>
         /// Directory of the last install medium picked **on this PC**, reopened by the local pickers.
         /// Kept apart from <see cref="HostProfile.LastServerMediaDir"/> because the two are different filesystems:
         /// one path is meaningless in the other's browser. ISO and floppy share it; they are picked from

@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.VisualTree;
 using VirtDeck.Avalonia.Controls;
+using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Storage;
 using VirtDeck.Models;
 using VirtDeck.Services;
@@ -539,7 +540,7 @@ public partial class StorageModule : UserControl, IModule
             if (_details.TryGetValue(row.Key, out var w) && ReferenceEquals(w, window))
                 _details.Remove(row.Key);
         };
-        window.Show();
+        window.ShowCenteredOn(Owner);
     }
 
     /// <summary>
@@ -921,7 +922,7 @@ public partial class StorageModule : UserControl, IModule
             if (_poolDetails.TryGetValue(row.Key, out var w) && ReferenceEquals(w, window))
                 _poolDetails.Remove(row.Key);
         };
-        window.Show();
+        window.ShowCenteredOn(Owner);
     }
 
     // ---- the commands ------------------------------------------------------

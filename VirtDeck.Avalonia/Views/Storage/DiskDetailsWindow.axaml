@@ -4,7 +4,7 @@
         x:Class="VirtDeck.Avalonia.Views.Storage.DiskDetailsWindow"
         Title="Disk"
         Width="960" Height="620" MinWidth="720" MinHeight="460"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterOwner">
 
   <!-- Declared here rather than in each page, so no two of them can drift apart on what a
        fact looks like. Styles and data templates on a Window reach its whole tree, tab content

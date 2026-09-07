@@ -6,15 +6,19 @@
         WindowStartupLocation="CenterOwner"
         CanResize="False" ShowInTaskbar="False">
   <DockPanel Margin="20">
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
-      <!-- The alternative sits in a Border because a disabled control is not hit-testable in
-           Avalonia: the tooltip explaining why it is disabled has to hang off an enabled parent. -->
-      <Border Name="AltButtonHost" IsVisible="False">
-        <Button Name="AltButton" MinWidth="88" />
-      </Border>
-      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
-      <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+    <StackPanel DockPanel.Dock="Bottom" Spacing="12" Margin="0,20,0,0">
+      <!-- Above the buttons and left of them, because it qualifies both answers rather than
+           belonging to either: see Ask. -->
+      <CheckBox Name="OptionCheck" IsVisible="False" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <!-- The alternative sits in a Border because a disabled control is not hit-testable in
+             Avalonia: the tooltip explaining why it is disabled has to hang off an enabled parent. -->
+        <Border Name="AltButtonHost" IsVisible="False">
+          <Button Name="AltButton" MinWidth="88" />
+        </Border>
+        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+        <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+      </StackPanel>
     </StackPanel>
     <TextBlock Name="MessageText" TextWrapping="Wrap" />
   </DockPanel>
