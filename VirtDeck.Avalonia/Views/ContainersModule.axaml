@@ -9,6 +9,7 @@
     <!-- One column layout shared by each header strip and its rows, so they stay aligned. Prefixed
          per tab, because the two tables have nothing to do with each other. -->
     <x:Double x:Key="ColName">220</x:Double>
+    <x:Double x:Key="ColStack">150</x:Double>
     <x:Double x:Key="ColImage">240</x:Double>
     <x:Double x:Key="ColState">90</x:Double>
     <x:Double x:Key="ColUptime">100</x:Double>
@@ -91,7 +92,7 @@
               </StackPanel>
               <c:FilterBox DockPanel.Dock="Right" Name="ContainerSearch" Width="200" Margin="10,0,0,0"
                            PlaceholderText="Search containers"
-                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name and the image." />
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name, the image and the stack." />
               <Panel />
             </DockPanel>
           </Border>
@@ -103,6 +104,10 @@
                  dot without widening the column. -->
             <DockPanel Name="ContainerHeaderStrip">
               <c:ColumnHeader DockPanel.Dock="Left" Text="Name"   SortKey="name"   Indent="14" Width="{StaticResource ColName}" />
+              <!-- The compose project, beside the name because it is the name's prefix whenever
+                   compose chose that name, and the only place the project is stated when it did
+                   not. Blank for every container compose did not create. -->
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Stack"  SortKey="stack"  Width="{StaticResource ColStack}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="Image"  SortKey="image"  Width="{StaticResource ColImage}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="Uptime" SortKey="uptime" Width="{StaticResource ColUptime}" />
@@ -140,6 +145,11 @@
                       <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis" />
                     </DockPanel>
+                    <!-- The tooltip is the project in full, and adds the one thing the cell cannot
+                         say for a `docker compose run` container: that it wears the label without
+                         being one of the stack's services. -->
+                    <TextBlock Text="{Binding Stack}"  Width="{StaticResource ColStack}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding StackTip}" />
                     <TextBlock Text="{Binding Image}"  Width="{StaticResource ColImage}"
                                TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Image}" />
                     <!-- Docker's own rendered phrase ("Exited (0) 2 days ago") is the tooltip: the

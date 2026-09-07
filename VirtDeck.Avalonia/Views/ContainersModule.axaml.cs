@@ -708,7 +708,8 @@ public partial class ContainersModule : UserControl, IModule
             ? Docker.Containers.AsEnumerable()
             : Docker.Containers.Where(c =>
                 c.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase));
+                c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                c.Stack.Contains(needle, StringComparison.OrdinalIgnoreCase));
 
         TableRows.Merge(_rows, _byId, items,
             c => c.Id, c => new ContainerRow(c), (row, c) => row.Update(c), OrderContainers);
@@ -723,6 +724,12 @@ public partial class ContainersModule : UserControl, IModule
     /// rarely what somebody came to look at. Uptime sorts on the elapsed seconds rather than on the
     /// "3d 04:11:02" string, which does not sort once a run passes a day.
     ///
+    /// <para>Stack sorts as the plain string it is, which puts every container outside compose in
+    /// one block at whichever end the direction sends it, and the name breaks the tie so a project's
+    /// containers stay in their own order inside the group. That is what the Subnet and Gateway arms
+    /// on the networks table do with their blanks, and grouping the blanks is the point rather than
+    /// an accident of the comparer.</para>
+    ///
     /// <para>Ports has no arm because it has no order. Its cell holds a list of mappings rather
     /// than a value, so there is nothing for a comparer to be about; sorted on its own text it put
     /// 1433 above 3306 above 80 above 8002, which is not an order anybody asked for. Its heading
@@ -731,6 +738,8 @@ public partial class ContainersModule : UserControl, IModule
     private IEnumerable<ContainerRow> OrderContainers(IEnumerable<ContainerRow> rows) => ContainerSort.Key switch
     {
         "name" => ContainerSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "stack" => ContainerSort.By(rows, r => r.Stack, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "image" => ContainerSort.By(rows, r => r.Image, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "state" => ContainerSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)

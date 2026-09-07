@@ -47,6 +47,36 @@ public sealed class ContainerRow : INotifyPropertyChanged
     /// </summary>
     public string? PortsReported { get => _portsReported; private set => Set(ref _portsReported, value); }
 
+    private string _stack = "";
+    /// <summary>
+    /// The compose project this container belongs to, blank for one compose did not create. It is
+    /// the prefix of a compose-made container's name and still worth its own column, because
+    /// <c>container_name:</c> replaces that name outright and the column is then the only place the
+    /// project is stated. <see cref="StackTip"/> is what the cell says on hover.
+    /// </summary>
+    public string Stack { get => _stack; private set { if (Set(ref _stack, value)) Raise(nameof(StackTip)); } }
+
+    /// <summary>Set through <see cref="Set{T}"/> under the name of the one thing it changes.</summary>
+    private bool _stackOneOff;
+
+    /// <summary>
+    /// What the Stack cell says on hover: the project in full, since a long name trims in a 150px
+    /// cell, and null for a container outside compose so an empty row draws no empty tooltip box.
+    /// Same shape as the Ports cell beside it.
+    ///
+    /// <para>A <c>docker compose run</c> container says so, because it is the one row where this
+    /// column and the Stacks tab disagree: it carries the project label, so the cell names the
+    /// project, but it is not one of the project's services and the Stacks tab leaves it out of the
+    /// count for that reason. The hover is where that is said rather than the cell, which would then
+    /// be saying something other than which project this is.</para>
+    /// </summary>
+    public string? StackTip =>
+        _stack.Length == 0 ? null
+        : _stackOneOff
+            ? _stack + "\n\nA “docker compose run” container: it carries the project's label " +
+                       "but is not one of its services, so the Stacks tab does not count it."
+            : _stack;
+
     private string _uptime = "";
     public string Uptime { get => _uptime; private set => Set(ref _uptime, value); }
 
@@ -95,6 +125,8 @@ public sealed class ContainerRow : INotifyPropertyChanged
         Status = info.Status;
         Ports = CleanPorts(info.Ports);
         PortsReported = info.Ports.Length == 0 ? null : info.Ports;
+        Stack = info.Stack;
+        Set(ref _stackOneOff, info.StackOneOff, nameof(StackTip));
         _startedAtUtc = info.StartedAtUtc;
         TickUptime();
     }

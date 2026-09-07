@@ -21,6 +21,20 @@ namespace VirtDeck.Models
         public string Ports { get; set; } = string.Empty;
 
         /// <summary>
+        /// The compose project this container belongs to, read off <c>com.docker.compose.project</c>,
+        /// and empty for a container compose did not create. The same label the Stacks tab discovers
+        /// whole projects by, asked here of one container.
+        /// </summary>
+        public string Stack { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether this is a <c>docker compose run</c> container (<c>com.docker.compose.oneoff</c>).
+        /// It carries the project label without being one of the project's services, which is why
+        /// <see cref="DockerStackInfo"/> drops it from the stack's member list.
+        /// </summary>
+        public bool StackOneOff { get; set; }
+
+        /// <summary>
         /// When the container was started (UTC), or null when it has never run or the host could not
         /// say. Uptime is ticked client-side from this, exactly as <see cref="VmInfo.StartedAtUtc"/> is.
         /// </summary>

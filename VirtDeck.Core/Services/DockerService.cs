@@ -68,9 +68,16 @@ namespace VirtDeck.Services
         // itself, again matching the VM script, so host/client clock skew never enters the number.
         // The uptime half is best-effort: it is fenced off from the exit status, so a host whose
         // `date` cannot parse docker's timestamps still gets its list, with the column blank.
+        //
+        // The two compose labels sit between the status and the ports, because Ports is the one
+        // unbounded field on the record and stays last. A project name is compose's own
+        // [a-z0-9][a-z0-9_-]* and the oneoff label is one word, so neither can carry a tab. They are
+        // the same labels the Stacks tab discovers whole projects by, asked here of one container.
         private const string ListScript =
             "docker ps --all --no-trunc " +
-            "--format 'c\t{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}' || exit $?\n" +
+            "--format 'c\t{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t" +
+            "{{.Label \"com.docker.compose.project\"}}\t{{.Label \"com.docker.compose.oneoff\"}}\t" +
+            "{{.Ports}}' || exit $?\n" +
             "now=$(date -u +%s)\n" +
             "ids=$(docker ps --quiet --no-trunc 2>/dev/null)\n" +
             "if [ -n \"$ids\" ]; then\n" +
@@ -101,7 +108,8 @@ namespace VirtDeck.Services
                     continue;
                 }
 
-                // Ports is last and may be empty, so a short row is read rather than dropped.
+                // The three trailing fields are all empty on a container outside compose that
+                // publishes nothing, so a short row is read rather than dropped.
                 if (f[0] != "c" || f.Length < 6 || string.IsNullOrWhiteSpace(f[1])) continue;
 
                 list.Add(new ContainerInfo
@@ -111,7 +119,10 @@ namespace VirtDeck.Services
                     Image = f[3],
                     State = f[4],
                     Status = f[5],
-                    Ports = f.Length > 6 ? f[6].Trim() : string.Empty,
+                    Stack = f.Length > 6 ? f[6].Trim() : string.Empty,
+                    StackOneOff = f.Length > 7 &&
+                                  string.Equals(f[7].Trim(), "True", StringComparison.OrdinalIgnoreCase),
+                    Ports = f.Length > 8 ? f[8].Trim() : string.Empty,
                 });
             }
 
