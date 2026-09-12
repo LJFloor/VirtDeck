@@ -117,6 +117,109 @@ namespace VirtDeck.Models
     }
 
     /// <summary>
+    /// Which of the two things a dataset is. Snapshots are deliberately not here: they are a subject
+    /// of their own, they need a listing that can carry thousands of rows off one auto-snapshot
+    /// timer, and nothing in this pass rolls one back or clones one.
+    /// </summary>
+    public enum ZfsDatasetType
+    {
+        /// <summary>A filesystem, which is the kind that has a mount point.</summary>
+        Filesystem,
+
+        /// <summary>A zvol: a block device carved out of the pool, which is what a VM disk sits on.</summary>
+        Volume,
+    }
+
+    /// <summary>
+    /// One dataset, exactly as <c>zfs list -H -p</c> stated it. <see cref="ZfsPool"/>'s rule
+    /// throughout: the listing and nothing else, and no field derived from another.
+    ///
+    /// <para><b>Every number is nullable for the reason every number on a pool is.</b> ZFS writes
+    /// <c>-</c> for a figure that does not apply and that dash survives <c>-p</c>: a filesystem has
+    /// no <c>volsize</c>, a volume reports no mount point, and a dataset under a full pool can
+    /// report no available space at all. Reading any of those as zero would draw a number ZFS never
+    /// said.</para>
+    ///
+    /// <para><see cref="Name"/> is the whole path (<c>tank/vm/db</c>) and is the identity: it is what
+    /// every command addresses, what the table merges on, and what the tree is built out of by
+    /// splitting on <c>/</c>. There is a GUID underneath and it is deliberately not used, for the
+    /// reason <c>ZfsNodeRow.Key</c> gives about a pool's.</para>
+    /// </summary>
+    public sealed record ZfsDataset
+    {
+        public string Name { get; init; } = "";
+
+        public ZfsDatasetType Type { get; init; } = ZfsDatasetType.Filesystem;
+
+        /// <summary>
+        /// Space this dataset and everything under it takes up. <b>This is <c>zfs</c>'s USED and
+        /// never <c>zpool</c>'s ALLOC</b>: the two differ by parity on a raidz pool, and mixing them
+        /// in one column would make a parent's figure fail to cover its children's.
+        /// </summary>
+        public long? UsedBytes { get; init; }
+
+        /// <summary>Space left, as ZFS computes it against any quota above this dataset.</summary>
+        public long? AvailableBytes { get; init; }
+
+        /// <summary>Space this dataset's own data takes up, without its children's.</summary>
+        public long? ReferencedBytes { get; init; }
+
+        public long? QuotaBytes { get; init; }
+        public long? RefQuotaBytes { get; init; }
+        public long? ReservationBytes { get; init; }
+
+        /// <summary>A volume's size. Null on a filesystem, which has none.</summary>
+        public long? VolSizeBytes { get; init; }
+
+        /// <summary>What compression actually bought, as a multiplier. 1.00 means nothing.</summary>
+        public double? CompressRatio { get; init; }
+
+        /// <summary>The <c>compression</c> setting, in ZFS's own spelling: <c>off</c>, <c>lz4</c>, <c>zstd-3</c>.</summary>
+        public string Compression { get; init; } = "";
+
+        /// <summary>Where a filesystem mounts. <c>-</c>, and so empty, on a volume and on <c>canmount=off</c>.</summary>
+        public string Mountpoint { get; init; } = "";
+
+        /// <summary>
+        /// Whether it is mounted <b>now</b>, which is not the same as having a mount point: a
+        /// filesystem with a perfectly good mountpoint can be unmounted. Null where ZFS said
+        /// <c>-</c>, which is what a volume says.
+        /// </summary>
+        public bool? Mounted { get; init; }
+
+        /// <summary>The snapshot this was cloned from, empty on the overwhelming majority that were not.</summary>
+        public string Origin { get; init; } = "";
+
+        /// <summary>When it was created, as a Unix timestamp, because <c>-p</c> prints one.</summary>
+        public long? CreationUnix { get; init; }
+
+        /// <summary>
+        /// Everything <c>zfs get all</c> said, by property name, with the source beside the value.
+        /// Filled only for the one dataset an edit window is open on: the listing carries the dozen
+        /// columns the table draws, and reading sixty properties for every dataset on a host would
+        /// turn one round trip into a large one.
+        /// </summary>
+        public IReadOnlyDictionary<string, string> Properties { get; init; } =
+            new Dictionary<string, string>(StringComparer.Ordinal);
+
+        /// <summary>One property, or empty. Never throws for a property this dataset did not report.</summary>
+        public string Property(string name) =>
+            Properties.TryGetValue(name, out var value) ? value : "";
+
+        /// <summary>The pool this belongs to, which is everything before the first slash.</summary>
+        public string Pool => Name.Split('/')[0];
+
+        /// <summary>
+        /// The last component, which is what the tree draws: a row indented under <c>tank/vm</c> and
+        /// reading <c>tank/vm/db</c> spends its whole column restating its parent.
+        /// </summary>
+        public string LeafName => Name.Split('/')[^1];
+
+        /// <summary>Whether this is a pool's root dataset, which the tree folds into the pool's own row.</summary>
+        public bool IsPoolRoot => !Name.Contains('/');
+    }
+
+    /// <summary>
     /// One node of a pool's vdev tree, as the <c>config:</c> block of <c>zpool status</c> draws it:
     /// the pool at the root, its top-level vdevs below, and the leaf devices under those.
     ///
@@ -261,6 +364,24 @@ namespace VirtDeck.Models
         public IReadOnlyList<ZfsPool> Pools { get; init; } = [];
 
         /// <summary>
+        /// Every filesystem and volume on the host, flat and in <c>zfs list</c>'s own order, which is
+        /// by name. The tree is built from <see cref="ZfsDataset.Name"/> rather than carried here,
+        /// because a listing is a listing and the shape of it is the view's question.
+        /// </summary>
+        public IReadOnlyList<ZfsDataset> Datasets { get; init; } = [];
+
+        /// <summary>
+        /// Whether the dataset listing could be asked at all, which keeps "this pool has nothing in
+        /// it" apart from "nobody could look". The pool half has <see cref="Probed"/> for exactly
+        /// this and the two are separate because the halves fail separately: an imported pool whose
+        /// devices went away lists under <c>zpool</c> and refuses under <c>zfs</c>.
+        /// </summary>
+        public bool DatasetsProbed { get; init; }
+
+        /// <summary>Why the dataset listing failed, in ZFS's own words. Empty when it did not.</summary>
+        public string DatasetFailure { get; init; } = "";
+
+        /// <summary>
         /// Each whole disk's preferred stable name, keyed by kernel name. What the create dialog
         /// builds a vdev spec out of: a pool is made from <c>/dev/disk/by-id</c> paths and never
         /// from <c>/dev/sdX</c>, because kernel names follow discovery order and a pool whose disks
@@ -274,6 +395,8 @@ namespace VirtDeck.Models
 
         public bool Usable => Probed && ListFailure.Length == 0;
 
+        public bool DatasetsUsable => DatasetsProbed && DatasetFailure.Length == 0;
+
         /// <summary>The userland and the module disagree, which means a package was upgraded and nothing rebooted.</summary>
         public bool VersionSkew =>
             Version.Length > 0 && KmodVersion.Length > 0 &&
@@ -283,5 +406,78 @@ namespace VirtDeck.Models
         private static string Strip(string line) => line.Replace("-kmod", "", StringComparison.Ordinal);
 
         public static readonly ZfsReading NotProbed = new();
+    }
+
+    /// <summary>
+    /// One dataset's whole property set, as <c>zfs get -H -p -o property,value,source all</c> reports
+    /// it. What the edit window loads, and the only place in this feature that carries a property's
+    /// <b>source</b>.
+    ///
+    /// <para><b>The source is the half that makes the window honest.</b> A value read back without
+    /// it cannot tell a quota somebody set on this dataset from one it inherits from its parent, and
+    /// writing an inherited value back would quietly make it local: the dataset would stop following
+    /// its parent and nothing on screen would have said so. So every row draws where its value came
+    /// from, and Apply writes only what the user changed.</para>
+    ///
+    /// <para>A failure is a <b>value</b> and not an exception, for <see cref="ZpoolStatus"/>'s
+    /// reason: the window has to draw it.</para>
+    /// </summary>
+    public sealed record DatasetProperties
+    {
+        public string Dataset { get; init; } = "";
+
+        /// <summary>Property name to what ZFS said and where it came from.</summary>
+        public IReadOnlyDictionary<string, DatasetProperty> Values { get; init; } =
+            new Dictionary<string, DatasetProperty>(StringComparer.Ordinal);
+
+        public bool Probed { get; init; }
+
+        public string Failure { get; init; } = "";
+
+        public bool Usable => Probed && Failure.Length == 0;
+
+        /// <summary>One property, or an absent one. Never throws for something this build asked for and ZFS does not have.</summary>
+        public DatasetProperty Get(string name) =>
+            Values.TryGetValue(name, out var value) ? value : DatasetProperty.Absent;
+
+        public static readonly DatasetProperties NotProbed = new();
+    }
+
+    /// <summary>
+    /// One property: what it reads and where that came from.
+    /// </summary>
+    /// <param name="Source">
+    /// ZFS's own word, unparsed except for the one shape that carries a payload: <c>local</c>,
+    /// <c>default</c>, <c>-</c> for a read-only property, <c>temporary</c>, <c>received</c>, and
+    /// <c>inherited from tank</c>, whose parent is split out into <see cref="InheritedFrom"/>.
+    /// </param>
+    public readonly record struct DatasetProperty(string Value, string Source, bool Present)
+    {
+        public static readonly DatasetProperty Absent = new("", "", false);
+
+        /// <summary>Set on this dataset, so it can be cleared back to what its parent says.</summary>
+        public bool IsLocal => Source.Equals("local", StringComparison.Ordinal);
+
+        /// <summary>Nobody has ever set it, here or above.</summary>
+        public bool IsDefault => Source.Equals("default", StringComparison.Ordinal);
+
+        /// <summary>The dataset it is inherited from, or empty when it is not inherited.</summary>
+        public string InheritedFrom =>
+            Source.StartsWith("inherited from ", StringComparison.Ordinal)
+                ? Source["inherited from ".Length..].Trim()
+                : "";
+
+        /// <summary>
+        /// Where the value came from, in the words the edit window draws beside each field. ZFS's
+        /// own spelling survives anything this build does not know, which is
+        /// <c>ZfsNodeRow.VerdictOf</c>'s rule: a word from the host beats a word saying we have none.
+        /// </summary>
+        public string SourceText =>
+            !Present ? ""
+            : IsLocal ? "local"
+            : IsDefault ? "default"
+            : InheritedFrom.Length > 0 ? "inherited from " + InheritedFrom
+            : Source is "-" or "" ? "read only"
+            : Source;
     }
 }

@@ -71,7 +71,8 @@ in this index.
 | [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, and the listing the Dashboard shares. |
 | [user-accounts.md](docs/user-accounts.md) | Users and groups, the name suggestion, the password path over stdin, and deleting. |
 | [storage.md](docs/storage.md) | The host's disks from one `lsblk -J`, and what SMART says about each one. |
-| [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, and the full SMART reading. |
+| [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |
 | [storage-zfs.md](docs/storage-zfs.md) | The host's pools: listing, status, topology, create, scrub, import, export and destroy. |
+| [storage-zfs-datasets.md](docs/storage-zfs-datasets.md) | What is inside a pool, as a tree under it: filesystems and volumes, their properties, and create, edit, rename and destroy. |
 | [file-explorer.md](docs/file-explorer.md) | Browsing as the login user, the one-shot root retry, cut/copy/paste, deleting, transfers in both directions, and dragging. |
 | [terminal.md](docs/terminal.md) | One shell on the host as the logged-in user, and how the keyboard is handled across the three terminal surfaces. |

@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Storage.UnlockLuksDialog"
+        Title="Unlock"
+        Width="520" SizeToContent="Height" MinWidth="480"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #UnlockButton.Tag}">
+        <Button Name="UnlockButton" Content="Unlock" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <TextBlock Name="Subject" Classes="note" />
+
+      <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Passphrase" VerticalAlignment="Center" />
+        <!-- It never reaches a command line: the window hands it to cryptsetup over stdin, which is
+             the same route the sudo password already takes. -->
+        <TextBox Grid.Row="0" Grid.Column="1" Name="PassphraseBox" PasswordChar="•" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Open as" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Name="MappingBox" />
+      </Grid>
+
+      <!-- The device node the mapping will appear at, said out loud, because that is the name
+           everything else on the host will call it by. -->
+      <TextBlock Name="MappingNote" Classes="note" />
+
+      <StackPanel Classes="options">
+        <CheckBox Name="RememberBox" Content="Remember the passphrase for this session" />
+        <TextBlock Classes="subnote"
+                   Text="Kept in memory for as long as this connection lasts and nowhere else: not on disk, not in the OS secret store, and gone when the host is switched or VirtDeck closes. It fills this box in again rather than skipping the question." />
+      </StackPanel>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

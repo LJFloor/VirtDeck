@@ -33,9 +33,11 @@
 
   <DockPanel>
 
-    <!-- Refresh and Close, and a status line to their left for what the deeper read is doing. No
-         Cancel: nothing here writes, so there is no work in flight worth interrupting and the
-         window closing is the whole of how you stop looking. -->
+    <!-- Refresh and Close, and a status line to their left for what a read or a command is doing.
+         No Cancel, although this window does write now: every command here is one round trip that
+         either happened or did not, so there is no half-finished state to take back the way a
+         transfer or a package install has. What runs while one is in flight is nothing: Refresh and
+         the partition table's menu both grey out until it answers. -->
     <Border DockPanel.Dock="Bottom" Padding="16,12"
             BorderThickness="0,1,0,0" BorderBrush="#33808080" Background="#11808080">
       <Grid ColumnDefinitions="*,Auto">

@@ -1,0 +1,37 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Storage.DatasetRenameDialog"
+        Title="Rename dataset"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #RenameButton.Tag}">
+        <Button Name="RenameButton" Content="Rename" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold" />
+
+      <!-- The whole path and not just the last component, because zfs rename moves a dataset as
+           readily as it renames one and both are the same command. What it cannot do is move it to
+           another pool, which is a send and a receive, and Problem says so by name. -->
+      <StackPanel Classes="options">
+        <TextBlock Text="New name" />
+        <TextBox Name="NameBox" />
+      </StackPanel>
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="Everything under it moves with it, and a filesystem is remounted at its new place unless its mount point was set by hand. A dataset can be moved to another parent in the same pool by changing the path; moving it to another pool is a send and a receive, which is not here." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

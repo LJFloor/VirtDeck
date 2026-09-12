@@ -33,7 +33,7 @@ public partial class DestroyPoolDialog : Window
         Headline.Text = $"Destroy the pool {pool.Name}?";
         ConfirmPrompt.Text = $"Type {pool.Name} to confirm.";
 
-        var size = ZfsPoolRow.Bytes(pool.AllocatedBytes);
+        var size = ZfsNodeRow.Bytes(pool.AllocatedBytes);
         if (size.Length > 0)
         {
             MembersNote.IsVisible = true;

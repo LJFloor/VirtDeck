@@ -1,0 +1,95 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:s="clr-namespace:VirtDeck.Avalonia.Views.Storage"
+        x:Class="VirtDeck.Avalonia.Views.Storage.DatasetEditDialog"
+        Title="Dataset properties"
+        Width="600" Height="680" MinWidth="560" MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+
+  <!-- Declared once on the window rather than in each group, so no two of the four can drift apart
+       on what a property row looks like. A row is a label, an editor, where the value came from, and
+       the button that hands it back to the parent; which of the three editors is drawn is the row's
+       own answer, so there is one template and not three. -->
+  <Window.DataTemplates>
+    <DataTemplate DataType="s:DatasetPropertyRow">
+      <Grid ColumnDefinitions="120,*,120,Auto" Margin="0,0,0,4" ToolTip.Tip="{Binding Tip}">
+
+        <TextBlock Grid.Column="0" Text="{Binding Label}" VerticalAlignment="Center" Opacity="0.85" />
+
+        <TextBox Grid.Column="1" Text="{Binding Value, Mode=TwoWay}"
+                 IsVisible="{Binding IsText}" IsEnabled="{Binding IsEnabled}" />
+
+        <ComboBox Grid.Column="1" ItemsSource="{Binding Choices}"
+                  SelectedItem="{Binding Value, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch"
+                  IsVisible="{Binding IsChoice}" IsEnabled="{Binding IsEnabled}" />
+
+        <CheckBox Grid.Column="1" IsChecked="{Binding IsOn, Mode=TwoWay}"
+                  IsVisible="{Binding IsToggle}" IsEnabled="{Binding IsEnabled}"
+                  VerticalAlignment="Center" />
+
+        <TextBlock Grid.Column="2" Text="{Binding SourceText}" Opacity="0.6"
+                   VerticalAlignment="Center" Margin="8,0,0,0"
+                   TextTrimming="CharacterEllipsis" />
+
+        <!-- A disabled control is not hit-testable, so the reason a value cannot be handed back to
+             the parent hangs off an enabled Border, as CheckRow and ServiceRow do. The click is
+             caught once on the window rather than wired per row, which is how the ZFS tree's
+             chevron and the services list's autostart tick are both handled: the handler reads the
+             row off the source's DataContext, so Cancel and Apply pass straight through it. -->
+        <Border Grid.Column="3" Background="Transparent"
+                ToolTip.Tip="Clears the value set on this dataset so it follows its parent again. Only a value set here can be cleared.">
+          <Button Content="{Binding InheritText}" MinWidth="64"
+                  Theme="{StaticResource JbToolButton}"
+                  IsEnabled="{Binding CanInherit}" />
+        </Border>
+      </Grid>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12"
+            BorderThickness="0,1,0,0" BorderBrush="#33808080" Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Name="StatusText" Grid.Column="0" Opacity="0.7"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <Border Background="Transparent" ToolTip.Tip="{Binding #ApplyButton.Tag}">
+            <Button Name="ApplyButton" Content="Apply" MinWidth="88" IsDefault="True" Classes="accent" />
+          </Border>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <ScrollViewer>
+      <StackPanel Classes="page" Margin="16">
+
+        <TextBlock Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold" />
+
+        <TextBlock Name="LoadNote" Classes="note" TextWrapping="Wrap" />
+
+        <HeaderedContentControl Name="SpaceBox" Header="Space" Theme="{StaticResource JbGroupBox}" IsVisible="False">
+          <ItemsControl Name="SpaceRows" />
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Name="PerformanceBox" Header="Performance" Theme="{StaticResource JbGroupBox}" IsVisible="False">
+          <ItemsControl Name="PerformanceRows" />
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Name="BehaviourBox" Header="Behaviour" Theme="{StaticResource JbGroupBox}" IsVisible="False">
+          <ItemsControl Name="BehaviourRows" />
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Name="SharingBox" Header="Sharing" Theme="{StaticResource JbGroupBox}" IsVisible="False">
+          <ItemsControl Name="SharingRows" />
+        </HeaderedContentControl>
+
+        <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+      </StackPanel>
+    </ScrollViewer>
+
+  </DockPanel>
+</Window>

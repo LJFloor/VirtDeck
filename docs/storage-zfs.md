@@ -1,8 +1,9 @@
 # Storage: ZFS
 
 The second tab: the host's pools, what state each is in, and the commands that make, scrub, move and
-destroy one. `Views/ZfsPoolRow`, `Views/Storage/{PoolDetailsWindow,PoolGeneralTab,PoolStatusTab,PoolTopologyView,CreatePoolDialog,ImportPoolDialog,DestroyPoolDialog}`,
-`Core/Services/ZfsService`, `Core/Models/ZfsPool`.
+destroy one. `Views/ZfsNodeRow`, `Views/Storage/{PoolDetailsWindow,PoolGeneralTab,PoolStatusTab,PoolTopologyView,CreatePoolDialog,ImportPoolDialog,DestroyPoolDialog}`,
+`Core/Services/ZfsService`, `Core/Models/ZfsPool`. What is *inside* a pool is drawn in the same tree
+and is [storage-zfs-datasets.md](storage-zfs-datasets.md)'s subject.
 
 **A tab and not a module, and the argument is the same one that keeps `smartctl` out of
 `RequiredTools`.** A pool is built out of the disks the other tab already lists, so the create
@@ -141,12 +142,19 @@ ZFS, which is most of them, when the disks half is exactly as useful there.
   pool and is drawn as "feature flags" rather than as a missing value.
 - **A Refresh button, no poll and no event tail**, the disks tab's answer and for the same reason:
   nothing on a host announces a pool being created, and pools change about as often as accounts do.
+- **The table is a tree, and five of the pool's own columns left it to make room.** SIZE, the
+  capacity bar, FRAG, DEDUP and the health word are only ever a pool's, and holding a column open for
+  them across rows that are datasets would leave nine cells in ten blank. They are on the row's hover
+  and on the General page of the details window, which already drew every one of them; **health stays
+  on screen as the coloured dot**, which is the half that has to be visible without hovering.
+  [storage-zfs-datasets.md](storage-zfs-datasets.md) has the rest of that argument.
 
-**Not here yet on the ZFS tab:** datasets and zvols as objects of their own (a zvol is still created
-from the VM side, through `AddDiskDialog`); snapshots; send and receive; adding, removing or
-replacing a vdev; `zpool trim` and `zpool initialize`; encryption, which is left out on purpose
-because key management at boot and after import is modelled nowhere in the app and a pool nobody can
-unlock from VirtDeck is worse than no option; and dRAID.
+**Not here yet on the ZFS tab:** snapshots; send and receive; adding, removing or replacing a vdev;
+`zpool trim` and `zpool initialize`; encryption, which is left out on purpose because key management
+at boot and after import is modelled nowhere in the app and a pool nobody can unlock from VirtDeck is
+worse than no option; and dRAID. Datasets and zvols as objects of their own are now here, in
+[storage-zfs-datasets.md](storage-zfs-datasets.md); a VM's zvol is still *created* from the VM side
+through `AddDiskDialog`.
 
 **Not here yet:** starting a self-test; mounting and unmounting; formatting and partitioning; LVM,
 MD RAID and LUKS management; NFS and iSCSI; per-disk IO graphs (the sampler already reads

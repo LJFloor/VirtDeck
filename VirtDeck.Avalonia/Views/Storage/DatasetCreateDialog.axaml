@@ -1,0 +1,72 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Storage.DatasetCreateDialog"
+        Title="New dataset"
+        Width="520" SizeToContent="Height" MinWidth="480"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #CreateButton.Tag}">
+        <Button Name="CreateButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <!-- The parent is a picker rather than a fixed label, so the toolbar's New dataset works
+             with nothing selected and so a wrong right-click is fixed here rather than by starting
+             again. Volumes are not in it: a zvol is a block device and holds nothing. -->
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Inside" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="0" Grid.Column="1" Name="ParentBox" HorizontalAlignment="Stretch" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Name="NameBox" PlaceholderText="data" />
+      </Grid>
+
+      <!-- The whole path said out loud, because the box holds one component and the thing being
+           created is the other. -->
+      <TextBlock Name="PathNote" Classes="subnote" TextWrapping="Wrap" />
+
+      <StackPanel Classes="options" Orientation="Horizontal" Spacing="16">
+        <RadioButton Name="FilesystemRadio" Content="Filesystem" GroupName="Kind" IsChecked="True" />
+        <RadioButton Name="VolumeRadio" Content="Volume" GroupName="Kind" />
+      </StackPanel>
+      <TextBlock Name="KindNote" Classes="subnote" TextWrapping="Wrap" />
+
+      <HeaderedContentControl Header="Options" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Name="SizeLabel" Grid.Row="0" Grid.Column="0" Text="Size" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="SizeBox" PlaceholderText="40G" />
+
+            <TextBlock Name="BlockLabel" Grid.Row="1" Grid.Column="0" Text="Block size" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" Name="BlockBox" HorizontalAlignment="Stretch" />
+
+            <TextBlock Name="RecordLabel" Grid.Row="2" Grid.Column="0" Text="Record size" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="2" Grid.Column="1" Name="RecordBox" HorizontalAlignment="Stretch" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Compression" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="3" Grid.Column="1" Name="CompressionBox" HorizontalAlignment="Stretch" />
+
+            <TextBlock Name="QuotaLabel" Grid.Row="4" Grid.Column="0" Text="Quota" VerticalAlignment="Center" />
+            <TextBox Grid.Row="4" Grid.Column="1" Name="QuotaBox" PlaceholderText="none" />
+          </Grid>
+
+          <CheckBox Name="SparseBox" Content="Sparse, reserving no space up front" />
+          <TextBlock Name="SparseNote" Classes="subnote" TextWrapping="Wrap"
+                     Text="A sparse volume can be created larger than the pool and only takes up what is written to it. It also means the pool can fill up under a guest that thought it had room, which a guest filesystem handles far worse than a disk that was full to begin with." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

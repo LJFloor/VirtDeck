@@ -28,6 +28,13 @@ public sealed class DiskPartitionRow
 
     private readonly bool _swap;
 
+    /// <summary>
+    /// The device this row drew, which is what a command is issued against.
+    /// <c>StorageRow.Device</c> is exposed for the same reason: the row is a rendering of the
+    /// device and the window needs the thing rather than the rendering.
+    /// </summary>
+    public BlockDevice Device => _device;
+
     /// <summary>Levels below the disk. A partition is 0, a volume inside a LUKS container on it is 1.</summary>
     public int Depth { get; }
 
@@ -96,6 +103,47 @@ public sealed class DiskPartitionRow
             return string.Join(" · ", parts);
         }
     }
+
+    // ---- what the context menu may offer on this row -----------------------
+    //
+    // The predicates live here rather than in the view for the reason every other row model in this
+    // app answers its own questions: the view switches on four booleans and never reasons about
+    // lsblk's vocabulary. A command whose answer is no is **disabled and not hidden**, so the menu
+    // is the same four items on every row and says which of them this row can take.
+
+    /// <summary>
+    /// A formatted volume nobody has mounted. A LUKS container is excluded although it has an
+    /// FSTYPE, because <c>crypto_LUKS</c> is the header and not a filesystem: what is inside it
+    /// does not exist until the container is open, which is what Unlock is for.
+    /// </summary>
+    public bool CanMount =>
+        _device.FsType.Length > 0 &&
+        !IsLuks &&
+        !_swap &&
+        _device.Mountpoints.Count == 0;
+
+    /// <summary>
+    /// Mounted somewhere that may be taken out of the tree. <b>The root filesystem never is</b>:
+    /// unmounting <c>/</c> takes the host down with everything on it, and it is not a command worth
+    /// offering behind a confirmation. A device mounted at both <c>/</c> and somewhere else can
+    /// still be unmounted, from the other place only.
+    /// </summary>
+    public bool CanUnmount => _device.Mountpoints.Any(m => !IsRoot(m));
+
+    /// <summary>The one mount point nothing here will unmount.</summary>
+    public static bool IsRoot(string mountPoint) => mountPoint == "/";
+
+    /// <summary>
+    /// A closed LUKS container. Open is decided by the tree and not by a second reading: lsblk
+    /// draws the mapping as a <c>crypt</c> child of the container, so a container with one is
+    /// already unlocked.
+    /// </summary>
+    public bool CanUnlock => IsLuks && !_device.Children.Any(c => c.Type == "crypt");
+
+    /// <summary>An open LUKS mapping, which is the row Unlock created.</summary>
+    public bool CanLock => _device.Type == "crypt";
+
+    private bool IsLuks => _device.FsType == "crypto_LUKS";
 
     /// <summary>
     /// The disk's whole stack, flattened depth first in the host's own order.

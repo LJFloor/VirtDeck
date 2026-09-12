@@ -36,14 +36,14 @@ public sealed record PoolView(ZfsPool Pool, ZpoolStatus Status)
         Status.Usable && Status.State.Length > 0 ? Status.State : Pool.HealthWord;
 
     /// <summary>The app's own word for that state.</summary>
-    public string Verdict => ZfsPoolRow.VerdictOf(Health, StateWord);
+    public string Verdict => ZfsNodeRow.VerdictOf(Health, StateWord);
 
     /// <summary>
     /// Never null, for the reason it is never null on a row: a null <c>IBrush</c> bound to
     /// <c>Foreground</c> is a real local value that suppresses the inherited one rather than
     /// falling back to it, so Avalonia draws nothing at all.
     /// </summary>
-    public IBrush StateBrush => ZfsPoolRow.BrushOf(Health);
+    public IBrush StateBrush => ZfsNodeRow.BrushOf(Health);
 
     /// <summary>Whether a scrub or resilver is running, which is what the Status page's button reads.</summary>
     public bool ScanRunning => Status.ScanRunning;

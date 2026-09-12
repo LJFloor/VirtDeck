@@ -27,17 +27,31 @@ namespace VirtDeck.Avalonia.Views.Storage;
 /// is also what finally uses <c>DiskHealth.Model</c>, <c>.Serial</c> and <c>.Firmware</c>, which
 /// were parsed and read by nothing at all before this window existed.</para>
 /// </summary>
-public partial class DiskGeneralTab : UserControl, IDiskTab
+public partial class DiskGeneralTab : UserControl, IDiskTab, IDiskPartitionCommands
 {
     private readonly ObservableCollection<DiskFact> _left = [];
     private readonly ObservableCollection<DiskFact> _right = [];
+
+    /// <summary>
+    /// The partition table's context menu, passed straight through.
+    ///
+    /// <para>The table is a control this page hosts and not a page, so the window's tab walk cannot
+    /// reach it; this forwards, which is the same relationship <see cref="Show"/> already has with
+    /// it. Nothing is decided on the way past: the page neither holds a service nor knows what a
+    /// mount is.</para>
+    /// </summary>
+    public event Action<PartitionRequest>? CommandRequested;
 
     public DiskGeneralTab()
     {
         InitializeComponent();
         LeftFacts.ItemsSource = _left;
         RightFacts.ItemsSource = _right;
+
+        PartitionTable.CommandRequested += request => CommandRequested?.Invoke(request);
     }
+
+    public void SetBusy(bool busy) => PartitionTable.SetBusy(busy);
 
     public void Show(DiskView view)
     {

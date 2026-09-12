@@ -428,6 +428,23 @@ namespace VirtDeck.Models
         /// <summary>What <c>lsblk --version</c> said, for the status bar.</summary>
         public string LsblkVersion { get; init; } = "";
 
+        /// <summary>
+        /// Whether <c>cryptsetup</c> is on the host, which is what decides whether Unlock and Lock
+        /// are offered. It rides this listing rather than a probe of its own because the listing is
+        /// a round trip that is already being paid for, and it is a <b>stated answer</b>: the two
+        /// commands are disabled with a reason rather than hidden, and every re-read asks again, so
+        /// installing the package mid-session is not a dead end.
+        /// </summary>
+        public bool HasCryptsetup { get; init; }
+
+        /// <summary>
+        /// Whether <c>findmnt</c> is on the host, so an <c>/etc/fstab</c> line can be checked before
+        /// it is installed. Absent, the write still happens and says it went unverified: the line is
+        /// only ever written after the mount it describes has already succeeded, which is the real
+        /// safety mechanism and does not depend on this.
+        /// </summary>
+        public bool HasFindmnt { get; init; }
+
         /// <summary>Every device in the tree, depth first, which is what the counts are taken over.</summary>
         public IEnumerable<BlockDevice> All() => Roots.SelectMany(r => r.SelfAndDescendants());
     }
@@ -470,4 +487,29 @@ namespace VirtDeck.Models
 
         public static readonly HealthReading NotProbed = new();
     }
+
+    /// <summary>
+    /// One <c>mount</c>, as the dialog settled it. <see cref="Options"/> is what goes after
+    /// <c>-o</c> and is left empty rather than spelled <c>defaults</c>, so the flag is omitted
+    /// altogether when there is nothing to say.
+    /// </summary>
+    public sealed record MountRequest(string Device, string MountPoint, string Options);
+
+    /// <summary>
+    /// One line for <c>/etc/fstab</c>, already in the form it will be written in:
+    /// <see cref="MountPoint"/> carries fstab's own <c>\040</c> escaping, and
+    /// <see cref="Options"/> already includes <c>nofail</c>.
+    /// </summary>
+    /// <param name="Spec">
+    /// How the line names the device: <c>UUID=</c> where there is one, else <c>PARTUUID=</c>, else
+    /// the path. <c>StorageService.FstabSpec</c> is the one place that decides, so the preview in
+    /// the dialog and the text in the file cannot drift.
+    /// </param>
+    public sealed record FstabRequest(string Spec, string MountPoint, string FsType, string Options);
+
+    /// <summary>
+    /// One <c>cryptsetup open</c>. The passphrase is here only for the length of the call: it goes
+    /// over stdin and never onto a command line, the way the sudo password already does.
+    /// </summary>
+    public sealed record UnlockRequest(string Device, string Mapping, string Passphrase);
 }

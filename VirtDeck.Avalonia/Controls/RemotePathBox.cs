@@ -84,6 +84,13 @@ public sealed class RemotePathBox : UserControl
 
     public bool SelectMultiple { get; set; }
 
+    /// <summary>
+    /// Whether the browser should pick a folder rather than a file. Off by default, so every
+    /// existing caller (an ISO, a disk image, an export destination) is unchanged; the mount dialog
+    /// sets it, because a mount point is a directory.
+    /// </summary>
+    public bool DirectoriesOnly { get; set; }
+
     /// <summary>Directory the browser opens in while the box is still empty. Ignored once it has a path.</summary>
     public string StartDirectory { get; set; } = "";
 
@@ -98,6 +105,18 @@ public sealed class RemotePathBox : UserControl
     {
         get => _text.Text ?? "";
         set => _text.Text = value;
+    }
+
+    /// <summary>
+    /// Focuses the text field with the caret at the end, for a dialog that opens on a suggestion
+    /// somebody may want to edit rather than replace. The inner <c>TextBox</c> is private, so this
+    /// is how a caller reaches it; <c>Focus()</c> on the control itself would land on the
+    /// <c>UserControl</c> and type nowhere.
+    /// </summary>
+    public void FocusPath()
+    {
+        _text.Focus();
+        _text.CaretIndex = (_text.Text ?? "").Length;
     }
 
     public bool IsReadOnly
@@ -117,7 +136,8 @@ public sealed class RemotePathBox : UserControl
         if (Files == null || TopLevel.GetTopLevel(this) is not Window owner) return;
         var start = Path.Trim();
         if (start.Length == 0) start = StartDirectory;
-        var dlg = new RemoteFileBrowserDialog(Files, start, Filter, SelectMultiple, DialogTitle);
+        var dlg = new RemoteFileBrowserDialog(
+            Files, start, Filter, SelectMultiple, DialogTitle, DirectoriesOnly);
         if (await dlg.ShowDialog<bool?>(owner) is true && dlg.SelectedPath is { } p)
         {
             Path = SelectMultiple ? string.Join("; ", dlg.SelectedPaths) : p;

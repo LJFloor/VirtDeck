@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Input.Platform;
 using Avalonia.VisualTree;
 using VirtDeck.Avalonia.Controls;
@@ -15,11 +16,15 @@ namespace VirtDeck.Avalonia.Views;
 /// <summary>
 /// What the host is made of: the disks in it, and what SMART says about each one.
 ///
-/// <para><b>Read-only, on purpose.</b> Cockpit's storage page is also where a disk is partitioned,
-/// formatted, grown, encrypted and put into a volume group; none of that is here. What is here is
-/// the half that answers "what is this machine and is any of it about to fail", which is the half a
-/// libvirt host's operator needs before the guests find out for them. Nothing forecloses the rest:
-/// the listing a format dialog would need is the listing this module already builds.</para>
+/// <para><b>It reads the hardware and it does not reshape it.</b> Cockpit's storage page is also
+/// where a disk is partitioned, formatted, grown and put into a volume group; none of that is here.
+/// What is here is the half that answers "what is this machine and is any of it about to fail",
+/// which is the half a libvirt host's operator needs before the guests find out for them. The one
+/// thing that has crossed that line is <b>reaching what is already on the disk</b>: the details
+/// window's partition table mounts and unmounts a volume and opens and closes a LUKS container,
+/// because a formatted partition nobody can get at is a fact the page was stating and refusing to
+/// act on. Nothing forecloses the rest either: the listing a format dialog would need is the listing
+/// this module already builds.</para>
 ///
 /// <para><b>One row per disk, and everything else is in a window.</b> This table used to be the
 /// whole block-device tree flattened with an indent and a chevron, over a details pane in a
@@ -68,8 +73,19 @@ public partial class StorageModule : UserControl, IModule
 
     private ZfsService? _zfs;
 
-    private readonly ObservableCollection<ZfsPoolRow> _poolRows = [];
-    private readonly Dictionary<string, ZfsPoolRow> _poolByKey = new(StringComparer.Ordinal);
+    private readonly ObservableCollection<ZfsNodeRow> _zfsRows = [];
+    private readonly Dictionary<string, ZfsNodeRow> _zfsByKey = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Which parents are folded shut, by <see cref="ZfsNodeRow.Key"/> and so by their place in the
+    /// tree.
+    ///
+    /// <para><b>Collapsed rather than expanded, because the default has to be open</b>: a pool with
+    /// its datasets hidden is the one view nobody came for, and a set of what is closed says that
+    /// with an empty set rather than with a pass over the listing to fill one in. Session state on
+    /// the module, exactly as the sort state and the needle are.</para>
+    /// </summary>
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
 
     /// <summary>Open pool details windows, keyed by pool name, exactly as <see cref="_details"/> is by kname.</summary>
     private readonly Dictionary<string, PoolDetailsWindow> _poolDetails = new(StringComparer.Ordinal);
@@ -85,8 +101,8 @@ public partial class StorageModule : UserControl, IModule
     /// </summary>
     private bool _zfsBusy;
 
-    private TableSort? _poolSortOrNull;
-    private TableSort PoolSort => _poolSortOrNull!;
+    private TableSort? _zfsSortOrNull;
+    private TableSort ZfsSort => _zfsSortOrNull!;
 
     /// <summary>
     /// Which of the four SMART columns this host earns, recomputed from the health pass on every
@@ -122,25 +138,40 @@ public partial class StorageModule : UserControl, IModule
 
         DeviceList.ContextRequested += (_, _) => UpdateMenu();
 
-        PoolList.ItemsSource = _poolRows;
+        ZfsTree.ItemsSource = _zfsRows;
 
-        _poolSortOrNull = new TableSort(PoolHeaderStrip);
-        _poolSortOrNull.Changed += PopulatePools;
+        _zfsSortOrNull = new TableSort(ZfsHeaderStrip);
+        _zfsSortOrNull.Changed += PopulateZfs;
 
-        ZfsRefreshButton.Tag = "Read the host's ZFS pools again";
+        ZfsSearch.Changed += PopulateZfs;
+        FilterBox.AttachFindShortcut(this, () => Current == Tab.Zfs ? ZfsSearch : null);
+
+        ZfsRefreshButton.Tag = "Read the host's ZFS pools and datasets again";
         ZfsRefreshButton.Click += async (_, _) => await RefreshZfsAsync();
         NewPoolButton.Click += async (_, _) => await CreatePoolAsync();
+        NewDatasetButton.Click += async (_, _) => await NewDatasetAsync();
         ImportPoolButton.Click += async (_, _) => await ImportPoolAsync();
 
-        PoolList.DoubleTapped += OnPoolDoubleTapped;
-        PoolList.SelectionChanged += (_, _) => UpdatePoolMenu();
-        PoolList.ContextRequested += (_, _) => UpdatePoolMenu();
+        ZfsTree.DoubleTapped += OnZfsDoubleTapped;
+        ZfsTree.SelectionChanged += (_, _) => UpdateZfsMenu();
+        ZfsTree.ContextRequested += (_, _) => UpdateZfsMenu();
+
+        // The chevron is a Button inside the row, so the click is caught once here rather than
+        // wired per row: the idiom the services module uses for its in-row autostart tick. There is
+        // only one button in a ZFS row, so nothing has to work out which.
+        ZfsTree.AddHandler(Button.ClickEvent, OnZfsRowButtonClicked);
 
         MenuPoolDetails.Click += (_, _) => OpenPoolDetailsForSelected();
+        MenuNewDataset.Click += async (_, _) => await NewDatasetAsync();
+        MenuEditDataset.Click += async (_, _) => await EditDatasetAsync();
+        MenuRenameDataset.Click += async (_, _) => await RenameDatasetAsync();
+        MenuDestroyDataset.Click += async (_, _) => await DestroyDatasetAsync();
         MenuScrub.Click += async (_, _) => await ScrubSelectedAsync(stop: false);
         MenuStopScrub.Click += async (_, _) => await ScrubSelectedAsync(stop: true);
         MenuExport.Click += async (_, _) => await ExportSelectedAsync();
         MenuDestroy.Click += async (_, _) => await DestroySelectedAsync();
+        MenuExpandAll.Click += (_, _) => SetAllFolded(false);
+        MenuCollapseAll.Click += (_, _) => SetAllFolded(true);
         MenuCopyPoolName.Click += async (_, _) => await CopyPoolNameAsync();
 
         // The Source test is not defensive noise. SelectionChanged is declared on
@@ -152,14 +183,14 @@ public partial class StorageModule : UserControl, IModule
             if (!ReferenceEquals(e.Source, Tabs)) return;
             PaintStatus();
             UpdateMenu();
-            UpdatePoolMenu();
+            UpdateZfsMenu();
             await RefreshActiveAsync();
         };
 
         UpdateMenu();
-        UpdatePoolMenu();
+        UpdateZfsMenu();
         Populate();
-        PopulatePools();
+        PopulateZfs();
     }
 
     /// <summary>The two subjects this module draws, in tab order.</summary>
@@ -213,9 +244,17 @@ public partial class StorageModule : UserControl, IModule
     {
         _storage = new StorageService(ssh);
         _zfs = new ZfsService(ssh);
+
+        // Only so the disk details window's mount dialog can browse for a mount point. This module
+        // lists no files itself; the picker takes a RemoteFileService rather than reaching one
+        // through another service, which is the rule every remote picker in the app follows.
+        _files = new RemoteFileService(ssh);
     }
 
     private ZfsService Zfs => _zfs ?? throw new InvalidOperationException("Module not attached.");
+
+    /// <summary>Handed to the disk details window so its mount dialog can browse for a directory.</summary>
+    private RemoteFileService? _files;
 
     public async Task ActivateAsync()
     {
@@ -224,7 +263,7 @@ public partial class StorageModule : UserControl, IModule
         // Draw what is already in hand before the round trip that replaces it, so a re-entry is not
         // a blank page for as long as the host takes to answer.
         Populate();
-        PopulatePools();
+        PopulateZfs();
         PaintStatus();
 
         await RefreshActiveAsync();
@@ -256,6 +295,8 @@ public partial class StorageModule : UserControl, IModule
     /// </summary>
     public void Deactivate()
     {
+        ZfsSearch.Cancel();
+
         _cts.Cancel();
         _cts.Dispose();
         _cts = new CancellationTokenSource();
@@ -533,7 +574,7 @@ public partial class StorageModule : UserControl, IModule
             return;
         }
 
-        var window = new DiskDetailsWindow(Storage, ViewOf(row));
+        var window = new DiskDetailsWindow(Storage, _files, ViewOf(row));
         _details[row.Key] = window;
         window.Closed += (_, _) =>
         {
@@ -552,6 +593,7 @@ public partial class StorageModule : UserControl, IModule
     private DiskView ViewOf(StorageRow row) => new(
         row.Device,
         _layout.SwapDevices,
+        _layout.HasCryptsetup,
         row.Health,
         row.HealthProbed,
         _health.Failure,
@@ -632,7 +674,7 @@ public partial class StorageModule : UserControl, IModule
     }
 
     /// <summary>
-    /// The ZFS page's two slots: how many pools on the left, what version of ZFS on the right.
+    /// The ZFS page's two slots: what is in the tree on the left, what version of ZFS on the right.
     ///
     /// <para>The right slot carries the <b>userland</b> version, and it names the kernel module's
     /// too when the two disagree. That is not trivia: the userland is what decides which flags
@@ -644,17 +686,31 @@ public partial class StorageModule : UserControl, IModule
     {
         if (!_zfsRead)
         {
-            SetStatus("Reading the host's ZFS pools...");
+            SetStatus("Reading the host's ZFS pools and datasets...");
             SetCaps("");
             return;
         }
 
-        var n = _poolRows.Count;
+        // Counted over the listing rather than over the rows, because a needle or a folded pool
+        // narrows what is drawn and neither changes what the host has. The needle says so itself
+        // with the suffix below, which is what every other module's filtered count does.
+        var pools = _reading.Pools.Count;
+        var datasets = _reading.Datasets.Count(d => !d.IsPoolRoot);
+
+        var parts = new List<string>();
+        Add(parts, pools, "pool");
+        Add(parts, datasets, "dataset");
+
+        // A dataset listing that failed under pools that read is said <b>beside</b> the count rather
+        // than instead of it: the pools on screen are real and the tree is drawing them, so
+        // replacing the count would claim the whole page had failed.
         SetStatus(
             !_reading.Available ? "ZFS not installed."
             : _reading.ListFailure.Length > 0 ? "Pools could not be listed."
-            : n == 0 ? "No pools."
-            : $"{n} pool{(n == 1 ? "" : "s")}");
+            : parts.Count == 0 ? "No pools."
+            : string.Join(", ", parts)
+              + (_reading.DatasetFailure.Length > 0 ? " · datasets could not be listed" : "")
+              + (ZfsSearch.HasNeedle ? " · filtered" : ""));
 
         if (!_reading.Available) { SetCaps("zpool not installed"); return; }
 
@@ -741,7 +797,7 @@ public partial class StorageModule : UserControl, IModule
             _zfsRead = true;
 
             SyncZfsTab();
-            PopulatePools();
+            PopulateZfs();
             PaintStatus();
         }
         catch (OperationCanceledException)
@@ -757,13 +813,19 @@ public partial class StorageModule : UserControl, IModule
             _reading = new ZfsReading { Available = true, Probed = true, ListFailure = Trim(ex.Message) };
             _zfsRead = true;
             SyncZfsTab();
-            PopulatePools();
+            PopulateZfs();
             PaintStatus();
         }
         finally
         {
             _zfsBusy = false;
             ZfsRefreshButton.IsEnabled = true;
+
+            // Re-enabled from here and not only from the populate above, which ran while the read
+            // still held the busy flag. The context menu gets away without this because it is
+            // rebuilt on ContextRequested; the New dataset button in the toolbar is not, and would
+            // have stayed disabled until the next click somewhere else.
+            UpdateZfsMenu();
         }
     }
 
@@ -800,76 +862,305 @@ public partial class StorageModule : UserControl, IModule
         if (!have && Current == Tab.Zfs) Tabs.SelectedIndex = (int)Tab.Disks;
     }
 
-    // ---- the rows ----------------------------------------------------------
-
-    private IEnumerable<ZfsPool> Pools() => OrderPools(_reading.Pools);
-
-    private IEnumerable<ZfsPool> OrderPools(IReadOnlyList<ZfsPool> pools) => PoolSort.Key switch
-    {
-        "pool" => PoolSort.By(pools, p => p.Name, StringComparer.OrdinalIgnoreCase),
-
-        // Every figure sorts on the nullable straight, so a pool that reported `-` for a column
-        // goes to one end rather than being handed an invented zero in among the real readings.
-        // .NET orders null below every value, which puts the silent ones first ascending and last
-        // descending, and descending is the telling click for all of these.
-        "size" => PoolSort.By(pools, p => p.SizeBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "alloc" => PoolSort.By(pools, p => p.AllocatedBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "free" => PoolSort.By(pools, p => p.FreeBytes).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "cap" => PoolSort.By(pools, p => p.CapacityPercent).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "frag" => PoolSort.By(pools, p => p.FragmentationPercent).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-        "dedup" => PoolSort.By(pools, p => p.DedupRatio).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-
-        "health" => PoolSort.By(pools, PoolHealthOrder).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase),
-
-        // The host's own order, which is what a third click on a heading comes back to.
-        _ => pools,
-    };
+    // ---- the tree ----------------------------------------------------------
 
     /// <summary>
-    /// Worst first, so one ascending click puts the pools worth looking at at the top. Sorting by
-    /// health to be shown the healthy ones is not a thing anybody clicks for, which is the argument
-    /// that already orders the disks table and the updates table.
+    /// One node of the ZFS tree while it is being built: a pool, or a dataset, and what is under it.
+    ///
+    /// <para><b>A pool node carries the pool's root dataset as well</b>, because a pool named
+    /// <c>tank</c> and the dataset named <c>tank</c> are one object with two sets of facts. Drawing
+    /// them as two rows would put a <c>tank</c> under every <c>tank</c> and say nothing with it.</para>
     /// </summary>
-    private static int PoolHealthOrder(ZfsPool pool) => pool.Health switch
+    internal sealed record ZfsNode(string Key, ZfsPool? Pool, ZfsDataset? Dataset, List<ZfsNode> Children);
+
+    /// <summary>
+    /// The listing turned into a tree.
+    ///
+    /// <para><b>The shape is read off the names and is never carried in the listing</b>, because
+    /// that is where ZFS keeps it: <c>tank/vm/db</c> says what it is under. So a node is attached to
+    /// whatever its name says its parent is, and a dataset whose parent is somehow missing from the
+    /// listing climbs to the nearest ancestor that is there rather than being dropped. That is
+    /// <c>ReadConfig</c>'s rule for the vdev tree and it is here for the same reason: a row nobody
+    /// can see is worse than a row at the wrong indent.</para>
+    /// </summary>
+    /// <remarks>
+    /// A pure function of the listing, and <c>internal static</c> for the reason
+    /// <c>ZfsService.ParsePools</c> and <c>BuildCreateArgv</c> are: the shape of the tree is the
+    /// part of this worth checking without a window around it.
+    /// </remarks>
+    internal static List<ZfsNode> BuildTree(ZfsReading reading)
     {
-        ZfsHealth.Faulted => 0,
-        ZfsHealth.Unavail => 1,
-        ZfsHealth.Suspended => 2,
-        ZfsHealth.Degraded => 3,
-        ZfsHealth.Removed => 4,
-        ZfsHealth.Offline => 5,
-        ZfsHealth.Unknown => 6,
-        _ => 7,
-    };
+        var roots = new List<ZfsNode>();
+        var byName = new Dictionary<string, ZfsNode>(StringComparer.Ordinal);
 
-    private void PopulatePools()
-    {
-        var pools = Pools().ToList();
+        foreach (var pool in reading.Pools)
+        {
+            if (byName.ContainsKey(pool.Name)) continue;
+            var node = new ZfsNode(pool.Name, pool, null, []);
+            byName[pool.Name] = node;
+            roots.Add(node);
+        }
 
-        TableRows.Merge(
-            _poolRows, _poolByKey, pools,
-            p => p.Name,
-            p => new ZfsPoolRow(p),
-            (row, p) => row.Update(p),
-            _ => pools.Select(p => _poolByKey[p.Name]));
+        // Sorted by depth so a parent is always in the index before its children ask for it, which
+        // is what lets one pass do the whole attach. zfs list already answers in name order, which
+        // is nearly this, but "nearly" is how a child ends up at the root on the one host that
+        // orders differently.
+        foreach (var dataset in reading.Datasets.OrderBy(d => d.Name.Count(c => c == '/'))
+                                                 .ThenBy(d => d.Name, StringComparer.Ordinal))
+        {
+            if (dataset.IsPoolRoot)
+            {
+                // The pool's own dataset. It joins the pool's row rather than becoming one.
+                if (byName.TryGetValue(dataset.Name, out var pooled))
+                {
+                    byName[dataset.Name] = pooled with { Dataset = dataset };
+                    Replace(roots, pooled, byName[dataset.Name]);
+                }
+                else
+                {
+                    // A pool zfs can see and zpool could not list, which is what a pool listing
+                    // that failed looks like from this side. Drawn rather than dropped.
+                    var orphan = new ZfsNode(dataset.Name, null, dataset, []);
+                    byName[dataset.Name] = orphan;
+                    roots.Add(orphan);
+                }
 
-        DrawPoolEmpty();
-        UpdatePoolMenu();
+                continue;
+            }
+
+            var node = new ZfsNode(dataset.Name, null, dataset, []);
+            byName[dataset.Name] = node;
+
+            var parent = ParentOf(dataset.Name, byName);
+            if (parent is null) roots.Add(node);
+            else parent.Children.Add(node);
+        }
+
+        return roots;
     }
 
     /// <summary>
-    /// Five empty tables that are five different answers, and never one drawn as another: a host
-    /// with no zpool, a host with the tools installed and the kernel module not loaded, a listing
-    /// that failed with ZFS's own reason on it, a listing nobody could run, and a host that
-    /// genuinely has no pools. Only the last of those is a state to be pleased about.
+    /// Swaps a node out of whichever list holds it. Needed only because a pool node is rebuilt when
+    /// its root dataset arrives, and a record is replaced rather than mutated.
     /// </summary>
-    private void DrawPoolEmpty()
+    private static void Replace(List<ZfsNode> list, ZfsNode from, ZfsNode to)
     {
-        PoolEmpty.IsVisible = _poolRows.Count == 0;
-        if (_poolRows.Count > 0) return;
+        var i = list.IndexOf(from);
+        if (i >= 0) list[i] = to;
+    }
 
-        PoolEmpty.Text =
-            !_zfsRead ? "Reading the host's ZFS pools..."
+    /// <summary>
+    /// The nearest ancestor of a dataset that is actually in the listing, by trimming components off
+    /// its name. Null when none is, which puts the row at the root.
+    /// </summary>
+    private static ZfsNode? ParentOf(string name, IReadOnlyDictionary<string, ZfsNode> byName)
+    {
+        var cut = name.LastIndexOf('/');
+        while (cut > 0)
+        {
+            var parent = name[..cut];
+            if (byName.TryGetValue(parent, out var node)) return node;
+            cut = parent.LastIndexOf('/');
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// **Siblings are ordered at every level, not just the roots.** A tree sorted only at the top
+    /// would put its pools in the asked-for order and leave every dataset under them in the host's,
+    /// which reads as a sort that half worked. A third click still comes back to the tree's own
+    /// order, which here is by name at every depth.
+    /// </summary>
+    private IEnumerable<ZfsNode> OrderNodes(IEnumerable<ZfsNode> nodes)
+    {
+        var list = nodes as IReadOnlyList<ZfsNode> ?? nodes.ToList();
+
+        return ZfsSort.Key switch
+        {
+            "name" => ZfsSort.By(list, n => n.Key, StringComparer.OrdinalIgnoreCase),
+            "type" => ZfsSort.By(list, KindOrder).ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+
+            // Every figure sorts on the nullable straight, so a row that reported `-` for a column
+            // goes to one end rather than being handed an invented zero in among the real readings.
+            // .NET orders null below every value, which puts the silent ones first ascending and
+            // last descending, and descending is the telling click for all of these.
+            "used" => ZfsSort.By(list, n => n.Dataset?.UsedBytes ?? n.Pool?.AllocatedBytes)
+                             .ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+            "avail" => ZfsSort.By(list, n => n.Dataset?.AvailableBytes ?? n.Pool?.FreeBytes)
+                              .ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+            "refer" => ZfsSort.By(list, n => n.Dataset?.ReferencedBytes)
+                              .ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+            "compress" => ZfsSort.By(list, n => n.Dataset?.Compression ?? "", StringComparer.OrdinalIgnoreCase)
+                                 .ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+            "mount" => ZfsSort.By(list, n => n.Dataset?.Mountpoint ?? "", StringComparer.OrdinalIgnoreCase)
+                              .ThenBy(n => n.Key, StringComparer.OrdinalIgnoreCase),
+
+            // The tree's own order, which is what a third click on a heading comes back to: pools as
+            // zpool listed them, and datasets by name under each.
+            _ => list,
+        };
+    }
+
+    /// <summary>Pools first, then filesystems, then volumes, which is the order the tree nests in.</summary>
+    private static int KindOrder(ZfsNode node) =>
+        node.Pool is not null ? 0
+        : node.Dataset?.Type == ZfsDatasetType.Volume ? 2
+        : 1;
+
+    /// <summary>
+    /// Which rows the needle leaves standing, or null when there is no needle.
+    ///
+    /// <para><b>A match keeps its parents, and that is the whole of the rule that makes filtering a
+    /// tree work.</b> Matching <c>db</c> against <c>tank/vm/db</c> and drawing that row alone would
+    /// leave one row sitting at an indent of two with nothing above it, which reads as a broken
+    /// table rather than as an answer. So a node is kept when it matches or when anything under it
+    /// does, and a kept parent is drawn open whatever the fold state says: a match hidden inside a
+    /// folded pool is a search that answered with nothing.</para>
+    ///
+    /// <para>The match is against the <b>full</b> name and the mount point, not the leaf the cell
+    /// draws: somebody typing <c>tank/vm</c> means the path, and the column showing only the last
+    /// component is a drawing decision rather than a claim about what the row is called.</para>
+    /// </summary>
+    private HashSet<string>? MatchingKeys(IReadOnlyList<ZfsNode> roots)
+    {
+        if (!ZfsSearch.HasNeedle) return null;
+
+        var needle = ZfsSearch.Needle;
+        var keep = new HashSet<string>(StringComparer.Ordinal);
+
+        bool Visit(ZfsNode node)
+        {
+            var any = false;
+
+            // |= and not ||=, so every child is visited: short-circuiting here would keep the
+            // first matching branch and drop every one after it.
+            foreach (var child in node.Children) any |= Visit(child);
+
+            if (!any && !Matches(node, needle)) return false;
+
+            keep.Add(node.Key);
+            return true;
+        }
+
+        foreach (var root in roots) Visit(root);
+        return keep;
+    }
+
+    private static bool Matches(ZfsNode node, string needle) =>
+        node.Key.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+        (node.Dataset?.Mountpoint.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    /// <summary>
+    /// The tree flattened into the rows the list draws, in order, skipping what is folded shut.
+    /// </summary>
+    private void Walk(
+        IEnumerable<ZfsNode> nodes, int depth, IReadOnlySet<string>? keep,
+        List<(ZfsNode Node, int Depth, bool HasChildren)> into)
+    {
+        foreach (var node in OrderNodes(nodes))
+        {
+            if (keep is not null && !keep.Contains(node.Key)) continue;
+
+            var children = keep is null
+                ? node.Children
+                : node.Children.Where(c => keep.Contains(c.Key)).ToList();
+
+            into.Add((node, depth, children.Count > 0));
+
+            // A needle draws the whole of what it kept, open. Otherwise the fold is the user's.
+            if (keep is null && _collapsed.Contains(node.Key)) continue;
+            Walk(children, depth + 1, keep, into);
+        }
+    }
+
+    private void PopulateZfs()
+    {
+        var roots = BuildTree(_reading);
+        var keep = MatchingKeys(roots);
+
+        var flat = new List<(ZfsNode Node, int Depth, bool HasChildren)>();
+        Walk(roots, 0, keep, flat);
+
+        // While a needle is in the box every row is drawn open and no chevron is drawn at all: one
+        // that could not fold what it points at would be a control answering a click by doing
+        // nothing, which is what TableSort.MakeInert exists to avoid one heading at a time.
+        var foldable = keep is null;
+
+        TableRows.Merge(
+            _zfsRows, _zfsByKey, flat,
+            v => v.Node.Key,
+            v => new ZfsNodeRow(
+                v.Node.Key, v.Node.Pool, v.Node.Dataset, v.Depth, v.HasChildren,
+                !foldable || !_collapsed.Contains(v.Node.Key), foldable),
+            (row, v) => row.Update(
+                v.Node.Pool, v.Node.Dataset, v.Depth, v.HasChildren,
+                !foldable || !_collapsed.Contains(v.Node.Key), foldable),
+
+            // The wanted order is exactly the order the flatten produced, so it is rebuilt from that
+            // rather than sorted again here. Merge has already put every one of these in the index
+            // by the time this runs.
+            _ => flat.Select(v => _zfsByKey[v.Node.Key]));
+
+        DrawZfsEmpty();
+        UpdateZfsMenu();
+        if (Current == Tab.Zfs) PaintZfsStatus();
+    }
+
+    private void OnZfsRowButtonClicked(object? sender, RoutedEventArgs e)
+    {
+        if (e.Source is StyledElement { DataContext: ZfsNodeRow row }) Toggle(row);
+    }
+
+    private void Toggle(ZfsNodeRow row)
+    {
+        if (!row.HasChildren || ZfsSearch.HasNeedle) return;
+        if (!_collapsed.Remove(row.Key)) _collapsed.Add(row.Key);
+        PopulateZfs();
+    }
+
+    /// <summary>
+    /// Folds every parent shut or opens every one. Collapsing is done by asking for the whole tree
+    /// with nothing folded and taking the keys of what has children, rather than by walking the
+    /// listing: the key is a position in the tree and only the walk knows one.
+    /// </summary>
+    private void SetAllFolded(bool folded)
+    {
+        _collapsed.Clear();
+
+        if (folded)
+        {
+            var flat = new List<(ZfsNode Node, int Depth, bool HasChildren)>();
+            Walk(BuildTree(_reading), 0, null, flat);
+            foreach (var (node, _, hasChildren) in flat)
+                if (hasChildren) _collapsed.Add(node.Key);
+        }
+
+        PopulateZfs();
+    }
+
+    /// <summary>
+    /// Six empty tables that are six different answers, and never one drawn as another: a host with
+    /// no zpool, a host with the tools installed and the kernel module not loaded, a pool listing
+    /// that failed with ZFS's own reason on it, a listing nobody could run, a dataset listing that
+    /// refused under pools that read perfectly well, and a host that genuinely has no pools. Only
+    /// the last is a state to be pleased about.
+    ///
+    /// <para>A needle that matches nothing draws its own text rather than any of them, because
+    /// "nothing here" and "nothing matching" are different claims and the table has not become
+    /// empty.</para>
+    /// </summary>
+    private void DrawZfsEmpty()
+    {
+        ZfsEmpty.IsVisible = _zfsRows.Count == 0;
+        if (_zfsRows.Count > 0) return;
+
+        // **Every reason the listing could not answer outranks the needle**, which is the rule the
+        // containers, updates and file explorer tables all keep: a search must never replace the
+        // reason a table is empty with an empty table. The needle only speaks for a listing that
+        // was read and simply has nothing matching in it.
+        ZfsEmpty.Text =
+            !_zfsRead ? "Reading the host's ZFS pools and datasets..."
             : !_reading.Available
                 ? "zpool is not installed on this host."
             : !_reading.ModuleLoaded && _reading.ModuleAvailable
@@ -879,34 +1170,44 @@ public partial class StorageModule : UserControl, IModule
                 ? "The host's ZFS pools could not be listed: " + _reading.ListFailure
             : !_reading.Probed
                 ? "The host's ZFS pools could not be listed."
+            : _reading.DatasetFailure.Length > 0
+                ? "The host's datasets could not be listed: " + _reading.DatasetFailure
+            : ZfsSearch.HasNeedle
+                ? $"No pool or dataset matches '{ZfsSearch.Needle}'."
             : "This host has no ZFS pools. Create one to get started.";
     }
 
     // ---- the details window ------------------------------------------------
 
-    private void OnPoolDoubleTapped(object? sender, TappedEventArgs e)
+    /// <summary>
+    /// A double-click opens whatever the row's own window is: a pool's details, and a dataset's
+    /// properties. One gesture, and it means "show me this" on both kinds rather than meaning
+    /// something on one and nothing on the other.
+    /// </summary>
+    private async void OnZfsDoubleTapped(object? sender, TappedEventArgs e)
     {
         foreach (var v in (e.Source as Visual)?.GetSelfAndVisualAncestors() ?? [])
-            if (v is ListBoxItem { DataContext: ZfsPoolRow row })
+            if (v is ListBoxItem { DataContext: ZfsNodeRow row })
             {
-                OpenPoolDetailsFor(row);
+                if (row.IsPool) OpenPoolDetailsFor(row);
+                else await EditDatasetFor(row);
                 return;
             }
     }
 
     private void OpenPoolDetailsForSelected()
     {
-        if (SelectedPools is [var only]) OpenPoolDetailsFor(only);
+        if (SelectedNodes is [{ IsPool: true } only]) OpenPoolDetailsFor(only);
     }
 
     /// <summary>
-    /// One window per pool, non-modal, and a second ask focuses the one already up. The disk
-    /// details window's tracking verbatim, including the reference check in <c>Closed</c>: without
-    /// it a stale close would evict a replacement opened under the same key.
+    /// One window per pool, non-modal, and a second ask focuses the one already up. The disk details
+    /// window's tracking verbatim, including the reference check in <c>Closed</c>: without it a
+    /// stale close would evict a replacement opened under the same key.
     /// </summary>
-    private void OpenPoolDetailsFor(ZfsPoolRow row)
+    private void OpenPoolDetailsFor(ZfsNodeRow row)
     {
-        if (_zfs is null) return;
+        if (_zfs is null || row.Pool is not { } pool) return;
 
         if (_poolDetails.TryGetValue(row.Key, out var existing))
         {
@@ -915,7 +1216,7 @@ public partial class StorageModule : UserControl, IModule
             return;
         }
 
-        var window = new PoolDetailsWindow(Zfs, new PoolView(row.Pool, ZpoolStatus.NotProbed));
+        var window = new PoolDetailsWindow(Zfs, new PoolView(pool, ZpoolStatus.NotProbed));
         _poolDetails[row.Key] = window;
         window.Closed += (_, _) =>
         {
@@ -927,28 +1228,177 @@ public partial class StorageModule : UserControl, IModule
 
     // ---- the commands ------------------------------------------------------
 
-    private List<ZfsPoolRow> SelectedPools =>
-        PoolList.SelectedItems?.Cast<ZfsPoolRow>().ToList() ?? [];
+    private List<ZfsNodeRow> SelectedNodes =>
+        ZfsTree.SelectedItems?.Cast<ZfsNodeRow>().ToList() ?? [];
 
-    private void UpdatePoolMenu()
+    private List<ZfsNodeRow> SelectedPools =>
+        [.. SelectedNodes.Where(r => r.IsPool)];
+
+    /// <summary>
+    /// Which commands the selection can carry.
+    ///
+    /// <para><b>The tree holds two kinds of row, so a command is enabled against the kind it is
+    /// about rather than against the count alone.</b> A scrub is a pool's; a quota is a dataset's;
+    /// Copy name is neither and works on anything. A mixed selection leaves everything but Copy name
+    /// disabled, because a command that quietly applied to the half of a selection it understood is
+    /// worse than one that says it cannot.</para>
+    /// </summary>
+    private void UpdateZfsMenu()
     {
-        var selected = SelectedPools;
+        var selected = SelectedNodes;
+        var pools = selected.Count(r => r.IsPool);
+        var datasets = selected.Count - pools;
+        var one = selected.Count == 1 ? selected[0] : null;
 
-        // One window is about one pool, so this is the single-selection command, disabled rather
-        // than opening the first of several.
-        MenuPoolDetails.IsEnabled = selected.Count == 1;
+        // One window is about one pool, so this is a single-selection command, disabled rather than
+        // opening the first of several.
+        MenuPoolDetails.IsEnabled = one is { IsPool: true };
 
-        var any = selected.Count > 0 && !_zfsBusy;
-        MenuScrub.IsEnabled = any;
-        MenuStopScrub.IsEnabled = any;
-        MenuExport.IsEnabled = any;
+        // Every pool command is a pool command: a dataset in the selection disables it rather than
+        // being quietly skipped over.
+        var allPools = pools > 0 && datasets == 0 && !_zfsBusy;
+        MenuScrub.IsEnabled = allPools;
+        MenuStopScrub.IsEnabled = allPools;
+        MenuExport.IsEnabled = allPools;
 
         // Destroy is single-selection on purpose, and not because several would be hard. Its
         // confirmation types the pool's name, and a question that names one pool must not act on
         // three.
-        MenuDestroy.IsEnabled = selected.Count == 1 && !_zfsBusy;
+        MenuDestroy.IsEnabled = one is { IsPool: true } && !_zfsBusy;
+
+        // A volume holds no datasets, so it is not a parent. A pool row is, because it is the pool's
+        // root dataset as much as it is the pool.
+        var canHoldChildren = one is { IsVolume: false } && _reading.DatasetsUsable;
+        MenuNewDataset.IsEnabled = canHoldChildren && !_zfsBusy;
+        NewDatasetButton.IsEnabled = _reading.DatasetsUsable && _reading.Pools.Count > 0 && !_zfsBusy;
+        NewDatasetButton.Tag =
+            !_reading.DatasetsUsable ? "The host's datasets could not be listed, so there is nowhere to put a new one."
+            : _reading.Pools.Count == 0 ? "This host has no pools, and a dataset lives inside one."
+            : "Create a filesystem or a volume inside a pool";
+
+        MenuEditDataset.IsEnabled = one?.Dataset is not null && !_zfsBusy;
+
+        // Renaming a pool's root dataset would be renaming the pool, which zfs refuses and zpool has
+        // no command for at all. So both are the dataset rows' commands only.
+        MenuRenameDataset.IsEnabled = one is { IsPool: false } && !_zfsBusy;
+        MenuDestroyDataset.IsEnabled = one is { IsPool: false } && !_zfsBusy;
+
+        var anyParents = _zfsRows.Any(r => r.HasChildren);
+        MenuExpandAll.IsEnabled = anyParents && !ZfsSearch.HasNeedle && _collapsed.Count > 0;
+        MenuCollapseAll.IsEnabled =
+            anyParents && !ZfsSearch.HasNeedle && _zfsRows.Any(r => r is { HasChildren: true, IsExpanded: true });
+
         MenuCopyPoolName.IsEnabled = selected.Count > 0;
     }
+
+    // ---- the dataset commands ----------------------------------------------
+
+    /// <summary>
+    /// Creating a dataset, which needs no dry run: it makes an empty thing, costs nothing and is
+    /// undone by destroying it. See <c>ZfsService.BuildCreateDatasetArgv</c>.
+    /// </summary>
+    private async Task NewDatasetAsync()
+    {
+        if (_zfs is null || _zfsBusy) return;
+        if (_reading.Pools.Count == 0) return;
+
+        // The selected row where it can hold children, and the first pool otherwise, so the button
+        // in the toolbar works with nothing selected.
+        var parent =
+            SelectedNodes is [{ IsVolume: false } row] ? row.Key
+            : _reading.Pools[0].Name;
+
+        var dialog = new DatasetCreateDialog(parent, TakenDatasetNames(), PoolNames());
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request) return;
+
+        await RunPoolCommandAsync("New dataset", $"Creating {request.Name}...",
+            () => Zfs.CreateDatasetAsync(request));
+    }
+
+    private async Task EditDatasetAsync()
+    {
+        if (SelectedNodes is [var row] && row.Dataset is not null) await EditDatasetFor(row);
+    }
+
+    /// <summary>
+    /// The properties window. It reads the dataset's whole property set for itself, because the
+    /// listing carries the dozen columns the table draws and reading sixty properties for every
+    /// dataset on the host would turn one round trip into a large one for a window usually shut.
+    /// </summary>
+    private async Task EditDatasetFor(ZfsNodeRow row)
+    {
+        if (_zfs is null || _zfsBusy || row.Dataset is not { } dataset) return;
+
+        var dialog = new DatasetEditDialog(Zfs, dataset);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } edit) return;
+        if (edit.Set.Count == 0 && edit.Inherit.Count == 0) return;
+
+        await RunPoolCommandAsync("Edit dataset", $"Applying changes to {row.Key}...", async () =>
+        {
+            await Zfs.SetPropertiesAsync(row.Key, edit.Set);
+            await Zfs.InheritPropertiesAsync(row.Key, edit.Inherit);
+        });
+    }
+
+    private async Task RenameDatasetAsync()
+    {
+        if (_zfs is null || _zfsBusy) return;
+        if (SelectedNodes is not [{ IsPool: false } row] || row.Dataset is null) return;
+
+        var dialog = new DatasetRenameDialog(row.Key, TakenDatasetNames());
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } target) return;
+
+        await RunPoolCommandAsync("Rename dataset", $"Renaming {row.Key}...",
+            () => Zfs.RenameDatasetAsync(row.Key, target));
+    }
+
+    /// <summary>
+    /// Destroying a dataset, and the one dataset command with a pre-flight.
+    ///
+    /// <para><b>The dry run is what the question is built from</b>, which is <c>zpool create -n</c>
+    /// pointed the other way: <c>zfs destroy -nvp -r</c> names every child, snapshot and clone that
+    /// would go with it, so the confirmation states the size of what is about to happen instead of
+    /// asking somebody to work it out. A subject that takes only itself gets the ordinary question;
+    /// one that takes anything else gets the typed name, because that is a bigger claim than the
+    /// user made when they picked one row.</para>
+    /// </summary>
+    private async Task DestroyDatasetAsync()
+    {
+        if (_zfs is null || _zfsBusy) return;
+        if (SelectedNodes is not [{ IsPool: false } row] || row.Dataset is not { } dataset) return;
+
+        SetStatus($"Working out what destroying {row.Key} would take...");
+        ZfsService.DatasetDestroyPreview preview;
+        try { preview = await Zfs.PreviewDestroyAsync(row.Key, _cts.Token); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Destroy dataset", Trim(ex.Message));
+            return;
+        }
+        finally { PaintStatus(); }
+
+        var dialog = new DestroyDatasetDialog(dataset, preview);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true) return;
+
+        await RunPoolCommandAsync("Destroy dataset", $"Destroying {row.Key}...",
+            () => Zfs.DestroyDatasetAsync(row.Key, dialog.Recursive, dialog.Force));
+    }
+
+    private IReadOnlyList<string> TakenDatasetNames() =>
+        [.. _reading.Datasets.Select(d => d.Name).Concat(_reading.Pools.Select(p => p.Name)).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// Every dataset a child could go under: the pools and their filesystems, and never a volume,
+    /// which is a block device and holds nothing.
+    /// </summary>
+    private IReadOnlyList<string> PoolNames() =>
+        [.. _reading.Pools.Select(p => p.Name)
+            .Concat(_reading.Datasets
+                .Where(d => d.Type == ZfsDatasetType.Filesystem)
+                .Select(d => d.Name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
     /// A scrub reads every block on the pool and repairs what it can from redundancy.
@@ -1000,9 +1450,9 @@ public partial class StorageModule : UserControl, IModule
     /// </summary>
     private async Task DestroySelectedAsync()
     {
-        if (SelectedPools is not [var row] || _zfsBusy) return;
+        if (SelectedNodes is not [var row] || row.Pool is not { } pool || _zfsBusy) return;
 
-        var dialog = new DestroyPoolDialog(row.Pool);
+        var dialog = new DestroyPoolDialog(pool);
         if (await dialog.ShowDialog<bool?>(Owner) is not true) return;
 
         await RunPoolCommandAsync("Destroy pool", $"Destroying {row.Key}...",
@@ -1066,7 +1516,7 @@ public partial class StorageModule : UserControl, IModule
     private async Task RunPoolCommandAsync(string title, string status, Func<Task> work)
     {
         _zfsBusy = true;
-        UpdatePoolMenu();
+        UpdateZfsMenu();
         SetStatus(status);
 
         try { await work(); }
@@ -1080,14 +1530,16 @@ public partial class StorageModule : UserControl, IModule
     /// Names a selection for a question. Up to three by name and a count past that, because
     /// <c>MessageDialog</c> is a fixed 420 wide and sizes to its content.
     /// </summary>
-    private static string Names(IReadOnlyList<ZfsPoolRow> pools) =>
+    private static string Names(IReadOnlyList<ZfsNodeRow> pools) =>
         pools.Count == 1 ? pools[0].Key
         : pools.Count <= 3 ? string.Join(", ", pools.Select(p => p.Key))
         : $"{pools.Count} pools";
 
     private async Task CopyPoolNameAsync()
     {
-        var names = SelectedPools.Select(r => r.Key).Where(n => n.Length > 0).ToList();
+        // Every row and not only the pools: the cell draws a dataset's last component, so its whole
+        // path is exactly the thing that is tedious to retype and is what this command is for.
+        var names = SelectedNodes.Select(r => r.Key).Where(n => n.Length > 0).ToList();
         if (names.Count == 0) return;
         if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard) return;
 

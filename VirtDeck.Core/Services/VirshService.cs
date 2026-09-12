@@ -1005,6 +1005,16 @@ namespace VirtDeck.Services
             catch { /* best effort */ }
         }
 
+        /// <summary>
+        /// The zvols on the host, for the disk picker.
+        ///
+        /// <para><b>These three predate the ZFS tab and <c>ZfsService</c> is where this belongs
+        /// now.</b> They interpolate into a command string rather than going through
+        /// <c>ShellScript.Argv</c>, swallow every failure as an empty list rather than reporting one,
+        /// and know nothing of the tagged-record idiom. <c>ZfsService</c> lists the same datasets
+        /// properly and creates one with <c>CreateDatasetAsync</c>; moving <c>AddDiskDialog</c> onto
+        /// it is a change of its own and is not the storage page's to make.</para>
+        /// </summary>
         public List<ZvolEntry> ListZvols()
         {
             try

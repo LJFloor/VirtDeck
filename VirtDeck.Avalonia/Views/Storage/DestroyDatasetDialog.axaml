@@ -1,0 +1,60 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Storage.DestroyDatasetDialog"
+        Title="Destroy dataset"
+        Width="520" SizeToContent="Height" MaxHeight="640"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <!-- **Which button is the primary depends on how much is about to go**, which is the one place
+         in the app where that is decided rather than fixed. A leaf dataset is an ordinary
+         destructive command and Destroy carries IsDefault, as Remove does everywhere else; the
+         moment the dry run names anything besides the subject itself, this becomes DestroyPoolDialog
+         and Cancel takes IsDefault so Enter cannot press it. The code sets it. -->
+    <StackPanel Name="Buttons" DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Border Background="Transparent" ToolTip.Tip="{Binding #DestroyButton.Tag}">
+        <Button Name="DestroyButton" Content="Destroy" MinWidth="88" />
+      </Border>
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <TextBlock Name="Summary" Classes="note" TextWrapping="Wrap" />
+
+      <!-- ZFS's own list of what would go, unparaphrased and never summarised into a count: the
+           point of running the dry run at all is that it names things this app would otherwise be
+           guessing at. Scrolled rather than truncated, because the interesting entry is as likely
+           to be the last as the first. -->
+      <HeaderedContentControl Name="WouldBox" Header="What would be destroyed"
+                              Theme="{StaticResource JbGroupBox}" IsVisible="False">
+        <ScrollViewer MaxHeight="200">
+          <ItemsControl Name="WouldList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </HeaderedContentControl>
+
+      <TextBlock Name="RefusedNote" Classes="note" TextWrapping="Wrap" IsVisible="False" />
+
+      <StackPanel Name="ConfirmRow" Classes="options" IsVisible="False">
+        <TextBlock Name="ConfirmPrompt" TextWrapping="Wrap" />
+        <TextBox Name="ConfirmBox" />
+      </StackPanel>
+
+      <StackPanel Classes="options">
+        <CheckBox Name="ForceBox" Content="Force, unmounting it if it is in use" />
+        <TextBlock Classes="subnote" TextWrapping="Wrap"
+                   Text="Only needed when something still has it open, which for a volume usually means a running virtual machine. Without it ZFS refuses and says what is holding it, which is nearly always the more useful answer." />
+      </StackPanel>
+
+    </StackPanel>
+  </DockPanel>
+</Window>

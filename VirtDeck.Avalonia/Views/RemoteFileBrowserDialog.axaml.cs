@@ -23,6 +23,18 @@ public partial class RemoteFileBrowserDialog : Window
 
     private readonly RemoteFileService _files;
     private readonly bool _selectMultiple;
+
+    /// <summary>
+    /// Whether what is being picked is a folder rather than a file.
+    ///
+    /// <para>Opt-in and defaulted off, so the four windows that pick an ISO or a disk image are
+    /// untouched. On, the dialog lists directories only, drops the name box and the type dropdown
+    /// (there is nothing to type and nothing to filter), and Open answers the directory currently
+    /// on screen unless a subdirectory is highlighted. It exists for the mount dialog, where the
+    /// thing being chosen is a mount point.</para>
+    /// </summary>
+    private readonly bool _directoriesOnly;
+
     private readonly ObservableCollection<RemoteFileRow> _rows = new();
 
     private string _currentDir = "/";
@@ -39,10 +51,11 @@ public partial class RemoteFileBrowserDialog : Window
     public RemoteFileBrowserDialog() : this(null!, null, "", false, "Select File") { }
 
     public RemoteFileBrowserDialog(RemoteFileService files, string? initialPath, string filter,
-                                   bool selectMultiple, string title)
+                                   bool selectMultiple, string title, bool directoriesOnly = false)
     {
         _files = files;
         _selectMultiple = selectMultiple;
+        _directoriesOnly = directoriesOnly;
         InitializeComponent();
         Title = title;
         FileList.ItemsSource = _rows;
@@ -67,8 +80,17 @@ public partial class RemoteFileBrowserDialog : Window
         };
         FileList.DoubleTapped += async (_, _) => await ActivateSelection();
         FileList.SelectionChanged += (_, _) => SyncNameBox();
-        OpenButton.Click += async (_, _) => await ActivateSelection();
+        OpenButton.Click += async (_, _) => await ConfirmSelection();
         CancelButton.Click += (_, _) => Close();
+
+        if (_directoriesOnly)
+        {
+            NameLabel.IsVisible = false;
+            NameBox.IsVisible = false;
+            TypeLabel.IsVisible = false;
+            FilterBox.IsVisible = false;
+            OpenButton.Content = "Select";
+        }
 
         var (dir, name) = SplitInitial(initialPath);
         _currentDir = dir;
@@ -138,6 +160,12 @@ public partial class RemoteFileBrowserDialog : Window
         _rows.Clear();
         foreach (var d in _entries.Where(x => x.IsDir).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
             _rows.Add(new RemoteFileRow(d, _iconSize));
+
+        // Files are not drawn dimmed and unselectable in this mode, they are simply not there: a
+        // list of things that cannot be picked is a worse account of a folder than a list of the
+        // things that can.
+        if (_directoriesOnly) return;
+
         foreach (var f in _entries.Where(x => !x.IsDir && Matches(x.Name, fe))
                                   .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
             _rows.Add(new RemoteFileRow(f, _iconSize));
@@ -161,6 +189,32 @@ public partial class RemoteFileBrowserDialog : Window
             return;
         }
         await Accept(picked);
+    }
+
+    /// <summary>
+    /// Descend on a double-click, but never on the Select button: in the directories-only mode
+    /// those two gestures mean different things about a highlighted folder, and running the shared
+    /// path for both would make the button that accepts a folder the button that opens it, so there
+    /// would be no way to pick one at all.
+    /// </summary>
+    private async Task ConfirmSelection()
+    {
+        if (!_directoriesOnly)
+        {
+            await ActivateSelection();
+            return;
+        }
+
+        var picked = FileList.SelectedItems?.Cast<RemoteFileRow>().ToList() ?? new List<RemoteFileRow>();
+        var name = picked.Count == 1 ? picked[0].Name : "";
+
+        // The highlighted folder, or the one being looked at when nothing is highlighted, which is
+        // what somebody who navigated into it and pressed Select meant.
+        SelectedPath = name.Length > 0
+            ? RemoteFileService.CombinePath(_currentDir, name)
+            : _currentDir;
+        SelectedPaths = [SelectedPath];
+        Close(true);
     }
 
     private async Task Accept(List<RemoteFileRow> picked)

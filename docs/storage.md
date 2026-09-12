@@ -3,7 +3,7 @@
 `StorageModule` is two tabs over one host's storage. **Disks** is the drives in the machine and
 what SMART says about each one, over a **disk details window** that holds everything about one of
 them; **ZFS** is the host's pools, over a **pool details window** of the same shape.
-`Views/StorageModule`, `Views/StorageRow`, `Views/ZfsPoolRow`, `Views/Storage/*` (both windows,
+`Views/StorageModule`, `Views/StorageRow`, `Views/ZfsNodeRow`, `Views/Storage/*` (both windows,
 their pages, the partition and topology tables and their rows), `Core/Services/StorageService`,
 `Core/Services/ZfsService`, `Core/Models/StorageDevice`, `Core/Models/ZfsPool`.
 
@@ -14,11 +14,15 @@ table under it and the ZFS page has a command that creates something where the d
 Only the visible tab's expensive half is read: the un-elevated layout runs whichever tab is up,
 because the create dialog picks disks out of it, and the SMART pass waits for the tab it is about.
 
-**Modelled on Cockpit's Storage page, and on the read-only half of it.** Cockpit is also where a
-disk is partitioned, formatted, grown, encrypted and put into a volume group; none of that is here.
+**Modelled on Cockpit's Storage page, and on nearly the read-only half of it.** Cockpit is also
+where a disk is partitioned, formatted, grown and put into a volume group; none of that is here.
 What is here is the half that answers "what is this machine, and is any of it about to fail", which
-is the half a libvirt host's operator needs before the guests find out for them. Nothing forecloses
-the rest: the listing a format dialog would need is the listing this module already builds.
+is the half a libvirt host's operator needs before the guests find out for them. **The one crossing
+of that line is reaching what is already on the disk**: the details window's partition table mounts
+and unmounts a volume and unlocks and locks a LUKS container, which is [the disk details
+window](storage-disk-details.md)'s "Mounting" and is the only place in the app that writes into
+`/etc`. Everything that would *change* a disk's shape is still absent, and nothing forecloses it:
+the listing a format dialog would need is the listing this module already builds.
 
 **One table of drives, and one window per drive.** The page used to be the whole block-device tree
 flattened with an indent and a chevron, over a `GridSplitter` pane drawing facts about the selected
@@ -55,6 +59,12 @@ it to see.
   and LVM cost nothing extra and there is no per-device round trip anywhere, which was the VM list's
   original latency problem. The whole tree is still read although only the disks are drawn, because
   it is what the window's partition table renders with no round trip of its own.
+- **The listing carries two tool probes, and they cost nothing.** `command -v cryptsetup` and
+  `command -v findmnt` ride the round trip that is already being made, which is what lets the
+  partition table's LUKS commands be **disabled with a reason rather than hidden** on a host without
+  them, and what lets an fstab write say whether it could be verified first. Neither tool is in
+  `RequiredTools`, for smartctl's reason: the page is exactly as useful without them. Every read
+  probes again, so installing a package mid-session is not a dead end.
 - **Un-elevated, and `df` is not used.** `lsblk` and `/proc/swaps` are both
   world-readable, so a read never puts a sudo prompt in front of somebody who only wanted to look,
   which is `FileExplorerModule`'s rule and the sampler's. `lsblk` carries `FSSIZE`/`FSUSED`/`FSAVAIL`

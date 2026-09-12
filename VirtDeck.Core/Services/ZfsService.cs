@@ -30,9 +30,15 @@ namespace VirtDeck.Services
     /// answers normally pays nothing for it. It needs no prompt, because the sudo password was
     /// accepted at the connect window.</para>
     ///
-    /// <para><b>Nothing here reads a pool's datasets.</b> Snapshots, send/recv and dataset
-    /// properties are a different subject and are not in this pass. What they would need is the
-    /// listing this class already builds.</para>
+    /// <para><b>The datasets ride the pools' round trip rather than one of their own.</b> The ZFS
+    /// tab draws a pool and what is inside it as one tree, so reading the two halves apart would put
+    /// half of it on screen while the other half was in flight. They fail apart, though: the dataset
+    /// half has its own probe and failure tags, because an imported pool whose devices went away
+    /// lists under <c>zpool</c> and refuses under <c>zfs</c>.</para>
+    ///
+    /// <para><b>Snapshots are still not here</b>, and neither is send/recv. A snapshot needs a
+    /// listing that can carry thousands of rows off one auto-snapshot timer and commands (rollback,
+    /// clone, hold) that have nothing in common with these; it is a subject rather than a column.</para>
     /// </summary>
     public class ZfsService
     {
@@ -110,6 +116,35 @@ namespace VirtDeck.Services
               zpool get -H -p all "$name" 2>/dev/null | awk 'NF { print "q\t" $0 }'
             done
 
+            # **The datasets, on the same round trip rather than on one of their own.** The ZFS tab
+            # draws pools and what is inside them as one tree, so reading them apart would put half a
+            # tree on screen while the other half was still in flight, and a Refresh would cost two
+            # trips for one table.
+            #
+            # Guarded by its own `command -v zfs`, because the two binaries ship together everywhere
+            # but nothing here needs to assume that, and fenced so a `zfs list` that refuses cannot
+            # take the pool listing above it down with it: `t` is its own failure tag for exactly
+            # that, and a host whose pools list and whose datasets do not still draws its pools.
+            #
+            # **No COLS_FULL/COLS_MIN fallback here, and its absence is the argued half.** The pool
+            # listing carries one because zpool's column headers and its property names are spelt
+            # differently and there was a real question which of the two `-o` takes. Every column
+            # below has been a zfs property for over a decade under exactly this name, so a fallback
+            # would be a second parse shape that no host can reach, and an unreachable branch is how
+            # the two drift.
+            #
+            # `mountpoint` goes last because it is the one unbounded field: a dataset name may hold
+            # neither a tab nor a space, and a mount path may hold a space.
+            if command -v zfs >/dev/null 2>&1; then
+              DCOLS='name,type,used,available,referenced,quota,refquota,reservation,volsize,compressratio,compression,mounted,origin,creation,mountpoint'
+              if dout=$(zfs list -H -p -t filesystem,volume -o "$DCOLS" 2>&1); then
+                printf 'y\t1\n'
+                printf '%s\n' "$dout" | awk 'NF { print "s\t" $0 }'
+              else
+                printf 't\t%s\n' "$(printf '%s' "$dout" | sed -n 1p)"
+              fi
+            fi
+
             # Every by-id link to a whole disk, unranked. Ranking is the client's, because the rule
             # is a preference order rather than a filter and reads better in one place than as a
             # case statement here. Partition links are dropped, and so are the device-mapper and
@@ -162,7 +197,10 @@ namespace VirtDeck.Services
             var module = "";
             var failure = "";
             var probed = false;
+            var datasetsProbed = false;
+            var datasetFailure = "";
             var rows = new List<string>();
+            var datasets = new List<ZfsDataset>();
             var properties = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
             var links = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
@@ -201,6 +239,18 @@ namespace VirtDeck.Services
                     case "d":
                         ReadLink(text, links);
                         break;
+
+                    case "s":
+                        if (ReadDataset(text) is { } dataset) datasets.Add(dataset);
+                        break;
+
+                    case "t":
+                        datasetFailure = text.Trim();
+                        break;
+
+                    case "y":
+                        datasetsProbed = true;
+                        break;
                 }
             }
 
@@ -226,6 +276,9 @@ namespace VirtDeck.Services
                 Pools = pools,
                 ByIdLinks = RankLinks(links),
                 Probed = probed || failure.Length > 0,
+                Datasets = datasets,
+                DatasetFailure = datasetFailure,
+                DatasetsProbed = datasetsProbed || datasetFailure.Length > 0,
             };
         }
 
@@ -265,6 +318,55 @@ namespace VirtDeck.Services
                     : new Dictionary<string, string>(StringComparer.Ordinal),
             };
         }
+
+        /// <summary>
+        /// One <c>zfs list -H -p</c> row, in the column order the script fixed.
+        ///
+        /// <para><b>The unbounded field is last and the split is capped, which is the tagged-record
+        /// rule applied properly rather than the exception <see cref="ReadProperty"/> has to make.</b>
+        /// A mount path may hold a space; a dataset name may hold neither a space nor a tab, and
+        /// every other field is a number or one word. So a cap at the field count keeps a path like
+        /// <c>/srv/my backups</c> whole without any of it being guessed at.</para>
+        /// </summary>
+        private static ZfsDataset? ReadDataset(string row)
+        {
+            const int fields = 15;
+            var f = row.Split('\t', fields);
+            if (f.Length < fields - 1 || f[0].Trim().Length == 0) return null;
+
+            string At(int i) => i < f.Length ? f[i] : "";
+
+            return new ZfsDataset
+            {
+                Name = f[0].Trim(),
+                Type = At(1).Trim() == "volume" ? ZfsDatasetType.Volume : ZfsDatasetType.Filesystem,
+                UsedBytes = Bytes(At(2)),
+                AvailableBytes = Bytes(At(3)),
+                ReferencedBytes = Bytes(At(4)),
+                QuotaBytes = Bytes(At(5)),
+                RefQuotaBytes = Bytes(At(6)),
+                ReservationBytes = Bytes(At(7)),
+                VolSizeBytes = Bytes(At(8)),
+                CompressRatio = Ratio(At(9)),
+                Compression = Dash(At(10)),
+                Mounted = YesNo(At(11)),
+                Origin = Dash(At(12)),
+                CreationUnix = Bytes(At(13)),
+                Mountpoint = Dash(At(14)),
+            };
+        }
+
+        /// <summary>
+        /// ZFS's <c>yes</c>/<c>no</c>, or null for the <c>-</c> a volume answers. Three states rather
+        /// than a bool for <see cref="Dash"/>'s reason: "not mounted" and "cannot be mounted" are
+        /// different facts and only one of them is about this filesystem being down.
+        /// </summary>
+        private static bool? YesNo(string field) => Dash(field) switch
+        {
+            "yes" => true,
+            "no" => false,
+            _ => null,
+        };
 
         /// <summary>One <c>zpool get -H -p</c> row: name, property, value, source.</summary>
         private static void ReadProperty(
@@ -1026,6 +1128,338 @@ namespace VirtDeck.Services
             return found;
         }
 
+        // ---- datasets -----------------------------------------------------------
+
+        // One dataset's whole property set, which is what the edit window loads. Not part of the
+        // listing: the table draws a dozen columns and reading sixty properties for every dataset
+        // on a host would turn one round trip into a large one for a window that is usually shut.
+        //
+        // The value is the middle field of three, which is zfs's layout and the same shape
+        // ReadProperty already has to read from the other end. See ReadDatasetProperty.
+        private const string PropertiesScript = """
+            export LC_ALL=C
+            command -v zfs >/dev/null 2>&1 || exit 0
+            DATASET
+            d="${a[0]}"
+            [ -n "$d" ] || exit 0
+            if ! out=$(zfs get -H -p -o property,value,source all -- "$d" 2>&1); then
+              printf 'x\t%s\n' "$(printf '%s' "$out" | sed -n 1p)"
+              exit 0
+            fi
+            printf 'k\t1\n'
+            printf '%s\n' "$out" | awk 'NF { print "q\t" $0 }'
+            exit 0
+            """;
+
+        /// <summary>
+        /// Everything <c>zfs get all</c> says about one dataset, with each value's source.
+        ///
+        /// <para>Un-elevated with the same single sudo retry the listing has, and for the same
+        /// measured reason: <c>/dev/zfs</c> is <c>crw-rw-rw-</c> where the packaging's udev rule
+        /// landed, so reading a dataset's properties must not put a sudo prompt in front of somebody
+        /// who only opened a window to look.</para>
+        /// </summary>
+        public async Task<DatasetProperties> ReadDatasetPropertiesAsync(
+            string dataset, CancellationToken ct = default)
+        {
+            RequireDatasetPath(dataset);
+
+            var script = PropertiesScript.Replace(
+                "DATASET", ShellScript.ArrayFrom("a", [dataset]).TrimEnd());
+
+            var raw = await Task.Run(() => _ssh.RunCommand(ShellScript.Wrap(script)), ct);
+            var read = ParseDatasetProperties(dataset, raw);
+
+            if (!NeedsRoot(read.Failure)) return read;
+
+            var elevated = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+            return ParseDatasetProperties(dataset, elevated);
+        }
+
+        internal static DatasetProperties ParseDatasetProperties(string dataset, string raw)
+        {
+            var values = new Dictionary<string, DatasetProperty>(StringComparer.Ordinal);
+            var failure = "";
+            var probed = false;
+
+            foreach (var (tag, text) in PackageScripts.Records(raw))
+            {
+                switch (tag)
+                {
+                    case "k":
+                        probed = true;
+                        break;
+
+                    case "x":
+                        failure = text.Trim();
+                        probed = true;
+                        break;
+
+                    case "q":
+                        ReadDatasetProperty(text, values);
+                        break;
+                }
+            }
+
+            if (!probed && failure.Length == 0)
+                return DatasetProperties.NotProbed with { Dataset = dataset };
+
+            return new DatasetProperties
+            {
+                Dataset = dataset,
+                Values = values,
+                Probed = true,
+                Failure = failure,
+            };
+        }
+
+        /// <summary>
+        /// One <c>zfs get -H -p -o property,value,source</c> row.
+        ///
+        /// <para><b>The unbounded field is the middle one</b>, which is the same corner
+        /// <see cref="ReadProperty"/> documents: the layout is zfs's, a value may hold a tab (a
+        /// <c>sharenfs</c> option list, a user property somebody wrote by hand), and the fixed word
+        /// comes after it. So the value is everything between the property and the last field rather
+        /// than one field, read from the right rather than the left.</para>
+        /// </summary>
+        private static void ReadDatasetProperty(
+            string row, Dictionary<string, DatasetProperty> into)
+        {
+            var f = row.Split('\t');
+            if (f.Length < 2) return;
+
+            var property = f[0].Trim();
+            if (property.Length == 0) return;
+
+            var value = f.Length >= 3 ? string.Join('\t', f[1..^1]) : f[1];
+            var source = f.Length >= 3 ? f[^1].Trim() : "";
+
+            into[property] = new DatasetProperty(value.Trim(), source, true);
+        }
+
+        /// <summary>
+        /// What to create. One record for both kinds, because they differ by three fields and the
+        /// dialog is one window: <see cref="Volume"/> decides whether <see cref="Size"/> and
+        /// <see cref="Sparse"/> mean anything.
+        /// </summary>
+        /// <param name="Properties">
+        /// <c>-o</c> pairs, in the order the dialog wants them applied. Values are handed to ZFS as
+        /// the user typed them, because ZFS owns the units: see <see cref="IsValidSize"/>.
+        /// </param>
+        public sealed record DatasetCreateRequest(
+            string Name,
+            bool Volume = false,
+            string Size = "",
+            bool Sparse = false,
+            IReadOnlyList<(string Property, string Value)>? Properties = null);
+
+        /// <summary>
+        /// <c>zfs create</c>.
+        ///
+        /// <para><b>There is no dry run, and that is the argued half.</b> <c>zpool create</c> has one
+        /// because it writes labels over whatever was on a disk; this makes an empty dataset, costs
+        /// nothing, and is undone by destroying it. A confirmation in front of it would be a dialog
+        /// in front of a decision that cannot go wrong, which is the same reason a scrub asks
+        /// nothing. ZFS's own refusal is what the caller draws.</para>
+        /// </summary>
+        internal static List<string> BuildCreateDatasetArgv(DatasetCreateRequest request)
+        {
+            RequireDatasetPath(request.Name);
+            if (!request.Name.Contains('/'))
+                throw new InvalidOperationException(
+                    $"'{request.Name}' names a pool rather than a dataset in one. A dataset is " +
+                    "created inside a pool, so its name carries at least one slash.");
+
+            var argv = new List<string> { "zfs", "create" };
+
+            if (request.Volume)
+            {
+                if (!IsValidSize(request.Size) || request.Size.Trim() is "none" or "")
+                    throw new InvalidOperationException("A volume needs a size, such as 40G.");
+
+                // -s before -V is not required and is written this way because a sparse volume is a
+                // property of the volume rather than of the size.
+                if (request.Sparse) argv.Add("-s");
+                argv.Add("-V");
+                argv.Add(request.Size.Trim());
+            }
+
+            foreach (var (property, value) in request.Properties ?? [])
+            {
+                if (property.Length == 0) continue;
+                argv.Add("-o");
+                argv.Add($"{property}={value}");
+            }
+
+            // zfs create parses with getopt(), so the literal -- is honoured. See SetPropertiesAsync
+            // for the one subcommand where it is not.
+            argv.Add("--");
+            argv.Add(request.Name);
+            return argv;
+        }
+
+        public async Task CreateDatasetAsync(
+            DatasetCreateRequest request, CancellationToken ct = default)
+        {
+            var argv = BuildCreateDatasetArgv(request);
+            SpiceLog.Log($"[zfs] create {(request.Volume ? "volume" : "filesystem")} {request.Name}");
+            await Task.Run(() => RunArgv(argv), ct);
+        }
+
+        /// <summary>
+        /// <c>zfs set</c>, one call for every changed property rather than one call each, so a window
+        /// that changed four things is one round trip and either all four took or none did.
+        ///
+        /// <para><b>This is the one vector in the file with no literal <c>--</c>, and leaving it out
+        /// is deliberate.</b> Every other <c>zfs</c> and <c>zpool</c> subcommand used here parses
+        /// with <c>getopt()</c> and honours it; <c>zfs set</c> grew its own <c>getopt()</c> only in
+        /// OpenZFS 2.2, and before that it rejected anything beginning with a hyphen outright, so a
+        /// <c>--</c> would fail the command on every host older than that with "invalid option".
+        /// What makes the name safe here instead is <see cref="RequireDatasetPath"/> refusing a
+        /// leading hyphen, and the argv never reaching a shell to be split by one.</para>
+        /// </summary>
+        public async Task SetPropertiesAsync(
+            string dataset,
+            IReadOnlyList<(string Property, string Value)> pairs,
+            CancellationToken ct = default)
+        {
+            RequireDatasetPath(dataset);
+            if (pairs.Count == 0) return;
+
+            var argv = new List<string> { "zfs", "set" };
+            foreach (var (property, value) in pairs)
+            {
+                if (property.Length == 0) continue;
+                argv.Add($"{property}={value}");
+            }
+
+            argv.Add(dataset);
+
+            SpiceLog.Log($"[zfs] set {string.Join(' ', pairs.Select(p => p.Property))} on {dataset}");
+            await Task.Run(() => RunArgv(argv), ct);
+        }
+
+        /// <summary>
+        /// <c>zfs inherit</c>: clears a property set on this dataset so it follows its parent again.
+        /// The other half of the edit window, and what makes a property page reversible.
+        /// </summary>
+        public async Task InheritPropertiesAsync(
+            string dataset, IReadOnlyList<string> properties, CancellationToken ct = default)
+        {
+            RequireDatasetPath(dataset);
+
+            foreach (var property in properties)
+            {
+                if (property.Length == 0) continue;
+
+                // One call each, because zfs inherit takes a single property and several datasets,
+                // which is the opposite of zfs set.
+                var argv = new List<string> { "zfs", "inherit", "--", property, dataset };
+                SpiceLog.Log($"[zfs] inherit {property} on {dataset}");
+                await Task.Run(() => RunArgv(argv), ct);
+            }
+        }
+
+        public async Task RenameDatasetAsync(string from, string to, CancellationToken ct = default)
+        {
+            RequireDatasetPath(from);
+            RequireDatasetPath(to);
+
+            SpiceLog.Log($"[zfs] rename {from} to {to}");
+            await Task.Run(() => RunArgv(["zfs", "rename", "--", from, to]), ct);
+        }
+
+        /// <summary>
+        /// What <c>zfs destroy -nvp</c> said: everything that would go, and ZFS's words either way.
+        /// </summary>
+        /// <param name="Would">
+        /// Every dataset, volume and snapshot the dry run named, the subject itself included. More
+        /// than one entry is what turns the destroy dialog into the typed-name kind.
+        /// </param>
+        /// <param name="Refused">
+        /// The dry run could not answer, so <see cref="Would"/> says nothing. Never treated as
+        /// "only this one would go": a refusal this code cannot read must not become a smaller
+        /// warning, which is <see cref="Classify"/>'s rule pointed the same way.
+        /// </param>
+        public sealed record DatasetDestroyPreview(
+            IReadOnlyList<string> Would, long? ReclaimBytes, string Text, bool Refused);
+
+        /// <summary>
+        /// The destroy pre-flight. <b>The mirror of <c>zpool create -n</c></b>: it takes nothing
+        /// away and it names exactly what would go, which for a dataset means its children, its
+        /// snapshots and anything cloned from them. It is what the confirmation is built from.
+        /// </summary>
+        public async Task<DatasetDestroyPreview> PreviewDestroyAsync(
+            string dataset, CancellationToken ct = default)
+        {
+            RequireDatasetPath(dataset);
+            var text = await Task.Run(
+                () => Try(["zfs", "destroy", "-n", "-v", "-p", "-r", "--", dataset]), ct);
+            return ClassifyDestroy(dataset, text);
+        }
+
+        /// <summary>
+        /// <c>-nvp</c> prints one tab-separated verb and name per line (<c>destroy</c> for each
+        /// object, then <c>reclaim</c> with a byte count). The parse is deliberately forgiving of
+        /// the verb column, because it is the names that matter and older builds have printed them
+        /// bare; a line it cannot read at all leaves <see cref="DatasetDestroyPreview.Refused"/> set
+        /// rather than shrinking the warning.
+        /// </summary>
+        internal static DatasetDestroyPreview ClassifyDestroy(string dataset, string text)
+        {
+            var would = new List<string>();
+            long? reclaim = null;
+
+            foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0) continue;
+
+                var f = line.Split('\t');
+                if (f.Length >= 2 && f[0].Trim() == "reclaim")
+                {
+                    if (long.TryParse(f[^1].Trim(), out var bytes)) reclaim = bytes;
+                    continue;
+                }
+
+                var name = f.Length >= 2 && f[0].Trim() == "destroy" ? f[^1].Trim() : f[0].Trim();
+
+                // A dataset name has no space in it, so a line carrying one is a sentence rather
+                // than a name: that is what a refusal looks like and it must not become a row.
+                if (name.Length == 0 || name.Any(char.IsWhiteSpace)) continue;
+                if (!name.StartsWith(dataset, StringComparison.Ordinal)) continue;
+
+                would.Add(name);
+            }
+
+            // Nothing recognisable came back, so the dry run refused or this build words its answer
+            // some other way. Either way the caller must assume the worst rather than the least.
+            var refused = would.Count == 0;
+            if (refused) would.Add(dataset);
+
+            return new DatasetDestroyPreview(would, reclaim, text.Trim(), refused);
+        }
+
+        /// <summary>
+        /// <c>zfs destroy</c>. <paramref name="recursive"/> is <c>-r</c>, which takes the children
+        /// and snapshots the preview named; <paramref name="force"/> is <c>-f</c>, which unmounts a
+        /// filesystem that is in use and is what a zvol a running VM still has open needs.
+        /// </summary>
+        public async Task DestroyDatasetAsync(
+            string dataset, bool recursive, bool force, CancellationToken ct = default)
+        {
+            RequireDatasetPath(dataset);
+
+            var argv = new List<string> { "zfs", "destroy" };
+            if (recursive) argv.Add("-r");
+            if (force) argv.Add("-f");
+            argv.Add("--");
+            argv.Add(dataset);
+
+            SpiceLog.Log($"[zfs] destroy {dataset}{(recursive ? " -r" : "")}{(force ? " -f" : "")}");
+            await Task.Run(() => RunArgv(argv), ct);
+        }
+
         // ---- running ------------------------------------------------------------
 
         /// <summary>The argv path every mutator takes. <c>DockerService.RunArgv</c>'s shape.</summary>
@@ -1096,6 +1530,126 @@ namespace VirtDeck.Services
             while (s.Length > 0 && !char.IsAsciiLetter(s[0])) s = s[1..];
 
             return s.Length > 255 ? s[..255] : s;
+        }
+
+        // ---- dataset naming ----------------------------------------------------
+
+        /// <summary>
+        /// What one component of a dataset path may be, which is what VirtDeck <b>creates</b>.
+        ///
+        /// <para>ZFS's own rule: a component begins with an alphanumeric and then takes letters,
+        /// digits, underscore, hyphen, colon and full stop. <c>%</c> is left out because ZFS reserves
+        /// it for its own internal datasets, and a slash is not a character in a component but the
+        /// separator between two.</para>
+        ///
+        /// <para><b><see cref="IsValidName"/> is the pool rule and must not be reused here.</b> It
+        /// forbids a slash, insists on a letter rather than an alphanumeric first, and refuses the
+        /// vdev keywords, none of which is about a dataset: <c>tank/0</c> and <c>tank/mirror</c> are
+        /// both perfectly good dataset names and the second is only a keyword where a topology is
+        /// being read.</para>
+        /// </summary>
+        public static bool IsValidDatasetComponent(string component) =>
+            component.Length > 0 &&
+            char.IsAsciiLetterOrDigit(component[0]) &&
+            component.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or ':' or '.') &&
+            component is not ("." or "..");
+
+        /// <summary>A whole path: a valid pool name, then at least one valid component under it.</summary>
+        public static bool IsValidDatasetPath(string path)
+        {
+            if (path.Length is 0 or > 255) return false;
+
+            var parts = path.Split('/');
+            if (!IsValidName(parts[0])) return false;
+
+            return parts.Skip(1).All(IsValidDatasetComponent);
+        }
+
+        /// <summary>
+        /// What VirtDeck will <b>address</b>, which is a looser test than what it will create, and
+        /// deliberately so: this is <c>UserAccountService.RequireSafe</c>'s rule. A dataset already
+        /// on the host was named by something else and may hold characters no dialog here would
+        /// offer, and refusing to so much as list it would be this app's opinion standing between
+        /// somebody and their own data. So the check is only for what would be a bug.
+        ///
+        /// <para>The leading hyphen is the one that carries weight rather than tidiness: it is what
+        /// keeps a name from being read as a flag by <c>zfs set</c>, the one subcommand here that
+        /// takes no <c>--</c>. See <see cref="SetPropertiesAsync"/>.</para>
+        /// </summary>
+        internal static void RequireDatasetPath(string path)
+        {
+            var bad =
+                path.Length == 0 ? "is empty"
+                : path.Length > 255 ? "is longer than ZFS allows"
+                : path[0] == '-' ? "begins with a hyphen"
+                : path[0] == '/' ? "begins with a slash"
+                : path.EndsWith('/') ? "ends with a slash"
+                : path.Contains("//", StringComparison.Ordinal) ? "has an empty component in it"
+                : path.Contains('\n') || path.Contains('\r') ? "has a line break in it"
+                : path.Contains('\t') ? "has a tab in it"
+                : path.Contains('@') ? "names a snapshot, which this page does not manage"
+                : "";
+
+            if (bad.Length > 0)
+                throw new InvalidOperationException($"'{path}' {bad}, so it is not a dataset name.");
+        }
+
+        /// <summary>
+        /// Folds a typed component toward <see cref="IsValidDatasetComponent"/>, so the create dialog
+        /// never suggests a name it would then refuse. <see cref="SanitizeName"/>'s twin, and applied
+        /// the same way: idempotent, on every keystroke, with the caret put back by hand.
+        /// </summary>
+        public static string SanitizeDatasetComponent(string typed)
+        {
+            var built = new StringBuilder(typed.Length);
+            foreach (var c in typed)
+            {
+                if (char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or ':' or '.') built.Append(c);
+                else if (c is ' ' or '/') built.Append('-');
+            }
+
+            var t = built.ToString();
+            while (t.Length > 0 && !char.IsAsciiLetterOrDigit(t[0])) t = t[1..];
+
+            return t.Length > 255 ? t[..255] : t;
+        }
+
+        /// <summary>
+        /// Whether a size box holds something ZFS will take.
+        ///
+        /// <para><b>The value is never parsed into bytes and is handed over as typed.</b> ZFS owns
+        /// these units and reads <c>1.5T</c>, <c>512M</c> and <c>2TiB</c> alike; converting here
+        /// would mean a second implementation of somebody else's rounding, and a quota set to
+        /// 1649267441664 where the user asked for 1.5T. So this checks the shape and nothing more,
+        /// and what comes back is exact bytes from <c>-p</c>, which is a different question.</para>
+        ///
+        /// <para><c>none</c> is a real value and is how a quota or a reservation is cleared.</para>
+        /// </summary>
+        public static bool IsValidSize(string text)
+        {
+            var t = text.Trim();
+            if (t.Length == 0) return true;
+            if (t.Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
+
+            var digits = t.TrimEnd();
+            var i = 0;
+            while (i < digits.Length && (char.IsAsciiDigit(digits[i]) || digits[i] == '.')) i++;
+            if (i == 0) return false;
+
+            var number = digits[..i];
+            if (number.Count(c => c == '.') > 1) return false;
+            if (!double.TryParse(
+                    number,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var value) || value < 0) return false;
+
+            // Not trimmed: `1 G` is not a size ZFS reads, and accepting it here would move the
+            // refusal from a dialog that can say why into a command that half ran.
+            var suffix = digits[i..];
+            return suffix.Length == 0 || suffix.ToUpperInvariant() is
+                "B" or "K" or "KB" or "KIB" or "M" or "MB" or "MIB" or "G" or "GB" or "GIB" or
+                "T" or "TB" or "TIB" or "P" or "PB" or "PIB" or "E" or "EB" or "EIB";
         }
 
         internal static ZfsHealth HealthOf(string word) => word.Trim().ToUpperInvariant() switch

@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.Storage.MountDialog"
+        Title="Mount"
+        Width="520" SizeToContent="Height" MinWidth="480"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #MountButton.Tag}">
+        <Button Name="MountButton" Content="Mount" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <!-- Four controls and nothing else. The window title already names the device, and what mount,
+         -o and /etc/fstab do is documented rather than restated in the dialog every time. -->
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="100,*" RowDefinitions="Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Mount at" VerticalAlignment="Center" />
+        <!-- A path box rather than a plain TextBox, so the directory can be picked as well as
+             typed; the browse button opens the app's own remote browser in its directories-only
+             mode, since what is being chosen here is a folder and not a file. -->
+        <c:RemotePathBox Grid.Row="0" Grid.Column="1" Name="PathBox" />
+      </Grid>
+
+      <StackPanel Classes="options">
+
+        <CheckBox Name="ReadOnlyBox" Content="Mount read-only" />
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto" RowSpacing="6">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Options" VerticalAlignment="Center" />
+          <TextBox Grid.Row="0" Grid.Column="1" Name="OptionsBox" PlaceholderText="noatime,uid=1000" />
+        </Grid>
+
+        <CheckBox Name="BootBox" Content="Auto-mount at boot" />
+
+      </StackPanel>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

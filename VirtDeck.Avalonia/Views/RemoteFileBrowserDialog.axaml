@@ -24,9 +24,13 @@
     <!-- File name + filter -->
     <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto"
           Margin="0,10,0,0">
-      <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <!-- Both rows go away in the directories-only mode: there is no name to type when the thing
+           being chosen is the folder on screen, and no type to filter by when no file is listed.
+           An auto row whose every child is hidden measures to nothing, so the grid closes up on
+           its own and the buttons stay where they are. -->
+      <TextBlock Grid.Row="0" Grid.Column="0" Name="NameLabel" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,0" />
       <TextBox  Grid.Row="0" Grid.Column="1" Name="NameBox" />
-      <TextBlock Grid.Row="1" Grid.Column="0" Text="Type:" VerticalAlignment="Center" Margin="0,8,8,0" />
+      <TextBlock Grid.Row="1" Grid.Column="0" Name="TypeLabel" Text="Type:" VerticalAlignment="Center" Margin="0,8,8,0" />
       <ComboBox Grid.Row="1" Grid.Column="1" Name="FilterBox" HorizontalAlignment="Stretch" Margin="0,8,0,0" />
 
       <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Orientation="Vertical"

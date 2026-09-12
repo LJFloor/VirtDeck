@@ -21,8 +21,13 @@ namespace VirtDeck.Services
     /// and root is the only way to get them. That is the same shape this service's neighbour already
     /// has: an un-elevated sampler with one elevated <c>ReadWorkloadAsync</c> beside it.</para>
     ///
-    /// <para><b>Nothing here writes.</b> Mounting, formatting, partitioning, LVM, RAID and LUKS are
-    /// deliberately not in this pass; what they would need is the listing this class already builds.</para>
+    /// <para><b>It writes, and the writes are a short list.</b> Mounting and unmounting what is
+    /// stacked on a disk, recording a mount in <c>/etc/fstab</c>, and opening and closing a LUKS
+    /// container. Formatting, partitioning, resizing, LVM and MD are still not here, and neither is
+    /// reading <c>/etc/fstab</c> back: the tick that writes a line is the whole of this app's
+    /// relationship with that file. Every write is elevated, every one of them is built as an
+    /// argument vector rather than interpolated into a shell, and the passphrase is the one value
+    /// that never touches a command line at all.</para>
     /// </summary>
     public class StorageService
     {
@@ -76,6 +81,14 @@ namespace VirtDeck.Services
               [ -d "$p" ] || continue
               [ -e "$p/device" ] || printf 'n\t%s\n' "${p##*/}"
             done
+
+            # Which of the two optional tools this host has, riding a round trip already paid for
+            # rather than costing a probe of its own. Neither is in RequiredTools: without
+            # cryptsetup the LUKS commands are disabled with a reason rather than the page being
+            # taken away, and without findmnt an fstab line is written unverified and says so.
+            for t in cryptsetup findmnt; do
+              command -v "$t" >/dev/null 2>&1 && printf 't\t%s\n' "$t"
+            done
             exit 0
             """;
 
@@ -98,6 +111,7 @@ namespace VirtDeck.Services
             var failure = "";
             var swaps = new List<string>();
             var notHardware = new HashSet<string>(StringComparer.Ordinal);
+            var tools = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var (tag, text) in PackageScripts.Records(raw))
             {
@@ -122,6 +136,10 @@ namespace VirtDeck.Services
                     case "n":
                         if (text.Trim() is { Length: > 0 } virtualName) notHardware.Add(virtualName);
                         break;
+
+                    case "t":
+                        if (text.Trim() is { Length: > 0 } tool) tools.Add(tool);
+                        break;
                 }
             }
 
@@ -144,6 +162,8 @@ namespace VirtDeck.Services
                 Available = true,
                 ListFailure = roots.Count == 0 ? failure : "",
                 LsblkVersion = version,
+                HasCryptsetup = tools.Contains("cryptsetup"),
+                HasFindmnt = tools.Contains("findmnt"),
             };
         }
 
@@ -1180,5 +1200,240 @@ namespace VirtDeck.Services
 
             return "";
         }
+
+        // ---- the writes ------------------------------------------------------
+
+        /// <summary>
+        /// Passphrases the user asked this session to remember, keyed by the LUKS header UUID.
+        ///
+        /// <para>Session state on a service the shell owns, which is what makes switching host the
+        /// reset, exactly as it is for a module's sort order and its filter needle. Nothing is
+        /// persisted and nothing reaches <c>settings.json</c>: the OS secret store is for a host's
+        /// login, and a volume passphrase somebody typed once is not that.</para>
+        ///
+        /// <para>It <b>prefills the dialog</b> and never skips it. The mapping name is still a real
+        /// choice, and this app does not decide an ambiguous one on the user's behalf.</para>
+        /// </summary>
+        private readonly Dictionary<string, string> _passphrases = new(StringComparer.Ordinal);
+
+        /// <summary>What was remembered for this container, or empty.</summary>
+        public string RememberedPassphrase(string uuid) =>
+            uuid.Length > 0 && _passphrases.TryGetValue(uuid, out var pass) ? pass : "";
+
+        /// <summary>Remembers a passphrase for the rest of the session, or forgets it.</summary>
+        public void RememberPassphrase(string uuid, string passphrase, bool remember)
+        {
+            if (uuid.Length == 0) return;
+            if (remember) _passphrases[uuid] = passphrase;
+            else _passphrases.Remove(uuid);
+        }
+
+        /// <summary>
+        /// The argv path every mutator here takes, which is <c>ZfsService.RunArgv</c>'s shape and
+        /// <c>DockerService.RunArgv</c>'s before it: the vector is assembled in C#, joined
+        /// NUL-separated, base64'd and rebuilt as a bash array on the host, so no value is ever read
+        /// as syntax however odd it is.
+        /// </summary>
+        private string RunArgv(IReadOnlyList<string> argv) =>
+            _ssh.RunSudoCommand(ShellScript.Argv(argv));
+
+        /// <summary>
+        /// Mounts a device at a path, creating the path first.
+        ///
+        /// <para><b>No <c>-t</c>.</b> mount autodetects through blkid, and lsblk's FSTYPE is not
+        /// always the name of a driver: an <c>ntfs</c> filesystem is mounted by <c>ntfs3</c> on one
+        /// host and <c>ntfs-3g</c> on the next, and naming the wrong one turns a mount that would
+        /// have worked into a refusal.</para>
+        ///
+        /// <para><c>mkdir -p</c> rather than a test: it is a no-op on a directory that is already
+        /// there, and where the path exists as a <b>file</b> it refuses in words that say so, which
+        /// is a better answer than one this end invented.</para>
+        /// </summary>
+        public async Task MountAsync(MountRequest request, CancellationToken ct = default)
+        {
+            List<string> mount = ["mount"];
+            if (request.Options.Length > 0) mount.AddRange(["-o", request.Options]);
+            mount.AddRange(["--", request.Device, request.MountPoint]);
+
+            // Two arrays and not two round trips: the directory has to exist before the mount, and
+            // `set -e` is what stops the second running when the first could not.
+            var script = "export LC_ALL=C\nset -e\n" +
+                         ShellScript.ArrayFrom("a", ["mkdir", "-p", "--", request.MountPoint]) +
+                         ShellScript.ArrayFrom("b", mount) +
+                         "\"${a[@]}\"\n\"${b[@]}\"\n";
+
+            await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+        }
+
+        /// <summary>
+        /// Unmounts every path the device is mounted at, deepest first, except <c>/</c>.
+        ///
+        /// <para>Deepest first matters: a bind mount or a nested filesystem inside one of these
+        /// paths has to go before the path it sits in, and sorting by descending length is the whole
+        /// of that ordering. umount takes them all in one call, so this is one round trip whatever
+        /// the device is mounted at.</para>
+        ///
+        /// <para><paramref name="lazy"/> is <c>umount -l</c>, and it is never the first attempt: it
+        /// detaches the mount now and only releases the filesystem when the last process using it
+        /// lets go, which is a different promise from the one the plain command makes. The window
+        /// offers it after the host has said the target is busy, never before.</para>
+        /// </summary>
+        public async Task UnmountAsync(
+            IReadOnlyList<string> mountPoints, bool lazy, CancellationToken ct = default)
+        {
+            // "/" is dropped here as well as in the window, because this is the one place every
+            // caller goes through and unmounting the root filesystem takes the host down.
+            var targets = mountPoints
+                .Where(m => m.Length > 0 && m != "/")
+                .Distinct(StringComparer.Ordinal)
+                .OrderByDescending(m => m.Length)
+                .ToList();
+
+            if (targets.Count == 0) return;
+
+            List<string> argv = ["umount"];
+            if (lazy) argv.Add("-l");
+            argv.Add("--");
+            argv.AddRange(targets);
+
+            await Task.Run(() => RunArgv(argv), ct);
+        }
+
+        /// <summary>Whether a refusal is the host saying something is still using the mount.</summary>
+        public static bool IsBusy(string message) =>
+            message.Contains("busy", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// How an <c>/etc/fstab</c> line should name this device.
+        ///
+        /// <para>A UUID where the filesystem has one, because that is what survives the disk being
+        /// moved to another port or another controller and <c>/dev/sdb2</c> is not. PARTUUID is the
+        /// same promise one level down, for a partition with no filesystem UUID of its own. The path
+        /// is the last resort and is the right answer for exactly the devices that reach it: an LVM
+        /// logical volume and an MD array already have stable names of their own.</para>
+        ///
+        /// <para>It is static and public because the dialog previews the line it is about to write.
+        /// One decision in one place is what keeps the preview and the file from disagreeing.</para>
+        /// </summary>
+        public static string FstabSpec(BlockDevice device) =>
+            device.Uuid.Length > 0 ? "UUID=" + device.Uuid
+            : device.PartUuid.Length > 0 ? "PARTUUID=" + device.PartUuid
+            : device.Path;
+
+        /// <summary>
+        /// fstab's own escaping for a field: a space is <c>\040</c> and a tab <c>\011</c>, because
+        /// the file is whitespace-separated and has no quoting. A newline has no encoding worth
+        /// having here and is refused by the dialog rather than mangled by this.
+        /// </summary>
+        public static string FstabEscape(string field) =>
+            field.Replace("\\", "\\134").Replace(" ", "\\040").Replace("\t", "\\011");
+
+        /// <summary>
+        /// Records a mount in <c>/etc/fstab</c>, replacing whatever that file already said about
+        /// this device or this mount point.
+        ///
+        /// <para><b>This is the only file in <c>/etc</c> the app edits, and the order it is called
+        /// in is the safety mechanism.</b> The window calls it only after the mount it describes has
+        /// already succeeded, so the device, the path, the filesystem type and the options in the
+        /// line are all known to work at the moment it is written. <c>findmnt --verify</c> is the
+        /// belt on top of that and not the thing being relied on.</para>
+        ///
+        /// <para><b>The verification calibrates itself.</b> findmnt is run against the fstab the
+        /// host already has first: where that one does not pass, its verdict on ours says nothing
+        /// about ours, so the check is skipped rather than turned into a refusal to write a line
+        /// that is very likely fine. A host with no findmnt takes the same path.</para>
+        ///
+        /// <para><b><c>cat</c> and never <c>mv</c>.</b> Writing through the existing file keeps its
+        /// inode, its mode and its SELinux label; a rename would hand it whatever mktemp created.
+        /// A copy is left at <c>/etc/fstab.virtdeck.bak</c> every time, so there is always one
+        /// command back.</para>
+        /// </summary>
+        public async Task WriteFstabAsync(FstabRequest request, CancellationToken ct = default)
+        {
+            var script = "export LC_ALL=C\nset -e\n" +
+                         ShellScript.ArrayFrom(
+                             "f", [request.Spec, request.MountPoint, request.FsType, request.Options]) +
+                         FstabScript;
+
+            await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+        }
+
+        // The awk pass copies every line it is not replacing byte for byte, comments and blanks
+        // included: this app is a guest in that file and rewriting what it did not come for is how
+        // an editor of /etc/fstab earns its reputation. A line is replaced when it names the same
+        // device **or** the same mount point, because both would be a conflict and leaving either
+        // behind would give the host two answers about one thing.
+        private const string FstabScript = """
+            tmp=$(mktemp -- /etc/fstab.virtdeck.XXXXXX)
+            trap 'rm -f -- "$tmp"' EXIT
+
+            awk -v s="${f[0]}" -v d="${f[1]}" '
+              /^[[:space:]]*#/ { print; next }
+              NF == 0          { print; next }
+              ($1 == s) || ($2 == d) { next }
+              { print }
+            ' /etc/fstab > "$tmp"
+
+            printf '%s %s %s %s 0 0\n' "${f[0]}" "${f[1]}" "${f[2]}" "${f[3]}" >> "$tmp"
+
+            if command -v findmnt >/dev/null 2>&1 && findmnt --verify --tab-file /etc/fstab >/dev/null 2>&1; then
+              findmnt --verify --tab-file "$tmp" >/dev/null 2>&1 || {
+                echo "the new line does not pass findmnt --verify, so /etc/fstab was left alone" >&2
+                exit 3
+              }
+            fi
+
+            cp -- /etc/fstab /etc/fstab.virtdeck.bak
+            cat -- "$tmp" > /etc/fstab
+            """;
+
+        /// <summary>
+        /// Opens a LUKS container, with the passphrase over stdin.
+        ///
+        /// <para><b>This is the one call here that cannot use <c>RunSudoCommand</c>.</b> That runner
+        /// spends stdin on the sudo password and then closes it, which is exactly the stream the
+        /// passphrase has to travel on. <c>RunPipeInAsync</c> is the primitive built for that
+        /// hazard: it writes the password, then a per-call sentinel, then hands the stream to the
+        /// caller, and the script skips lines until it has seen the sentinel, so a NOPASSWD host
+        /// where sudo read nothing and an ordinary one arrive at the same place. Same route
+        /// <c>UserAccountService.SetPasswordAsync</c> takes for <c>chpasswd</c>.</para>
+        ///
+        /// <para><b>The passphrase is written with no trailing newline and stdin is then closed</b>,
+        /// which is the one form that is right either way: cryptsetup stops at the first newline
+        /// where it stops at newlines, and at EOF where it does not. <c>--key-file=-</c> is
+        /// deliberately not used, because there a trailing newline is part of the key and a
+        /// passphrase that works at the console would be refused here.</para>
+        /// </summary>
+        public async Task UnlockAsync(UnlockRequest request, CancellationToken ct = default)
+        {
+            var script = "export LC_ALL=C\n" +
+                         ShellScript.ArrayFrom(
+                             "c",
+                             [
+                                 "cryptsetup", "--batch-mode", "open", "--type", "luks", "--",
+                                 request.Device, request.Mapping,
+                             ]) +
+                         "exec \"${c[@]}\"\n";
+
+            var pass = System.Text.Encoding.UTF8.GetBytes(request.Passphrase);
+
+            await _ssh.RunPipeInAsync(script, elevated: true,
+                async (stdin, token) =>
+                {
+                    await stdin.WriteAsync(pass, token);
+                    await stdin.FlushAsync(token);
+                    // Disposing the stream is the EOF cryptsetup reads the end of the passphrase
+                    // from, and RunPipeInAsync owns that dispose.
+                },
+                ct);
+        }
+
+        /// <summary>
+        /// Closes a LUKS mapping. A mapping that is still mounted, or is a physical volume in an
+        /// active volume group, is refused by cryptsetup in its own words, which is the reading to
+        /// draw rather than one this end guesses at.
+        /// </summary>
+        public async Task LockAsync(string mapping, CancellationToken ct = default) =>
+            await Task.Run(() => RunArgv(["cryptsetup", "close", "--", mapping]), ct);
     }
 }

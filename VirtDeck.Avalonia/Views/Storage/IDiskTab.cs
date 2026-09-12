@@ -20,10 +20,16 @@ namespace VirtDeck.Avalonia.Views.Storage;
 /// </summary>
 /// <param name="Disk">The disk and its whole subtree, as lsblk stated it.</param>
 /// <param name="Swaps">What <c>/proc/swaps</c> named, so a swap volume does not read "not mounted".</param>
+/// <param name="HasCryptsetup">
+/// Whether the host can open a LUKS container at all. It rides the same listing the tree does, so
+/// the partition table's two LUKS commands are disabled with a reason rather than failing at the
+/// host, and a Refresh is what asks again.
+/// </param>
 /// <param name="HealthUnavailable">Why the module's own pass could not answer, when it could not.</param>
 public sealed record DiskView(
     BlockDevice Disk,
     IReadOnlyList<string> Swaps,
+    bool HasCryptsetup,
     DiskHealth? Health,
     bool HealthProbed,
     string HealthUnavailable,
@@ -112,6 +118,47 @@ public interface IDiskWakeRequest
 {
     /// <summary>The user accepted the cost of waking a parked drive.</summary>
     event Action? WakeRequested;
+}
+
+/// <summary>What a partition row's context menu can ask the window for.</summary>
+public enum PartitionCommand
+{
+    Mount,
+    Unmount,
+    Unlock,
+    Lock,
+}
+
+/// <summary>One command, and the device it is about.</summary>
+///
+/// <param name="Device">
+/// The device itself and not the row that drew it: a row is rebuilt on every <c>Show</c>, and the
+/// window has to answer for a request that was raised against the listing in hand.
+/// </param>
+public sealed record PartitionRequest(PartitionCommand Command, BlockDevice Device);
+
+/// <summary>
+/// A page whose partition table can ask for something to be done to a row.
+///
+/// <para>A third interface beside <see cref="IDiskTab"/> and <see cref="IDiskWakeRequest"/>, for the
+/// same reason the second one exists: an event is the one thing that cannot be defaulted on an
+/// interface, and the Health page has no table to raise one from. The window subscribes to whichever
+/// pages implement it, so it still names none of them.</para>
+///
+/// <para>The table itself owns no service and opens no dialog, exactly as it owns no round trip: it
+/// raises this and stops. <c>DiskGeneralTab</c> forwards it up from the control it hosts, which is a
+/// page naming a literal element of its own markup rather than the window naming a page.</para>
+/// </summary>
+public interface IDiskPartitionCommands
+{
+    /// <summary>The user picked a command out of the partition table's context menu.</summary>
+    event Action<PartitionRequest>? CommandRequested;
+
+    /// <summary>
+    /// Whether a command is running, so the menu greys out rather than letting a second one be
+    /// started on top of the first. Pushed down from the window, which is what owns the flag.
+    /// </summary>
+    void SetBusy(bool busy);
 }
 
 /// <summary>One line of a facts column: a dimmed label and a value, with the whole value on hover.</summary>

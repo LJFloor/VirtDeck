@@ -30,11 +30,11 @@ public partial class PoolGeneralTab : UserControl, IPoolTab
         TitleNote.Text = view.ScanRunning ? "scrub or resilver running" : "";
 
         _left.Clear();
-        Add(_left, "Size", ZfsPoolRow.Bytes(pool.SizeBytes),
+        Add(_left, "Size", ZfsNodeRow.Bytes(pool.SizeBytes),
             "The pool's raw capacity. On a raidz pool this counts the parity disks too, so it is " +
             "more than you can store.");
-        Add(_left, "Allocated", ZfsPoolRow.Bytes(pool.AllocatedBytes));
-        Add(_left, "Free", ZfsPoolRow.Bytes(pool.FreeBytes));
+        Add(_left, "Allocated", ZfsNodeRow.Bytes(pool.AllocatedBytes));
+        Add(_left, "Free", ZfsNodeRow.Bytes(pool.FreeBytes));
         Add(_left, "Capacity", pool.CapacityPercent is { } c ? $"{c}%" : "",
             "ZFS slows down markedly past about 80 percent, because it has to work harder to find " +
             "contiguous space to write into.");
@@ -42,8 +42,8 @@ public partial class PoolGeneralTab : UserControl, IPoolTab
             "How fragmented the pool's free space is, which is about how easily it can find room " +
             "rather than about the data already on it.");
         Add(_left, "Dedup", pool.DedupRatio is { } d ? $"{d:0.00}x" : "");
-        Add(_left, "Checkpoint", ZfsPoolRow.Bytes(pool.CheckpointBytes));
-        Add(_left, "Expandable", ZfsPoolRow.Bytes(pool.ExpandSizeBytes),
+        Add(_left, "Checkpoint", ZfsNodeRow.Bytes(pool.CheckpointBytes));
+        Add(_left, "Expandable", ZfsNodeRow.Bytes(pool.ExpandSizeBytes),
             "Space a device grew into that the pool has not taken up yet.");
 
         _right.Clear();
