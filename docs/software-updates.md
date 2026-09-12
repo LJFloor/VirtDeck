@@ -73,7 +73,7 @@ free to disagree about the same sentence.
   ever installed because somebody arrived on a page.
 - **`IModuleNavigator` is a second interface rather than another defaulted `IModule` member**, because
   an event is the one thing that cannot be defaulted on an interface (it has nowhere to keep its
-  handlers), and eight of the nine modules never hand the user anywhere. The shell subscribes to
+  handlers), and nine of the ten modules never hand the user anywhere. The shell subscribes to
   whichever modules implement it, so adding a module stays a `TabItem` plus a `UserControl`, and it
   selects the tab whose content is of the type it was handed, so **the shell still names no module**.
   A type with no visible tab is ignored, which is the right answer for a module this host has no

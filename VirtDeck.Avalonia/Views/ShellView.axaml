@@ -32,6 +32,12 @@
          tell which of the two halves was meant. -->
     <StreamGeometry x:Key="IconStorage">M8,1.5 A6,6 0 0 1 14,4 A6,6 0 0 1 8,6.5 A6,6 0 0 1 2,4 A6,6 0 0 1 8,1.5 Z M2,4 V8 A6,6 0 0 0 8,10.5 A6,6 0 0 0 14,8 V4 M2,8 V12 A6,6 0 0 0 8,14.5 A6,6 0 0 0 14,12 V8</StreamGeometry>
 
+    <!-- A page with a folded corner and two lines of writing on it. The obvious art for a log is a
+         scroll or a list, and at 16x16 stroked both read as the file explorer's folder with extra
+         strokes; a sheet with its corner turned is the one document shape that is unmistakable at
+         this size. Same 16x16 stroked box as the others, so it sits at their weight. -->
+    <StreamGeometry x:Key="IconLogs">M3.5,1.5 H9.5 L12.5,4.5 V14.5 H3.5 Z M9.5,1.5 V4.5 H12.5 M5.5,8 H10.5 M5.5,11 H10.5</StreamGeometry>
+
     <!-- An arrow coming down into a tray. The arrow alone is a download and the tray alone is an
          inbox; together they read as something arriving on the machine, which is what this module is
          for. Same 16x16 stroked box as the five above, so it sits at their weight. -->
@@ -98,6 +104,21 @@
         <vm:DashboardModule />
       </TabItem>
 
+      <!-- Second, under the page about the host itself, which is where Cockpit puts it and for the
+           same reason: the journal is what the dashboard's readings send you to when one of them is
+           wrong, so it reads as the second half of looking at a host rather than as a tool. -->
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconLogs}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Logs" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:LogsModule />
+      </TabItem>
+
       <TabItem>
         <TabItem.Header>
           <StackPanel Orientation="Horizontal" Spacing="8">
@@ -159,8 +180,7 @@
       </TabItem>
 
       <!-- Between the accounts and the explorer: the explorer browses what these devices hold, so
-           the two read as a pair, and nothing is inserted above Virtual machines, which is the app's
-           headline subject. -->
+           the two read as a pair. -->
       <TabItem>
         <TabItem.Header>
           <StackPanel Orientation="Horizontal" Spacing="8">
