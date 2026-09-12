@@ -180,7 +180,13 @@ namespace VirtDeck.Services
                 var escapedCommand = command.Replace("'", "'\\''");
                 // -S reads the password from stdin (fed below), -p '' silences the prompt. The
                 // password is delivered out-of-band, so it never appears on the command line (ps/proc).
-                var sudoCommand = $"sudo -S -p '' bash -c 'export LANG=C; echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
+                //
+                // The PATH export sits beside the locale one and for the same reason: this bash is
+                // non-login, so it has sshd's bare PATH. It lands INSIDE the sudo'd bash rather than
+                // in front of sudo, which is what makes it independent of whether the host's sudoers
+                // sets a secure_path at all. See ShellScript.PathExport.
+                var sudoCommand = $"sudo -S -p '' bash -c 'export LANG=C; {ShellScript.PathExport}; " +
+                                  $"echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
 
                 using var cmd = _client.CreateCommand(sudoCommand);
                 var ar = cmd.BeginExecute();
@@ -326,7 +332,8 @@ namespace VirtDeck.Services
             string full;
             if (elevated)
             {
-                var inner = $"while IFS= read -r __l; do [ \"$__l\" = \"{sentinel}\" ] && break; done\n"
+                var inner = ShellScript.Prologue
+                            + $"while IFS= read -r __l; do [ \"$__l\" = \"{sentinel}\" ] && break; done\n"
                             + script;
                 var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(inner));
                 full = $"sudo -S -p '' bash -c \"$(echo {b64} | base64 -d)\"";
@@ -339,7 +346,8 @@ namespace VirtDeck.Services
                 // nothing. (tar answers "This does not look like a tar archive".) Every other script
                 // in the app can be piped in because none of them reads stdin; these are the ones
                 // that do, so the script has to arrive as an argument and leave stdin alone.
-                var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(script));
+                var b64 = Convert.ToBase64String(
+                    System.Text.Encoding.UTF8.GetBytes(ShellScript.Prologue + script));
                 full = $"bash -c \"$(echo {b64} | base64 -d)\"";
             }
 

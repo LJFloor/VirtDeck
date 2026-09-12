@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia.Media;
 using VirtDeck.Models;
@@ -80,6 +81,47 @@ public sealed class ContainerRow : INotifyPropertyChanged
     private string _uptime = "";
     public string Uptime { get => _uptime; private set => Set(ref _uptime, value); }
 
+    private string _cpu = "";
+    /// <summary>
+    /// What the host said this container is using of one core, as it said it ("0.06%", and "200%"
+    /// for one busy on two cores), and blank for a container that is not running or that the
+    /// sampler had no reading for. <see cref="CpuPercent"/> is the same value as a number.
+    /// </summary>
+    public string Cpu { get => _cpu; private set => Set(ref _cpu, value); }
+
+    private string _mem = "";
+    /// <summary>
+    /// The used half of docker's memory phrase, verbatim ("2.219MiB"). The limit it was printed
+    /// against is one hover away in <see cref="MemTip"/>, which is the shape the State and Ports
+    /// cells on either side already have: the cell says less, never something else.
+    /// </summary>
+    public string Mem { get => _mem; private set => Set(ref _mem, value); }
+
+    private string? _memTip;
+    /// <summary>
+    /// Docker's whole phrase with the percentage it computed, and null where there is no reading so
+    /// an empty cell draws no empty tooltip box. The limit in it is the host's own memory for a
+    /// container that was given none, which is why the percentage is not what the cell draws: on
+    /// most hosts most containers are unlimited and would all read 0.00%.
+    /// </summary>
+    public string? MemTip { get => _memTip; private set => Set(ref _memTip, value); }
+
+    /// <summary>
+    /// <see cref="Cpu"/> as a number, and -1 where there is no reading. What the CPU column sorts
+    /// on, for the reason <see cref="ImageRow.SizeBytes"/> exists: "9.5%" sorts above "80%" as
+    /// text, which is the wrong answer stated confidently. Absent is -1 rather than 0, so a
+    /// container with no reading stays distinguishable from one genuinely using nothing and lands
+    /// at the far end from the busiest, which is where an unknown belongs in that question.
+    /// </summary>
+    public double CpuPercent { get; private set; } = -1;
+
+    /// <summary>
+    /// The used side of <see cref="Mem"/> in bytes, and -1 where there is no reading. The Mem
+    /// column's sort key, and absent is -1 for the same reason <see cref="CpuPercent"/> makes it
+    /// -1: "999KiB" sorts above "1.02MiB" as text, and nothing to report is not zero.
+    /// </summary>
+    public long MemBytes { get; private set; } = -1;
+
     public IBrush StateBrush => _state switch
     {
         "running" => StateBrushes.Running,
@@ -150,6 +192,92 @@ public sealed class ContainerRow : INotifyPropertyChanged
         Uptime = elapsed.TotalDays >= 1
             ? $"{(int)elapsed.TotalDays}d {elapsed.Hours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
             : $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+    }
+
+    /// <summary>
+    /// Takes one sample's reading, or clears the two cells when there is none.
+    ///
+    /// <para>Separate from <see cref="Update"/> because the two arrive on separate cadences: the
+    /// listing is a round trip per refresh and the reading is a tail sampling every few seconds,
+    /// and neither is allowed to blank the other's columns on its way past.</para>
+    ///
+    /// <para>The state test is not belt and braces. <c>docker stats</c> reports running containers
+    /// only, so a stopped one goes blank on its own at the next sample; the test is what makes it
+    /// go blank <i>now</i>, in the case that always happens, where a container has just stopped and
+    /// the listing has already said so a good few seconds before the sampler comes round.</para>
+    /// </summary>
+    public void ApplyStats(ContainerStats? stats)
+    {
+        if (stats is null || !IsRunning)
+        {
+            Cpu = "";
+            Mem = "";
+            MemTip = null;
+            CpuPercent = -1;
+            MemBytes = -1;
+            return;
+        }
+
+        // Docker prints "--" for a container it has no reading for yet, and the whole phrase is
+        // "-- / --" with it. Neither is drawn: a blank cell says "no reading" in the column's own
+        // vocabulary, which is what the dash was saying in docker's.
+        var used = Split(stats.Memory);
+
+        CpuPercent = ParsePercent(stats.Cpu);
+        MemBytes = ParseBinarySize(used);
+
+        Cpu = CpuPercent < 0 ? "" : stats.Cpu;
+        Mem = MemBytes < 0 ? "" : used;
+        MemTip = MemBytes < 0 ? null : $"{stats.Memory}  ({stats.MemoryPercent})";
+    }
+
+    /// <summary>The used side of "2.219MiB / 31.27GiB", or the whole string where there is no limit half.</summary>
+    private static string Split(string usage)
+    {
+        var i = usage.IndexOf('/');
+        return (i < 0 ? usage : usage[..i]).Trim();
+    }
+
+    /// <summary>"0.06%" as 0.06, and -1 for anything that is not a number with a percent sign.</summary>
+    private static double ParsePercent(string text)
+    {
+        var t = text.Trim().TrimEnd('%');
+        return double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) && n >= 0
+            ? n : -1;
+    }
+
+    /// <summary>
+    /// Reads docker's memory phrase back into bytes, for the sort key alone, exactly as
+    /// <see cref="ImageRow.ParseSize"/> does for the images table. The two are deliberately not one
+    /// function: the docker CLI renders a stats reading with its <b>binary</b> helper (KiB is 1024)
+    /// and an image size with its decimal one (kB is 1000), and a single parser would have to
+    /// decide which host command it was reading for anyway.
+    ///
+    /// <para>Anything unrecognised answers -1 rather than 0, which is what keeps a container with
+    /// no reading distinguishable from one genuinely using nothing.</para>
+    /// </summary>
+    private static long ParseBinarySize(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) return -1;
+
+        var i = 0;
+        while (i < t.Length && (char.IsAsciiDigit(t[i]) || t[i] == '.')) i++;
+        if (i == 0) return -1;
+        if (!double.TryParse(t[..i], NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) return -1;
+
+        double scale = t[i..].Trim() switch
+        {
+            "" or "B" => 1,
+            "KiB" or "kiB" => 1024d,
+            "MiB" => 1024d * 1024,
+            "GiB" => 1024d * 1024 * 1024,
+            "TiB" => 1024d * 1024 * 1024 * 1024,
+            "PiB" => 1024d * 1024 * 1024 * 1024 * 1024,
+            _ => -1,
+        };
+
+        return scale < 0 ? -1 : (long)(n * scale);
     }
 
     /// <summary>

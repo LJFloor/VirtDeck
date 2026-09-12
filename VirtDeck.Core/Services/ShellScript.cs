@@ -23,12 +23,47 @@ namespace VirtDeck.Services
     /// <see cref="SudoWrap"/>.</item>
     /// </list>
     ///
+    /// All four also carry <see cref="PathExport"/>, for the same reason each already sets a locale:
+    /// what is on the far end is a non-login bash with sshd's bare PATH, not the PATH a person sees
+    /// when they log in.
+    ///
     /// Nothing here is a substitute for validating a value that has a shape (a container id, a user
     /// name). These helpers stop a value from being read as syntax; they cannot stop it from being
     /// the wrong value.
     /// </summary>
     internal static class ShellScript
     {
+        /// <summary>
+        /// What every wrapper here puts in front of its payload, and what
+        /// <c>SshConnectionManager.RunSudoCommand</c> puts beside its <c>LANG=C</c>.
+        ///
+        /// <para>A command sent over SSH's exec channel runs in a <b>non-login, non-interactive</b>
+        /// bash, which never sources <c>/etc/profile</c>, so the PATH it gets is sshd's bare
+        /// default rather than the one a person sees after logging in. On a host that keeps its
+        /// tooling outside <c>/usr/bin</c> that is the whole difference between finding a tool and
+        /// concluding it is not installed, and the app's answer to "is this module relevant?" is a
+        /// <c>command -v</c> loop. Synology DSM is the case that named this: it hands the exec
+        /// channel <c>/usr/bin:/bin:/usr/sbin:/sbin</c> and installs the docker CLI in
+        /// <c>/usr/local/bin</c>, which only <c>/etc/profile</c> puts on PATH. A source-built
+        /// <c>virsh</c> and an Entware host's <c>/opt/bin</c> are the same story.</para>
+        ///
+        /// <para><b>Appended, never prepended.</b> A host that already has an opinion about which
+        /// <c>docker</c> it wants keeps it; this only adds places to look once the host's own are
+        /// exhausted, so no host resolves a name differently than it did before.</para>
+        ///
+        /// <para>It repairs the <i>wrapped</i> paths only. The streaming runners neither escape nor
+        /// wrap, so a caller there spells its own out, and the ones that pass a bare command
+        /// (<c>virsh</c>, <c>journalctl</c>, the package managers) inherit nothing from this.</para>
+        /// </summary>
+        internal const string PathExport =
+            "export PATH=\"$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/opt/bin:/opt/sbin\"";
+
+        /// <summary>
+        /// <see cref="PathExport"/> as a statement of its own, for concatenating in front of a
+        /// script. Ends in a newline the way <see cref="ArrayFrom"/> does.
+        /// </summary>
+        internal const string Prologue = PathExport + "\n";
+
         /// <summary>
         /// Hands a script to bash on the host without the login shell or sudo's single-quote rewrap
         /// getting a say: base64 is [A-Za-z0-9+/=] and survives both untouched.
@@ -39,7 +74,7 @@ namespace VirtDeck.Services
         /// <c>bash -c "$(...)"</c> for exactly that reason.
         /// </summary>
         internal static string Wrap(string script) =>
-            $"echo {B64(script)} | base64 -d | bash";
+            $"echo {B64(Prologue + script)} | base64 -d | bash";
 
         /// <summary>
         /// The wrapper for <c>SshConnectionManager.RunSudoCommandStreaming</c> and
@@ -48,7 +83,7 @@ namespace VirtDeck.Services
         /// <c>VirshService.SparsifyDisk</c>.
         /// </summary>
         internal static string SudoWrap(string script) =>
-            $"bash -c \"$(echo {B64(script)} | base64 -d)\"";
+            $"bash -c \"$(echo {B64(Prologue + script)} | base64 -d)\"";
 
         /// <summary>
         /// One remote command built from an argument vector, with nothing quoted and nothing

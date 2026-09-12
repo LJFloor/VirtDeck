@@ -63,6 +63,14 @@ public partial class ContainersModule : UserControl, IModule
     private readonly ObservableCollection<ContainerRow> _rows = new();
     private readonly Dictionary<string, ContainerRow> _byId = new();
 
+    /// <summary>
+    /// The last CPU and memory sample, keyed by container id, and empty whenever the sampler is not
+    /// running. Held here rather than only pushed at the rows because a row is created and destroyed
+    /// by every keystroke in the search box and by every merge: without this, narrowing the table
+    /// would blank the two columns until the next sample came round seconds later.
+    /// </summary>
+    private Dictionary<string, ContainerStats> _stats = new(StringComparer.Ordinal);
+
     private readonly ObservableCollection<ImageRow> _imageRows = new();
     private readonly Dictionary<string, ImageRow> _imagesByKey = new(StringComparer.Ordinal);
 
@@ -214,6 +222,7 @@ public partial class ContainersModule : UserControl, IModule
             UpdateStatusCount();
             SyncCaps();
             UpdateMenu();
+            SyncStatsSampler();
             await RefreshActiveAsync();
         };
 
@@ -335,6 +344,7 @@ public partial class ContainersModule : UserControl, IModule
         _docker.ContainerEventReceived += OnContainerEvent;
         _docker.ImageEventReceived += OnImageEvent;
         _docker.NetworkEventReceived += OnNetworkEvent;
+        _docker.StatsReceived += OnStats;
 
         // Not for listing anything here: it is what the image dialogs hand their RemotePathBox so a
         // server path can be browsed for rather than typed from memory. It lists as root, which is
@@ -357,6 +367,7 @@ public partial class ContainersModule : UserControl, IModule
         if (!Docker.DockerAvailable) return;
 
         StartTimers();
+        SyncStatsSampler();
         await RefreshActiveAsync();
 
         // Who the host is signed in to Docker Hub as, re-read on every entry rather than polled or
@@ -379,6 +390,7 @@ public partial class ContainersModule : UserControl, IModule
     public void Deactivate()
     {
         _active = false;
+        SyncStatsSampler();
         _refreshTimer.Stop();
         _tickTimer.Stop();
         _eventDebounce.Stop();
@@ -414,6 +426,7 @@ public partial class ContainersModule : UserControl, IModule
         docker.ContainerEventReceived -= OnContainerEvent;
         docker.ImageEventReceived -= OnImageEvent;
         docker.NetworkEventReceived -= OnNetworkEvent;
+        docker.StatsReceived -= OnStats;
         try { docker.StopEventListener(); } catch { /* ignore */ }
     }
 
@@ -447,6 +460,57 @@ public partial class ContainersModule : UserControl, IModule
         if (!_active || Current != Tab.Networks) return;
         Debounce(Tab.Networks);
     });
+
+    /// <summary>
+    /// One finished sample from the stats tail, applied to the rows on screen.
+    ///
+    /// <para>Not debounced, unlike every event handler above it, because this is not an
+    /// announcement that something may have changed: it is the reading itself, it arrives at a
+    /// cadence the host already sets, and it costs no round trip to act on. It updates cells in
+    /// place and never re-orders the table, which is the rule the uptime tick already follows: a
+    /// table sorted by CPU would otherwise reshuffle under the pointer every few seconds, and the
+    /// next refresh puts it in order anyway.</para>
+    /// </summary>
+    private void OnStats(IReadOnlyList<ContainerStats> sample) => Dispatcher.UIThread.Post(() =>
+    {
+        // A sample that arrives just after the sampler was told to stop is the tail's last word on
+        // the way out, and the columns are meant to be empty by then.
+        if (!_active || Current != Tab.Containers) return;
+
+        // Last one wins per id. `docker stats` can print a record with no id at all for a container
+        // that went away mid-pass (observed on docker 29.1.3), and the service drops those before
+        // they get here.
+        _stats = sample.ToDictionary(x => x.Id, StringComparer.Ordinal);
+        foreach (var row in _rows) row.ApplyStats(StatsFor(row.Id));
+    });
+
+    private ContainerStats? StatsFor(string id) => _stats.GetValueOrDefault(id);
+
+    /// <summary>
+    /// Starts the stats tail while the containers table is the thing on screen, and stops it the
+    /// moment it is not: another tab, another module, a host without docker.
+    ///
+    /// <para>Stopping <b>clears the last sample</b> rather than leaving it on the rows. A container
+    /// name is still true after a minute on another tab and a CPU percentage is not, and the
+    /// alternative is a table that draws a reading from whenever somebody last looked. The price is
+    /// the two columns filling in a couple of seconds after the tab is entered, which is one
+    /// sample's wait and the honest thing to draw in the meantime.</para>
+    /// </summary>
+    private void SyncStatsSampler()
+    {
+        if (_docker is null) return;
+
+        if (_active && Current == Tab.Containers && Docker.DockerAvailable)
+        {
+            Docker.StartStatsSampler();
+            return;
+        }
+
+        Docker.StopStatsSampler();
+        if (_stats.Count == 0) return;
+        _stats = new Dictionary<string, ContainerStats>(StringComparer.Ordinal);
+        foreach (var row in _rows) row.ApplyStats(null);
+    }
 
     /// <summary>
     /// Restarts one page's coalescing timer. Bursts are the rule rather than the exception: one
@@ -711,8 +775,14 @@ public partial class ContainersModule : UserControl, IModule
                 c.Image.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
                 c.Stack.Contains(needle, StringComparison.OrdinalIgnoreCase));
 
+        // The reading is applied inside the merge rather than after it, so a row the merge has just
+        // created carries one before OrderContainers is handed the table: sorted by CPU, a pass that
+        // applied them afterwards would put every new row at the bottom whatever it was using.
         TableRows.Merge(_rows, _byId, items,
-            c => c.Id, c => new ContainerRow(c), (row, c) => row.Update(c), OrderContainers);
+            c => c.Id,
+            c => { var row = new ContainerRow(c); row.ApplyStats(StatsFor(c.Id)); return row; },
+            (row, c) => { row.Update(c); row.ApplyStats(StatsFor(c.Id)); },
+            OrderContainers);
 
         UpdateStatusCount();
         DrawEmpty(EmptyText, _rows.Count, _containersFailure, needle,
@@ -730,6 +800,12 @@ public partial class ContainersModule : UserControl, IModule
     /// on the networks table do with their blanks, and grouping the blanks is the point rather than
     /// an accident of the comparer.</para>
     ///
+    /// <para>CPU and Mem sort on the numbers behind their cells rather than on docker's phrases,
+    /// which is the bargain the Uptime arm above them already made: "9.5%" sorts above "80%" and
+    /// "999KiB" above "1.02MiB". Neither is re-sorted by a sample landing, only by the next
+    /// populate, for the reason the uptime tick does not re-sort either: a table that reshuffled
+    /// itself every few seconds would move the row somebody was reaching for.</para>
+    ///
     /// <para>Ports has no arm because it has no order. Its cell holds a list of mappings rather
     /// than a value, so there is nothing for a comparer to be about; sorted on its own text it put
     /// 1433 above 3306 above 80 above 8002, which is not an order anybody asked for. Its heading
@@ -745,6 +821,10 @@ public partial class ContainersModule : UserControl, IModule
         "state" => ContainerSort.By(rows, r => r.State, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         "uptime" => ContainerSort.By(rows, r => r.UptimeSeconds)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "cpu" => ContainerSort.By(rows, r => r.CpuPercent)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "mem" => ContainerSort.By(rows, r => r.MemBytes)
             .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
         _ => rows
             .OrderByDescending(r => r.State == "running")

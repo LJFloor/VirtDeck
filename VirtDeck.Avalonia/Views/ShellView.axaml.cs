@@ -38,6 +38,31 @@ public partial class ShellView : UserControl
     // RefreshProfile picks that up without a reconnect.
     private HostProfile _profile;
 
+    /// <summary>
+    /// Restarting and powering the host off, and finding out whether anyone else has. The shell's,
+    /// not a module's: the machine at the far end is what the whole window is about, the same
+    /// argument that puts the host cell here rather than in a status slot.
+    /// </summary>
+    private readonly HostPowerService _power;
+
+    /// <summary>What the host has been told to do and has not done yet, or null. See <see cref="ApplyScheduledAsync"/>.</summary>
+    private ScheduledPower? _scheduled;
+
+    /// <summary>
+    /// The schedule the user has already been shown, so a poll every few seconds warns once rather
+    /// than every tick. It is also what a restart ordered from this window sets before the poll can
+    /// see it: the dialog said what was about to happen, and saying it again as news would be the
+    /// app telling the user what they just did.
+    /// </summary>
+    private ScheduledPower? _warned;
+
+    /// <summary>
+    /// A restart was just ordered from this window and has not been read back yet. It covers the
+    /// gap the read-back leaves when it fails: without it, an ordered restart whose confirming read
+    /// did not land would come back fifteen seconds later as somebody else's news.
+    /// </summary>
+    private bool _ordered;
+
     private readonly DispatcherTimer _tickTimer;
     private long _lastBytes;       // total tunnel bytes at the last throughput sample
     private long _lastSampleTs;    // Stopwatch timestamp at the last sample
@@ -89,6 +114,12 @@ public partial class ShellView : UserControl
     private string _osName = "";
 
     /// <summary>
+    /// What the last probe was logged as, so a 4 s poll does not write the same line forever. Not
+    /// state anything reads: purely so the log names a move rather than a heartbeat.
+    /// </summary>
+    private string _lastProbeLog = "";
+
+    /// <summary>
     /// A connection to another host is up and this shell is finished. Opening and replacing windows
     /// is the window's business, not the shell's, so the shell says what it settled on and
     /// <see cref="MainWindow"/> does it.
@@ -131,8 +162,15 @@ public partial class ShellView : UserControl
         _profile = AppSettings.Current.FindHost(ssh.ProfileKey)
                    ?? new HostProfile { Host = ssh.Host, Port = ssh.Port, Username = ssh.Username };
 
+        _power = new HostPowerService(ssh);
+
+        // Raised on the watcher's own read thread, like every event tail in the app.
+        _power.ScheduleChanged += found => Dispatcher.UIThread.Post(() => _ = ApplyScheduledAsync(found));
+
         HostSwitcher.HostSelected += profile => _ = SwitchToAsync(profile);
         HostSwitcher.ManageHostsClicked += () => ManageHostsRequested?.Invoke(_profile);
+        HostSwitcher.PowerRequested += restart => _ = PowerAsync(restart);
+        HostSwitcher.CancelPowerRequested += () => _ = CancelPowerAsync();
         PaintHosts();
 
         foreach (var module in AllModules())
@@ -182,6 +220,11 @@ public partial class ShellView : UserControl
         _lastBytes = TotalTunnelBytes();
         _lastSampleTs = Stopwatch.GetTimestamp();
         _tickTimer.Start();
+
+        // Read once directly, so a window opened onto a host that is already going down says so
+        // now rather than a second connection and a round trip later, and then the watch takes over.
+        await ReadScheduledAsync();
+        _power.StartWatching();
 
         // Before the first switch, so the strip is right the first time it is drawn rather than
         // losing a tab from under the pointer a moment later.
@@ -274,6 +317,16 @@ public partial class ShellView : UserControl
 
             _probeFailed = host is null;
             ApplyRelevance(host);
+
+            // The probe that decides the whole side menu used to log nothing, which made a host
+            // hiding a module for a tool it does have (a PATH the exec channel never saw, say)
+            // invisible in the log. Only on a move, because this runs from a 4 s timer.
+            var found = host is null ? "probe failed" : string.Join(", ", host.Tools.Keys);
+            if (found != _lastProbeLog)
+            {
+                _lastProbeLog = found;
+                VirtDeck.Diagnostics.SpiceLog.Log($"[modules] os='{host?.OsId}' tools=[{found}]");
+            }
 
             // The host cell names what came back with the tool list. Repainted only when it moved,
             // because this runs from a timer and rebuilding a menu nobody asked about every four
@@ -373,6 +426,134 @@ public partial class ShellView : UserControl
         ModuleWidgetRule.IsVisible = widget != null;
     }
 
+    // ---- Restarting the host ---------------------------------------------
+
+    /// <summary>
+    /// Restarts the host or powers it off, after asking how long from now and what to tell whoever
+    /// is logged in.
+    ///
+    /// <para>The shell runs it rather than the cell, for the reason the cell knows nothing about
+    /// SSH: this owns the connection, and the status slot the outcome goes to.</para>
+    ///
+    /// <para>A module in the middle of something is <b>said out loud in the dialog rather than
+    /// being a refusal</b>, unlike a host switch, which is refused outright. Switching host is an
+    /// accident waiting to happen halfway through an upgrade and there is always the option of
+    /// waiting; restarting the host is sometimes exactly what has to happen, and the app is in no
+    /// position to decide that it does not.</para>
+    /// </summary>
+    private async Task PowerAsync(bool restart)
+    {
+        var dialog = new HostPowerDialog(restart, _profile.DisplayName, BlockingReason());
+        if (await dialog.ShowDialog<bool?>(Owner) != true) return;
+
+        var delay = dialog.Delay;
+        string noun = restart ? "restart" : "shutdown";
+        string title = restart ? "Restart host" : "Shut down host";
+
+        try
+        {
+            StatusText.Text = $"Scheduling the {noun}…";
+            _ordered = true;
+            await _power.ScheduleAsync(restart, delay, dialog.Message);
+
+            // Read back rather than assumed, so what the cell says is what the host wrote down, and
+            // marked as already seen so the poll does not report it as news a moment later. An
+            // immediate one has no schedule to read: the host is on its way down and the file is
+            // never written.
+            await ReadScheduledAsync();
+            PaintStatus();
+
+            await MessageDialog.Info(Owner, title, delay == TimeSpan.Zero
+                ? $"The host is {(restart ? "restarting" : "shutting down")}. " +
+                  "This window loses its connection in a moment."
+                : $"{_scheduled?.Summary() ?? $"The {noun} is scheduled"}. " +
+                  $"Call it off from the host cell if you change your mind.");
+        }
+        catch (Exception ex)
+        {
+            PaintStatus();
+            await MessageDialog.Info(Owner, title, ex.Message);
+        }
+    }
+
+    /// <summary>Calls off whatever the host has been told to do, whoever told it.</summary>
+    private async Task CancelPowerAsync()
+    {
+        try
+        {
+            await _power.CancelAsync();
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Cancel", ex.Message);
+        }
+
+        // Read rather than left to the watch: it would say the same thing a second later, and a
+        // menu that has not caught up by the time the dialog closes reads as the cancel not having
+        // worked. Whether it worked or not, what the host says now is the answer, and a cancel that
+        // failed leaves the row where it was rather than taking it away.
+        await ReadScheduledAsync();
+    }
+
+    /// <summary>
+    /// Asks the host directly what it has been told to do, for the two moments that cannot wait for
+    /// the watch: the first draw, and the read-back after this window ordered or called off
+    /// something. One un-elevated round trip on the shared channel.
+    ///
+    /// <para>A read that fails is not an answer and changes nothing on screen: the connection
+    /// dropping is exactly what happens while a restart this window ordered is under way.</para>
+    /// </summary>
+    private async Task ReadScheduledAsync()
+    {
+        ScheduledPower? found;
+        try { found = await _power.ReadScheduledAsync(); }
+        catch { return; }
+
+        await ApplyScheduledAsync(found, warn: false);
+    }
+
+    /// <summary>
+    /// Takes one answer about what the host has been told to do, from the watch or from a read of
+    /// this window's own, and warns once when it is news.
+    ///
+    /// <para><b>The watch behind it is a tail rather than a poll,</b> which is the refresh policy's
+    /// rule and not an exception to it, even though nothing on a host announces this: what
+    /// announces it is a loop <b>on the host</b>, one line only when the answer moves, so the app
+    /// hears about a restart somebody scheduled from Cockpit or from a terminal within about a
+    /// second instead of a quarter of a minute. It is the shell's tail, not a module's, for the
+    /// reason the host cell is the shell's: the host going down under somebody is worth knowing
+    /// about whichever module is on screen.</para>
+    ///
+    /// <para><b>An immediate <c>systemctl poweroff</c> is never seen, and cannot be.</b> Nothing is
+    /// written down for it and the host is gone before anything could read it. That is the honest
+    /// limit of this, and it is why the warning says what is scheduled rather than promising the
+    /// host will not vanish.</para>
+    /// </summary>
+    private async Task ApplyScheduledAsync(ScheduledPower? found, bool warn = true)
+    {
+        if (found == _scheduled) return;
+
+        _scheduled = found;
+        PaintHosts();
+
+        if (found == null)
+        {
+            _warned = null;
+            return;
+        }
+
+        // Warned once per schedule, and never for one this window just ordered: the dialog that
+        // ordered it already said what was going to happen.
+        bool news = warn && !_ordered && found != _warned;
+        _ordered = false;
+        _warned = found;
+        if (!news) return;
+
+        await MessageDialog.Info(Owner, "The host is going down",
+            $"{found.Summary()} on {_profile.DisplayName}." +
+            (found.Message.Length > 0 ? $"\n\nMessage to logged in users: {found.Message}" : ""));
+    }
+
     // ---- Switching host -------------------------------------------------
 
     /// <summary>
@@ -380,7 +561,7 @@ public partial class ShellView : UserControl
     /// for why this list is rebuilt rather than merged.
     /// </summary>
     public void PaintHosts(string? disabledReason = null) =>
-        HostSwitcher.Show(_profile, AppSettings.Current.Hosts, _osName, disabledReason);
+        HostSwitcher.Show(_profile, AppSettings.Current.Hosts, _osName, disabledReason, _scheduled);
 
     /// <summary>
     /// Re-reads the profile for the connection this shell is on, after the manager may have renamed
@@ -554,6 +735,7 @@ public partial class ShellView : UserControl
     {
         _tickTimer.Stop();
         _probeTimer.Stop();
+        _power.StopWatching();
 
         // Every module, not just the visible one: a hidden module still owns consoles and media
         // streams it opened while it was on screen.

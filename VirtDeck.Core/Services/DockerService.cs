@@ -218,7 +218,10 @@ namespace VirtDeck.Services
                         // belongs to is all a subscriber needs. Anything else is ignored rather
                         // than falling through to the container refresh, so stray daemon output
                         // cannot drive a round trip.
-                        _ssh.RunSudoCommandStreaming(EventsCommand, line =>
+                        // SudoWrap rather than the bare command: RunSudoCommandStreaming neither
+                        // escapes nor wraps, so this is the one docker stream that would otherwise
+                        // resolve `docker` against sudo's PATH rather than a repaired one.
+                        _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(EventsCommand), line =>
                         {
                             switch (line.Trim())
                             {
@@ -252,6 +255,117 @@ namespace VirtDeck.Services
             _eventTask = null;
         }
 
+        // ---- Live resource sampling ----------------------------------------
+
+        /// <summary>
+        /// One finished sample: every running container the host reported in one pass, raised on
+        /// the sampler's own read thread, so subscribers marshal to the UI thread exactly as they
+        /// do for the event tail. The list is the whole reading and never a delta, so an empty one
+        /// means nothing is running rather than nothing changed.
+        /// </summary>
+        public event Action<IReadOnlyList<ContainerStats>>? StatsReceived;
+
+        private CancellationTokenSource? _statsCts;
+        private Task? _statsTask;
+
+        // A remote loop rather than a command per tick, for the reason HostMetricsService is one:
+        // RunSudoCommand holds the shared _ioLock for its whole call and this command costs a flat
+        // two seconds (measured on docker 29.1.3, whatever the container count: the daemon needs
+        // two CPU readings a second apart before it can state a percentage). Through the shared
+        // connection that would stall every other module for two seconds a tick; the streaming
+        // runner opens a client of its own and takes no lock, so the whole cost is one connection.
+        //
+        // `--no-stream` in a loop rather than the live stream `docker stats` is by default, because
+        // the live one paints a terminal: over a pipe it still writes cursor-home and clear-line
+        // escapes around a block it repeats about twice a second, forever, per container. This
+        // prints plain records at a cadence we choose, and on a host with nothing running it costs
+        // nothing at all (measured: 0.01s and no output).
+        //
+        // `--no-trunc` is what makes the sample joinable: without it the id is docker's 12-char
+        // abbreviation and the listing's is the full 64.
+        //
+        // `e` closes a sample, the way the metrics sampler's awk ends one, and it is what empties
+        // the columns: the last container stopping is a sample with no `m` records in it, which is
+        // only distinguishable from a silent tail because the marker still arrives.
+        private const string StatsScript =
+            "export LC_ALL=C\n" +
+            "while :; do\n" +
+            "  docker stats --no-stream --no-trunc " +
+            "--format 'm\t{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' 2>/dev/null\n" +
+            "  echo e\n" +
+            "  sleep 3\n" +
+            "done";
+
+        /// <summary>
+        /// Samples what every running container is using, on a dedicated SSH connection, raising
+        /// <see cref="StatsReceived"/> once per pass. Idempotent, and it self-heals after a dropped
+        /// stream in <see cref="StartEventListener"/>'s shape.
+        ///
+        /// <para>Unlike that listener this one is <b>started and stopped with the page</b> rather
+        /// than left running for the session. An event tail is nearly free and its whole value is
+        /// arriving while nobody is looking; this asks the daemon to measure every container on the
+        /// host every few seconds, and a reading nothing is drawing is work nobody asked for. It is
+        /// the same reason only the visible tab is polled.</para>
+        /// </summary>
+        public void StartStatsSampler()
+        {
+            if (_statsCts != null) return; // already running
+            var cts = new CancellationTokenSource();
+            _statsCts = cts;
+            var ct = cts.Token;
+            _statsTask = Task.Run(() =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    // Rebuilt per sample rather than cleared, so the list handed to a subscriber is
+                    // never the one the next pass is filling in.
+                    var batch = new List<ContainerStats>();
+                    try
+                    {
+                        _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(StatsScript), line =>
+                        {
+                            var f = line.TrimEnd('\r').Split('\t');
+                            if (f[0] == "e")
+                            {
+                                StatsReceived?.Invoke(batch);
+                                batch = new List<ContainerStats>();
+                                return;
+                            }
+                            if (f.Length < 5 || f[0] != "m" || f[1].Length == 0) return;
+                            batch.Add(new ContainerStats(f[1].Trim(), f[2].Trim(), f[3].Trim(), f[4].Trim()));
+                        }, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!ct.IsCancellationRequested)
+                            Diagnostics.SpiceLog.Log($"[docker] stats sampler dropped: {ex.Message}");
+                    }
+                    if (!ct.IsCancellationRequested)
+                        try { Task.Delay(3000, ct).Wait(ct); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// Stops the sampler and tears down its connection, and <b>does not wait for either</b>,
+        /// which is the difference from <see cref="StopEventListener"/>. Cancelling a streaming run
+        /// disconnects its SSH client inline on whoever called Cancel, and this one is stopped by a
+        /// tab switch and a module switch rather than once at shutdown: the thread drawing the
+        /// window cannot be handed a network round trip that often.
+        /// </summary>
+        public void StopStatsSampler()
+        {
+            var cts = _statsCts;
+            if (cts == null) return;
+            _statsCts = null;
+            _statsTask = null;
+            Task.Run(() =>
+            {
+                try { cts.Cancel(); } catch { }
+                try { cts.Dispose(); } catch { }
+            });
+        }
+
         // ---- Host capabilities ---------------------------------------------
 
         /// <summary>
@@ -264,38 +378,104 @@ namespace VirtDeck.Services
         /// <summary>e.g. "27.3.1", or "" when docker is not installed or did not answer.</summary>
         public string DockerVersion { get; private set; } = string.Empty;
 
-        /// <summary>What systemd says about the daemon ("active", "inactive", "unknown", …).</summary>
+        /// <summary>Whether the daemon answers ("active", "inactive", "unknown").</summary>
         public string DaemonState { get; private set; } = "unknown";
 
+        // One round trip, tagged records, in place of the three this used to be.
+        //
+        // `s` is the daemon question asked of docker rather than of the init system. `systemctl
+        // is-active docker` only answers on a host whose unit happens to be named `docker`, which is
+        // most of them and not all: Synology's Container Manager ships the same dockerd as
+        // `pkg-ContainerManager-dockerd`, so that probe called a perfectly healthy daemon inactive.
+        // Whether the socket answers is what the module actually needs to know, and it is the same
+        // question on every init system and on hosts with none.
+        //
+        // `v` is the client, which needs no socket at all, and that is what keeps "installed" and
+        // "running" two separate answers: see "The test is installed, not running".
+        //
+        // Everything is fenced and the script ends `exit 0`, because RunSudoCommand throws on a
+        // non-zero exit and a host without docker has to get a sentence rather than an exception.
+        private const string CapabilitiesScript = """
+            export LC_ALL=C
+            printf 'v\t%s\n' "$(docker --version 2>/dev/null)"
+            printf 's\t%s\n' "$(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+            printf 'c\t%s\n' "$(docker compose version --short 2>/dev/null)"
+            exit 0
+            """;
+
         /// <summary>
-        /// Probes for the docker CLI and the daemon, mirroring
-        /// <see cref="VirshService.CheckHostCapabilities"/>: non-sudo, each guarded so a missing
-        /// tool answers empty instead of throwing.
+        /// Asks the host for the docker client, whether its daemon answers, and the compose plugin,
+        /// in one elevated round trip.
+        ///
+        /// <para><b>Elevated</b>, unlike <see cref="VirshService.CheckHostCapabilities"/>, which
+        /// this used to mirror. The daemon question here is "does the socket answer", and on a host
+        /// whose login user is not in a <c>docker</c> group the socket is root-only, so un-elevated
+        /// there is no answer to give at all. This is an always-sudo module (see "Containers") and
+        /// the login window already accepted the sudo password, so asking as root raises no prompt
+        /// and adds no failure mode. The compose half was elevated for its own reason and still is:
+        /// a CLI plugin is per user, every docker command this service runs is elevated, and so it
+        /// is <i>root's</i> plugin directory that decides whether <c>sudo docker compose</c> works.
+        /// It is also why compose is asked for here rather than only from the stacks listing: the
+        /// Stacks tab is <b>disabled</b> without it, and a tab that had to be entered before it
+        /// could be enabled would never enable.</para>
+        ///
+        /// <para>A probe that could not run answers absent, never throws, which is what makes the
+        /// module explain an empty list instead of showing one.</para>
         /// </summary>
         public (string version, string daemonState) CheckHostCapabilities()
         {
             var version = string.Empty;
-            var daemon = "unknown";
+            var server = string.Empty;
+            var compose = string.Empty;
 
             try
             {
-                var raw = _ssh.RunCommand("docker --version 2>/dev/null || true").Trim();
-                // "Docker version 27.3.1, build ce12230" -> "27.3.1"
-                var m = Regex.Match(raw, @"version\s+([^\s,]+)", RegexOptions.IgnoreCase);
-                if (m.Success) version = m.Groups[1].Value;
-            }
-            catch { }
+                var raw = _ssh.RunSudoCommand(ShellScript.Wrap(CapabilitiesScript));
+                foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
+                {
+                    switch (tag)
+                    {
+                        // "Docker version 27.3.1, build ce12230" -> "27.3.1"
+                        case "v":
+                            var m = Regex.Match(text, @"version\s+([^\s,]+)", RegexOptions.IgnoreCase);
+                            if (m.Success) version = m.Groups[1].Value;
+                            break;
 
-            try { daemon = _ssh.RunCommand("systemctl is-active docker 2>/dev/null || true").Trim(); } catch { }
+                        case "s":
+                            server = text.Trim();
+                            break;
+
+                        // A version and not merely some output: without the plugin docker prints its
+                        // own "unknown command" advice, and any of it reaching ComposeVersion would
+                        // put a sentence where the status bar expects a number.
+                        case "c":
+                            var line = text.Trim().TrimStart('v', 'V');
+                            if (line.Length > 0 && char.IsDigit(line[0])) compose = line;
+                            break;
+                    }
+                }
+            }
+            catch
+            {
+                // A host that could not be asked leaves every field where it started, which is the
+                // absent answer the module draws a sentence for.
+            }
 
             DockerVersion = version;
-            DaemonState = daemon.Length == 0 ? "unknown" : daemon;
             DockerAvailable = version.Length > 0;
+            ComposeVersion = compose;
+            ComposeAvailable = compose.Length > 0;
 
-            ProbeCompose();
+            // Three states and not two. No client at all leaves the daemon genuinely unasked, which
+            // is a different thing from a client whose socket did not answer, and the module says
+            // "docker not installed" for the first without ever reading this.
+            DaemonState = !DockerAvailable ? "unknown"
+                        : server.Length > 0 ? "active"
+                        : "inactive";
 
-            Diagnostics.SpiceLog.Log($"[docker] version='{version}' daemon='{DaemonState}' " +
-                                     $"available={DockerAvailable} compose='{ComposeVersion}'");
+            Diagnostics.SpiceLog.Log($"[docker] version='{version}' server='{server}' " +
+                                     $"daemon='{DaemonState}' available={DockerAvailable} " +
+                                     $"compose='{ComposeVersion}'");
             return (DockerVersion, DaemonState);
         }
 
@@ -1702,13 +1882,16 @@ namespace VirtDeck.Services
         ///
         /// Written out longhand because <c>RunSudoCommandStreaming</c> neither escapes its argument
         /// nor wraps it in <c>bash -c</c>, unlike <c>RunSudoCommand</c>: the wrapper the argv idiom
-        /// relies on has to be part of the string here. It also opens its own SSH connection, so the
-        /// container list behind the dialog keeps refreshing while a large image comes down.
+        /// relies on has to be part of the string here, and so does
+        /// <see cref="ShellScript.PathExport"/>, which a wrapper built here does not get for free.
+        /// It also opens its own SSH connection, so the container list behind the dialog keeps
+        /// refreshing while a large image comes down.
         /// </summary>
         private void Pull(string image, Action<string>? progress, CancellationToken ct)
         {
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(image));
-            var command = $"bash -c 'i=$(echo {b64} | base64 -d); docker pull -- \"$i\"'";
+            var command = $"bash -c '{ShellScript.PathExport}; " +
+                          $"i=$(echo {b64} | base64 -d); docker pull -- \"$i\"'";
             _ssh.RunSudoCommandStreaming(command, line =>
             {
                 var text = line.Trim();
@@ -2277,8 +2460,9 @@ namespace VirtDeck.Services
         ///
         /// The wrapper is written out longhand for the same reason <see cref="Pull"/> writes one:
         /// <c>RunSudoCommandStreaming</c> neither escapes its argument nor wraps it in
-        /// <c>bash -c</c>. The id is safe to interpolate because <see cref="RequireId"/> has vetted
-        /// it, so unlike the pull there is nothing to base64.
+        /// <c>bash -c</c>, so the PATH export has to be spelled out in it too. The id is safe to
+        /// interpolate because <see cref="RequireId"/> has vetted it, so unlike the pull there is
+        /// nothing to base64.
         /// </summary>
         public Task TailLogsAsync(string id, int tailLines, bool follow, Action<string> onLine,
                                   CancellationToken ct)
@@ -2291,7 +2475,7 @@ namespace VirtDeck.Services
             // stderr alone, so without the redirect the window would sit empty on a perfectly
             // chatty container. It belongs inside the inner bash, not on the sudo command, so that
             // sudo's own stderr is not merged into the log as well.
-            var command = $"bash -c 'docker logs --tail {tailLines} " +
+            var command = $"bash -c '{ShellScript.PathExport}; docker logs --tail {tailLines} " +
                           $"{(follow ? "--follow " : "")}{id} 2>&1'";
 
             return Task.Run(() => _ssh.RunSudoCommandStreaming(command, onLine, ct), ct);
@@ -2481,52 +2665,14 @@ namespace VirtDeck.Services
         /// <summary>
         /// Whether <c>docker compose</c> answered. False until the listing says otherwise, the same
         /// safe default <see cref="DockerAvailable"/> takes, and re-read on every listing rather
-        /// than latched, so installing the plugin mid-session is not a dead end.
+        /// than latched, so installing the plugin mid-session is not a dead end. Written by
+        /// <see cref="CheckHostCapabilities"/>, which asks for it in the same round trip as the
+        /// client and the daemon, and by the stacks listing's own <c>v</c> tag.
         /// </summary>
         public bool ComposeAvailable { get; private set; }
 
         /// <summary>e.g. "2.29.7", or "" when the plugin is not installed.</summary>
         public string ComposeVersion { get; private set; } = string.Empty;
-
-        /// <summary>
-        /// Asks whether the compose plugin is there, from the capability probe rather than only from
-        /// the stacks listing.
-        ///
-        /// <para>It has to be here because the Stacks tab is <b>disabled</b> without it, and a tab
-        /// that had to be entered before it could be enabled would never enable. The listing keeps
-        /// its own <c>v</c> tag so the version stays current while the page is open; this is what
-        /// decides whether the page can be opened at all.</para>
-        ///
-        /// <para>Through <c>sudo</c>, unlike the two probes above it, and that is not incidental: a
-        /// CLI plugin is per user, every docker command this service runs is elevated, and so it is
-        /// <i>root's</i> plugin directory that decides whether <c>sudo docker compose</c> works. It
-        /// raises no prompt, because the sudo password was already accepted at the login window.</para>
-        /// </summary>
-        private void ProbeCompose()
-        {
-            ComposeAvailable = false;
-            ComposeVersion = string.Empty;
-            if (!DockerAvailable) return;
-
-            try
-            {
-                var raw = _ssh.RunSudoCommand("docker compose version --short 2>/dev/null || true");
-                var line = LastLine(raw).Trim().TrimStart('v', 'V');
-
-                // A version and not merely some output: without the plugin docker prints its own
-                // "unknown command" advice, and any of it reaching ComposeVersion would put a
-                // sentence where the status bar expects a number.
-                if (line.Length > 0 && char.IsDigit(line[0]))
-                {
-                    ComposeVersion = line;
-                    ComposeAvailable = true;
-                }
-            }
-            catch
-            {
-                // Same rule as the two probes above: a missing tool answers absent, never throws.
-            }
-        }
 
         // Compose's own project-name rule. Strict, because this is what VirtDeck will *create*, and
         // because it is what makes StackDirectory safe to build: the same split IsValidNewUserName

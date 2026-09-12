@@ -13,6 +13,8 @@
     <x:Double x:Key="ColImage">240</x:Double>
     <x:Double x:Key="ColState">90</x:Double>
     <x:Double x:Key="ColUptime">100</x:Double>
+    <x:Double x:Key="ColCpu">65</x:Double>
+    <x:Double x:Key="ColMem">85</x:Double>
 
     <x:Double x:Key="ColRepository">260</x:Double>
     <x:Double x:Key="ColTag">150</x:Double>
@@ -111,6 +113,13 @@
               <c:ColumnHeader DockPanel.Dock="Left" Text="Image"  SortKey="image"  Width="{StaticResource ColImage}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="State"  SortKey="state"  Width="{StaticResource ColState}" />
               <c:ColumnHeader DockPanel.Dock="Left" Text="Uptime" SortKey="uptime" Width="{StaticResource ColUptime}" />
+              <!-- What the container is using right now, sampled by a tail of its own rather than
+                   read with the listing: see "Two columns that are not from the listing". CPU is
+                   docker's own percent of one core, so a container busy on two of them reads 200%.
+                   Both sort on the number behind the cell, and a container with no reading sorts
+                   below every container with one. -->
+              <c:ColumnHeader DockPanel.Dock="Left" Text="CPU"    SortKey="cpu"    Width="{StaticResource ColCpu}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Mem"    SortKey="mem"    Width="{StaticResource ColMem}" />
               <!-- Ports is the one heading in the app that carries no order. Its cell is a
                    list rather than a value, so no ordering of it means anything; TableSort
                    skips an empty SortKey and makes the cell inert, so it does not offer. -->
@@ -158,6 +167,13 @@
                     <TextBlock Text="{Binding State}"  Width="{StaticResource ColState}" Foreground="{Binding StateBrush}"
                                ToolTip.Tip="{Binding Status}" />
                     <TextBlock Text="{Binding Uptime}" Width="{StaticResource ColUptime}" Opacity="0.75" />
+                    <!-- Blank rather than a zero on a container that is not running, and on one the
+                         sampler has no reading for yet: there is nothing to report, which is not the
+                         same claim as reporting nothing. The Mem tooltip carries the limit the cell
+                         leaves out, the way the two cells on either side carry docker's phrase. -->
+                    <TextBlock Text="{Binding Cpu}" Width="{StaticResource ColCpu}" Opacity="0.75" />
+                    <TextBlock Text="{Binding Mem}" Width="{StaticResource ColMem}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding MemTip}" />
                     <!-- The cell is docker's phrase with the wildcard addresses, the duplicate
                          IPv6 half and an implied /tcp taken out; the tooltip is what docker
                          actually reported, the way the State cell carries its Status phrase. -->

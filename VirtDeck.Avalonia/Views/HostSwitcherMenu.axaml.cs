@@ -38,10 +38,23 @@ public partial class HostSwitcherMenu : UserControl
     private bool _statusBar;
     private string _currentKey = "";
 
+    /// <summary>
+    /// The scheduled restart or shutdown row, and what it is about. Kept so the countdown in it is
+    /// recomputed when the menu is opened: the menu is redrawn only when something changes, which
+    /// is what keeps a four second poll from rebuilding it forever, and a line saying "in 20 min"
+    /// written half an hour ago would be the one row here where that shows.
+    /// </summary>
+    private MenuItem? _scheduledFact;
+    private ScheduledPower? _scheduled;
+
     public HostSwitcherMenu()
     {
         InitializeComponent();
         HostItem.TemplateApplied += (_, e) => ApplyPlacement(e.NameScope);
+        HostItem.SubmenuOpened += (_, _) =>
+        {
+            if (_scheduledFact != null && _scheduled != null) _scheduledFact.Header = _scheduled.Summary();
+        };
     }
 
     /// <summary>A saved host was picked. Never raised for the one already connected.</summary>
@@ -49,6 +62,16 @@ public partial class HostSwitcherMenu : UserControl
 
     /// <summary>"Manage hosts" was picked: the caller opens the host manager.</summary>
     public event Action? ManageHostsClicked;
+
+    /// <summary>
+    /// Restart or Shut down was picked: true for a restart. The delay and the message to logged in
+    /// users are asked for by the caller, not here; this cell only says which of the two was
+    /// wanted, the same way it only says which host was picked.
+    /// </summary>
+    public event Action<bool>? PowerRequested;
+
+    /// <summary>The scheduled restart or shutdown should be called off.</summary>
+    public event Action? CancelPowerRequested;
 
     /// <summary>
     /// Whether this instance hangs in the shell's status bar (the default) or sits in an ordinary
@@ -98,7 +121,8 @@ public partial class HostSwitcherMenu : UserControl
     /// <summary>
     /// Draws the menu, with <paramref name="current"/> as the label and ticked in the list.
     ///
-    /// Three sections, separated: what this machine is, which host to be on, and the one command.
+    /// Four sections, separated: what this machine is, what to do to it, which host to be on, and
+    /// the one host-list command.
     /// The first is one <b>disabled item used as a fact rather than a command</b>, which is what a
     /// menu has instead of a heading: this is the one cell in the shell that is about the machine
     /// at the far end, so what it is running belongs in it, and it is the thing the cell's own
@@ -117,15 +141,25 @@ public partial class HostSwitcherMenu : UserControl
     /// <paramref name="disabledReason"/> is what the cell says on hover when it cannot be used
     /// (a switch already in flight); passing one is what disables it. Disabled with a reason
     /// rather than hidden, because a command that comes and goes reads as a bug.
+    ///
+    /// <paramref name="scheduled"/> is what the host has been told to do and has not done yet, from
+    /// anywhere: this app, another VirtDeck, a person at a terminal. It is drawn as a second fact
+    /// with the one command that undoes it under it, and both are <b>absent when nothing is
+    /// scheduled</b> rather than present and disabled: a call-off for a schedule that does not
+    /// exist is not a command somebody goes looking for, the same call the updates module's restart
+    /// panel makes.
     /// </summary>
     public void Show(HostProfile? current, IReadOnlyList<HostProfile> hosts,
-                     string osName = "", string? disabledReason = null)
+                     string osName = "", string? disabledReason = null,
+                     ScheduledPower? scheduled = null)
     {
         // A profile with no host in it is not a host: the design-time shell produces one, and it is
         // not connected to anything.
         if (current is { Host.Length: 0 }) current = null;
 
         _currentKey = current?.Key ?? "";
+        _scheduled = scheduled;
+        _scheduledFact = null;
         HostLabel.Text = current?.DisplayName ?? NoHost;
 
         // Built as sections and joined with separators afterwards, so an empty one (no probe answer
@@ -134,6 +168,31 @@ public partial class HostSwitcherMenu : UserControl
         var sections = new List<List<Control>>();
 
         if (osName.Length > 0) sections.Add([Fact(osName)]);
+
+        // Under the name, because they are about that machine rather than about which machine to be
+        // on. Both open a dialog: how long from now, and what to tell whoever is logged in. Only
+        // with a host on the other end: with none there is nothing to restart, and that is the
+        // design-time cell rather than a state the shell is ever in.
+        if (current != null)
+        {
+            var restart = Command("Restart", () => PowerRequested?.Invoke(true));
+            restart.Icon = PowerGlyph(true);
+            ToolTip.SetTip(restart, "Restart the host, after a delay you choose.");
+            var off = Command("Shut down", () => PowerRequested?.Invoke(false));
+            off.Icon = PowerGlyph(false);
+            ToolTip.SetTip(off, "Power the host off, after a delay you choose.");
+            sections.Add([restart, off]);
+
+            if (scheduled != null)
+            {
+                var cancel = Command($"Cancel the {scheduled.Noun}", () => CancelPowerRequested?.Invoke());
+                ToolTip.SetTip(cancel, scheduled.Message.Length > 0
+                    ? $"Message to logged in users: {scheduled.Message}"
+                    : "Call it off. The host stays up.");
+                _scheduledFact = Fact(scheduled.Summary());
+                sections.Add([_scheduledFact, cancel]);
+            }
+        }
 
         var saved = new List<Control>();
         foreach (var host in hosts)
@@ -197,7 +256,7 @@ public partial class HostSwitcherMenu : UserControl
     /// with the host names below regardless. Nothing is hung on it on hover either, because a
     /// disabled control is not hit-testable and a tip there would never be read.
     /// </summary>
-    private static Control Fact(string text) => new MenuItem { Header = text, IsEnabled = false };
+    private static MenuItem Fact(string text) => new() { Header = text, IsEnabled = false };
 
     private static MenuItem Command(string header, Action run)
     {
@@ -205,6 +264,47 @@ public partial class HostSwitcherMenu : UserControl
         item.Click += (_, _) => run();
         return item;
     }
+
+    /// <summary>
+    /// The two power glyphs, and the only colour in this menu: the app's refresh glyph in amber for
+    /// restart, the power symbol in red for shut down. Colour rather than the row's own foreground,
+    /// which is what the tick below binds to, because these two are the only rows here that do
+    /// something to the machine rather than to what this window is looking at, and the pair reads
+    /// as a pair at a glance.
+    ///
+    /// <para>Drawn in the app's 16x16 stroked house style like every other piece of vector art
+    /// here, and resolved from <c>JbIconRestart</c> and <c>JbIconRemove</c> with a literal fallback,
+    /// which is what every code-built brush lookup in the app does.</para>
+    /// </summary>
+    private Control PowerGlyph(bool restart)
+    {
+        // Restart is the app's own refresh glyph, the `IconRefresh` every module's toolbar carries,
+        // byte for byte: a circle open at the top-right closed by a right-angle arrowhead. Restart
+        // and refresh are the same gesture at two scales, so drawing a second circular arrow for it
+        // was one arrow too many. Shut down is the power symbol, a 300 degree arc under a stem
+        // through the gap it leaves.
+        string data = restart
+            ? "M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22"
+            : "M 8,1.6 V 7.4 M 5.6,4.34 A 4.8,4.8 0 1 0 10.4,4.34";
+
+        return new global::Avalonia.Controls.Shapes.Path
+        {
+            Data = StreamGeometry.Parse(data),
+            Width = 12,
+            Height = 12,
+            Stretch = Stretch.Uniform,
+            StrokeThickness = 1.5,
+            StrokeLineCap = PenLineCap.Round,
+            Stroke = Brush(restart ? "JbIconRestart" : "JbIconRemove",
+                           restart ? Color.FromRgb(0xD6, 0x8F, 0x00) : Color.FromRgb(0xC7, 0x54, 0x50)),
+        };
+    }
+
+    /// <summary>A themed brush by key, or the literal it should have been. The app's usual shape.</summary>
+    private IBrush Brush(string key, Color fallback) =>
+        this.TryFindResource(key, out var found) && found is IBrush brush
+            ? brush
+            : new SolidColorBrush(fallback);
 
     /// <summary>
     /// The tick beside the host already connected, and the only art in this menu. A Path rather

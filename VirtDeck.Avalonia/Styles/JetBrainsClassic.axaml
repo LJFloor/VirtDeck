@@ -383,6 +383,13 @@
   <SolidColorBrush x:Key="JbIconAdd" Color="#59A869" />
   <SolidColorBrush x:Key="JbIconRemove" Color="#C75450" />
 
+  <!-- The host cell's restart glyph, in the same register as those two and outside the theme
+       dictionaries for the same reason. IntelliJ's warning amber, and the colour a state dot
+       already uses for "on its way somewhere", which is what a host counting down to a restart is.
+       Powering a host off uses JbIconRemove's red rather than a key of its own: red in this palette
+       means the thing it is on takes something away, and this is the largest of those. -->
+  <SolidColorBrush x:Key="JbIconRestart" Color="#D68F00" />
+
   <!--
     THE font size for the whole app. Avalonia gives a bare TextBlock 12, while every Fluent
     ControlTheme sets its own FontSize from this key (14), so labels and the controls they label

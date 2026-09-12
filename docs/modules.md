@@ -31,6 +31,14 @@ exactly as useful without it. See "Storage".
   tooling the host does not have is a screen whose entire content is a sentence saying so. It is
   the second exception overall, after the answer-file window's Export XML button, and for the same
   shape of reason.
+- **`command -v` over a repaired PATH, not over sshd's.** The probe is un-elevated and stays that
+  way, but it goes out through `ShellScript.Wrap`, which puts `ShellScript.PathExport` in front of
+  it. Without that the probe asks a non-login bash with sshd's bare default PATH, and on a host that
+  keeps its tooling outside `/usr/bin` the honest answer to `command -v` is a lie: Synology DSM hands
+  out `/usr/bin:/bin:/usr/sbin:/sbin` and puts the docker CLI in `/usr/local/bin`, so a NAS running
+  three containers was drawn with no Containers tab. See "A remote command runs in a non-login bash".
+  The strip is the app's loudest consumer of that probe, so the shell also logs what came back,
+  once per move rather than once per 4 s tick.
 - **The test is installed, not running.** A stopped `libvirtd` or `dockerd` keeps its module,
   because that module's own status slot is where the daemon state is reported and taking the page
   away would hide the explanation along with the problem. So the probe asks `command -v` and the

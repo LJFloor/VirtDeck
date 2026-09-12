@@ -40,4 +40,19 @@ namespace VirtDeck.Models
         /// </summary>
         public DateTime? StartedAtUtc { get; set; }
     }
+
+    /// <summary>
+    /// One container's live resource reading, exactly as <c>docker stats</c> printed it: the CLI
+    /// has no raw-number placeholder, so every field here is a rendered phrase ("0.06%",
+    /// "2.219MiB / 31.27GiB") and reading one back into a number is the row's job, the same split
+    /// <see cref="ImageInfo.Size"/> and <c>ImageRow.SizeBytes</c> already live on.
+    ///
+    /// <para>Only running containers get one. A sample is the whole set of them in one pass rather
+    /// than a delta, so a container absent from it is a container with nothing to report.</para>
+    /// </summary>
+    /// <param name="Id">Full 64-hex id, matching <see cref="ContainerInfo.Id"/>: the sampler asks for --no-trunc so the two can be joined.</param>
+    /// <param name="Cpu">Percent of one core, so a container using two of them reads "200%".</param>
+    /// <param name="Memory">Used and limit together ("2.219MiB / 31.27GiB"). The limit is the host's own memory for a container that was given none.</param>
+    /// <param name="MemoryPercent">The used half as a percentage of that limit.</param>
+    public sealed record ContainerStats(string Id, string Cpu, string Memory, string MemoryPercent);
 }

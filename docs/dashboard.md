@@ -23,7 +23,9 @@ different landing page per host.
   --loop` and `journalctl --follow`: an event tail holds its own connection and rebuilding one per
   module switch would cost more than it saves. Here it also buys the feature, since a graph whose
   history stopped while you looked at a VM would have a two minute hole in it exactly when you came
-  back to find out what the host was doing. `Shutdown` stops it, because the shell disposes the
+  back to find out what the host was doing. That last clause is the whole of why the containers
+  table's `docker stats` sampler answers the opposite way and stops with its page: it draws a value
+  rather than a history, so it has no hole to leave. `Shutdown` stops it, because the shell disposes the
   shared connection straight after.
 - **Un-elevated.** `/proc` and `df` are world-readable, so the sampler never raises a sudo prompt
   for somebody who only wanted to look, which is `FileExplorerModule`'s rule and `PackageService`'s.
