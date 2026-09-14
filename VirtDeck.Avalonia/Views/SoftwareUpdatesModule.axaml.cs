@@ -33,8 +33,8 @@ namespace VirtDeck.Avalonia.Views;
 /// Refresh button.
 ///
 /// <b>The listing is the host's, not this page's.</b> <see cref="PackageService"/> is one instance
-/// per connection and the dashboard's update tile reads the same one, so a listing either page pays
-/// for is the listing both of them draw, a refresh on either shows up on the other through
+/// per connection and the Overview module's update tile reads the same one, so a listing either page pays
+/// for is the listing both of them draw, a read on either shows up on the other through
 /// <c>PackageService.Changed</c>, and neither re-runs seconds of work on the shared SSH lock to be
 /// told what it already knows. The probe still runs on every activation, because that one is cheap
 /// and is how a package manager installed mid-session stops being a dead end.
@@ -164,7 +164,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private void SetCaps(string text) { HostCapabilities = text; StatusChanged?.Invoke(); }
 
     /// <summary>
-    /// The service is the connection's and not this module's: the dashboard's update tile attaches
+    /// The service is the connection's and not this module's: the Overview module's update tile attaches
     /// to the same instance, so there is one listing, one reboot reading and one probe between the
     /// two pages rather than two of each that can disagree. <see cref="OnPackagesChanged"/> is how
     /// this page hears about a read the other one paid for.
@@ -181,7 +181,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         _active = true;
 
         // Draw the last answer before the round trip that replaces it, so a re-entry is not a blank
-        // table for as long as the host takes to answer. That answer is shared with the dashboard,
+        // table for as long as the host takes to answer. That answer is shared with the Overview module,
         // so it may be one this page never read.
         SetCaps(Packages.CapabilityText);
         if (Packages.Catalog.Available) Draw(Packages.Catalog);
@@ -202,7 +202,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         await LoadAsync(force: false);
         if (_active && Tabs.SelectedIndex == 1) await LoadHistoryAsync(force: false);
 
-        // Asked for from the dashboard's Update now, which is the count on that page made
+        // Asked for from the Overview module's Update now, which is the count on that page made
         // actionable and nothing more: the install happens here, where the progress strip and the
         // Cancel button are, and it asks first exactly as the button on this page does. Nothing is
         // installed merely because somebody arrived on this page.
@@ -210,7 +210,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     }
 
     /// <summary>
-    /// The shared package state moved, which is most often the dashboard having refreshed. It
+    /// The shared package state moved, which is most often the Overview module having read it first. It
     /// arrives on whichever thread did the reading, so it is marshalled.
     ///
     /// <para>It draws only a listing that exists: a probe raises this too, and drawing an empty
@@ -287,9 +287,9 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// nobody opens in a loop.</para>
     ///
     /// <para><b>The listing is, and it is cached on the host and not on the page.</b> It is seconds
-    /// of work holding the shared SSH lock, and the dashboard reads the same one through the same
+    /// of work holding the shared SSH lock, and the Overview module reads the same one through the same
     /// service, so a listing already in hand is drawn rather than paid for a second time. Refresh,
-    /// on either page, is <paramref name="force"/> and is how somebody asks the host again.</para>
+    /// which only this page has, is <paramref name="force"/> and is how somebody asks the host again.</para>
     /// </summary>
     private async Task LoadAsync(bool force)
     {

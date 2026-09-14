@@ -17,7 +17,7 @@ namespace VirtDeck.Avalonia.Controls;
 ///
 /// <para><b>There is no repaint pump, deliberately.</b> The other two have a 16 ms timer because a
 /// background thread produces frames far faster than anybody can look at them, so a dirty flag plus
-/// a clock is what stops the dispatcher being flooded. Here the dashboard marshals one sample every
+/// a clock is what stops the dispatcher being flooded. Here the Overview module marshals one sample every
 /// two seconds onto the UI thread, so <see cref="Push"/> invalidates directly. A timer here would
 /// be sixty wakeups a second to redraw something that changes every other second.</para>
 ///

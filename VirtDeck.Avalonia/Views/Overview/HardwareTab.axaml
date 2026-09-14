@@ -1,0 +1,272 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:o="clr-namespace:VirtDeck.Avalonia.Views.Overview"
+             x:Class="VirtDeck.Avalonia.Views.Overview.HardwareTab">
+
+  <UserControl.Resources>
+    <!-- One column layout per table, shared by its heading strip and its rows. -->
+    <x:Double x:Key="ColMemSlot">200</x:Double>
+    <x:Double x:Key="ColMemSize">90</x:Double>
+    <x:Double x:Key="ColMemType">100</x:Double>
+    <x:Double x:Key="ColMemSpeed">100</x:Double>
+    <x:Double x:Key="ColMemRank">60</x:Double>
+    <x:Double x:Key="ColMemMaker">140</x:Double>
+
+    <x:Double x:Key="ColPciSlot">110</x:Double>
+    <x:Double x:Key="ColPciClass">200</x:Double>
+    <x:Double x:Key="ColPciVendor">160</x:Double>
+    <x:Double x:Key="ColPciDriver">120</x:Double>
+    <x:Double x:Key="ColPciIommu">70</x:Double>
+
+    <x:Double x:Key="ColUsbPort">80</x:Double>
+    <x:Double x:Key="ColUsbId">90</x:Double>
+    <x:Double x:Key="ColUsbClass">130</x:Double>
+    <x:Double x:Key="ColUsbVendor">180</x:Double>
+    <x:Double x:Key="ColUsbSpeed">90</x:Double>
+    <x:Double x:Key="ColUsbDriver">130</x:Double>
+
+    <!-- The fact row. A DockPanel rather than the Summary's horizontal StackPanel, because a
+         StackPanel measures the value at infinite width and its trimming never fires, and a board
+         or firmware vendor here is routinely longer than half a pane. The whole value is on hover. -->
+    <DataTemplate x:Key="FactTemplate" DataType="o:HardwareFact">
+      <DockPanel Background="Transparent" ToolTip.Tip="{Binding TipText}">
+        <TextBlock DockPanel.Dock="Left" Classes="factlabel" Text="{Binding Label}" />
+        <TextBlock Classes="factvalue" Text="{Binding Value}" />
+      </DockPanel>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <!-- One scrolling page of boxes rather than a tab per subject, which is Cockpit's layout and for
+       its reason: a host has one of each of these, and the question somebody brings here (what is in
+       this machine) is answered by reading down it. No filter box, for the Filesystems table's
+       reason; the PCI table is the long one, and sorting it on Class already puts the one device
+       being looked for among the few like it. -->
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="12" Spacing="12">
+
+      <Grid ColumnDefinitions="*,12,*">
+        <HeaderedContentControl Grid.Column="0" Theme="{StaticResource JbGroupBox}" Header="System">
+          <Panel>
+            <ItemsControl Name="SystemFacts" ItemTemplate="{StaticResource FactTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="4" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <TextBlock Name="SystemEmpty" Opacity="0.6" TextWrapping="Wrap" IsVisible="False" />
+          </Panel>
+        </HeaderedContentControl>
+
+        <HeaderedContentControl Grid.Column="2" Theme="{StaticResource JbGroupBox}" Header="Processor and memory">
+          <Panel>
+            <ItemsControl Name="ProcessorFacts" ItemTemplate="{StaticResource FactTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="4" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <TextBlock Name="ProcessorEmpty" Opacity="0.6" TextWrapping="Wrap" IsVisible="False" />
+          </Panel>
+        </HeaderedContentControl>
+      </Grid>
+
+      <!-- Every slot the firmware describes, filled or not, which is the whole point of the table: a
+           board with two of four slots used says so by drawing the other two dimmed. -->
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Memory" Padding="0">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="MemoryHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Slot" SortKey="slot" Indent="14"
+                              Width="{StaticResource ColMemSlot}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
+                              Width="{StaticResource ColMemSize}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Type" SortKey="type"
+                              Width="{StaticResource ColMemType}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Speed" SortKey="speed"
+                              Width="{StaticResource ColMemSpeed}"
+                              Tip="What the board is running the module at. Where that is below what the module is rated for, the rating is on the row's hover." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Rank" SortKey="rank"
+                              Width="{StaticResource ColMemRank}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Manufacturer" SortKey="maker"
+                              Width="{StaticResource ColMemMaker}" />
+              <c:ColumnHeader Text="Part number" SortKey="part" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ItemsControl Name="MemoryList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="o:MemorySlotRow">
+                  <!-- A DockPanel with the last cell filling, for the storage table's reason: a
+                       StackPanel row never trims its last cell. The first cell is itself a panel, so
+                       the .cells gutter reaches only the columns after it. -->
+                  <DockPanel Classes="cells" Margin="12,4" Background="Transparent"
+                             Opacity="{Binding RowOpacity}" ToolTip.Tip="{Binding Summary}">
+                    <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColMemSlot}">
+                      <Panel DockPanel.Dock="Left" Width="14">
+                        <Ellipse Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                 Fill="{Binding StateBrush}" />
+                      </Panel>
+                      <TextBlock Text="{Binding SlotText}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding SizeText}"
+                               Width="{StaticResource ColMemSize}" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding TypeText}"
+                               Width="{StaticResource ColMemType}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding SpeedText}"
+                               Width="{StaticResource ColMemSpeed}" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding RankText}"
+                               Width="{StaticResource ColMemRank}" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding MakerText}"
+                               Width="{StaticResource ColMemMaker}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding PartText}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Name="MemoryEmpty" Opacity="0.6" IsVisible="False" Margin="12"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="480"
+                       HorizontalAlignment="Center" />
+          </Panel>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <!-- Model fills, and Driver and IOMMU dock from the right so the vendor and the model read as
+           one name. Rows with right-docked cells carry no right margin: the strip hands its right
+           inset to the rightmost heading as padding without widening it, so a 12px row margin there
+           would put every right-docked cell 12px left of its heading. -->
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="PCI devices" Padding="0">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="PciHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Slot" SortKey="slot"
+                              Width="{StaticResource ColPciSlot}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Class" SortKey="class"
+                              Width="{StaticResource ColPciClass}"
+                              Tip="Sorts on the class code, so every bridge sorts together and every USB controller does." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Vendor" SortKey="vendor"
+                              Width="{StaticResource ColPciVendor}" />
+              <c:ColumnHeader Name="PciIommuHeader" DockPanel.Dock="Right" Text="IOMMU" SortKey="iommu"
+                              Width="{StaticResource ColPciIommu}"
+                              Tip="The IOMMU group. A device handed to a guest takes its whole group with it. The column is not drawn on a host with the IOMMU off." />
+              <c:ColumnHeader DockPanel.Dock="Right" Text="Driver" SortKey="driver"
+                              Width="{StaticResource ColPciDriver}"
+                              Tip="The kernel driver bound to the device. vfio-pci means it is held for a guest." />
+              <c:ColumnHeader Text="Model" SortKey="model" />
+            </DockPanel>
+          </Border>
+
+          <TextBlock Name="PciNote" DockPanel.Dock="Bottom" Opacity="0.6" IsVisible="False"
+                     Margin="12,6" TextWrapping="Wrap" />
+
+          <Panel>
+            <ItemsControl Name="PciList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="o:HostPciRow">
+                  <DockPanel Classes="cells" Margin="12,4,0,4" Background="Transparent"
+                             ToolTip.Tip="{Binding Summary}">
+                    <!-- In a Border, so the .cells gutter does not reach the leftmost column. -->
+                    <Border DockPanel.Dock="Left" Width="{StaticResource ColPciSlot}">
+                      <TextBlock Text="{Binding Slot}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding ClassText}"
+                               Width="{StaticResource ColPciClass}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding VendorText}"
+                               Width="{StaticResource ColPciVendor}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding IommuText}"
+                               Width="{StaticResource ColPciIommu}" VerticalAlignment="Center"
+                               IsVisible="{Binding ShowIommu}" />
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding DriverText}"
+                               Width="{StaticResource ColPciDriver}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding ModelText}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Name="PciEmpty" Opacity="0.6" IsVisible="False" Margin="12"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="480"
+                       HorizontalAlignment="Center" />
+          </Panel>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="USB devices" Padding="0">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="UsbHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Port" SortKey="port"
+                              Width="{StaticResource ColUsbPort}"
+                              Tip="Bus, then the port on each hub down the chain: 5-4.3 is port 3 of the hub in port 4 of bus 5." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="ID" SortKey="id"
+                              Width="{StaticResource ColUsbId}"
+                              Tip="Vendor and product id, which is what a USB device is passed to a guest by." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Class" SortKey="class"
+                              Width="{StaticResource ColUsbClass}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Vendor" SortKey="vendor"
+                              Width="{StaticResource ColUsbVendor}" />
+              <c:ColumnHeader DockPanel.Dock="Right" Text="Driver" SortKey="driver"
+                              Width="{StaticResource ColUsbDriver}" />
+              <c:ColumnHeader DockPanel.Dock="Right" Text="Speed" SortKey="speed"
+                              Width="{StaticResource ColUsbSpeed}"
+                              Tip="The speed the device connected at, which is the slower of what it and its port can do." />
+              <c:ColumnHeader Text="Product" SortKey="product" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ItemsControl Name="UsbList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="o:HostUsbRow">
+                  <DockPanel Classes="cells" Margin="12,4,0,4" Background="Transparent"
+                             ToolTip.Tip="{Binding Summary}">
+                    <Border DockPanel.Dock="Left" Width="{StaticResource ColUsbPort}">
+                      <TextBlock Text="{Binding Port}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding IdText}"
+                               Width="{StaticResource ColUsbId}" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding ClassText}"
+                               Width="{StaticResource ColUsbClass}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding VendorText}"
+                               Width="{StaticResource ColUsbVendor}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding DriverText}"
+                               Width="{StaticResource ColUsbDriver}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding SpeedText}"
+                               Width="{StaticResource ColUsbSpeed}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ProductText}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Name="UsbEmpty" Opacity="0.6" IsVisible="False" Margin="12"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="480"
+                       HorizontalAlignment="Center" />
+          </Panel>
+        </DockPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

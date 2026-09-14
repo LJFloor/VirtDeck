@@ -32,11 +32,18 @@ namespace VirtDeck.Models
     /// rather than by a flag.</para>
     /// </summary>
     /// <param name="Priority">0 to 7, and journalctl reads it as "this severity and above".</param>
-    /// <param name="Identifier">A <c>SYSLOG_IDENTIFIER</c> match, or empty for all of them.</param>
+    /// <param name="Identifier">What the identifier column says (<c>SYSLOG_IDENTIFIER</c>, else <c>_COMM</c>), or empty for all of them.</param>
     public sealed record JournalQuery(JournalRange Range, string BootId, int Priority, string Identifier)
     {
         /// <summary>Error and above over the last 24 hours: the same defaults Cockpit's page opens on.</summary>
         public static readonly JournalQuery Default = new(JournalRange.Last24Hours, "", 3, "");
+
+        /// <summary>
+        /// Whether an entry's identifier column is the one chosen. The host-side match is an OR over
+        /// both fields and so a little wider than the column; this is what narrows it back.
+        /// </summary>
+        public bool Matches(JournalEntry entry) =>
+            Identifier.Length == 0 || string.Equals(entry.Identifier, Identifier, StringComparison.Ordinal);
     }
 
     /// <summary>

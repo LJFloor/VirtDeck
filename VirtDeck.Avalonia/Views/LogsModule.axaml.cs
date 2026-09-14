@@ -20,7 +20,7 @@ namespace VirtDeck.Avalonia.Views;
 ///
 /// <para>What keeps it current is a <c>journalctl --follow</c> stream rather than a poll, which is
 /// also why the page has a Pause button and no Refresh button: there is nothing to ask again for.
-/// The stream is left running when the module is hidden, for the reason the dashboard's sampler is:
+/// The stream is left running when the module is hidden, for the reason the Overview module's sampler is:
 /// here the gap <i>is</i> the content.</para>
 /// </summary>
 public partial class LogsModule : UserControl, IModule
@@ -79,10 +79,17 @@ public partial class LogsModule : UserControl, IModule
     private JournalQuery _query = JournalQuery.Default;
 
     /// <summary>
-    /// The newest cursor in hand, read by the tail thread on every reconnect. A field of its own
+    /// The newest cursor read, read by the tail thread on every reconnect. A field of its own
     /// rather than a peek at <see cref="_entries"/>, which the UI thread is mutating.
     /// </summary>
     private volatile string? _newest;
+
+    /// <summary>
+    /// The oldest cursor read, which is where the next page starts. Not the oldest entry in hand:
+    /// an identifier's host-side match is wider than its column and the difference is dropped
+    /// here, so a page can end on, or consist entirely of, entries that were never kept.
+    /// </summary>
+    private string? _oldest;
 
     /// <summary>
     /// How far back the current range reaches, measured off the host's own clock, or null for a
@@ -216,14 +223,19 @@ public partial class LogsModule : UserControl, IModule
         _active = true;
         PaintStatus();
 
-        if (_loaded && _available && _failure.Length == 0) return;
+        if (_loaded && _available && _failure.Length == 0)
+        {
+            // Paging only runs while the page is on screen, so a list left short picks up here.
+            FillViewport();
+            return;
+        }
         _loaded = true;
         await ReloadAsync();
     }
 
     /// <summary>
     /// Cancels the read in flight and nothing else. <b>The tail is left running</b>, which is the
-    /// refresh policy's rule for an event tail plus the dashboard sampler's argument for why this
+    /// refresh policy's rule for an event tail plus the Overview sampler's argument for why this
     /// one in particular must not be stopped: a stream that is paused while the page is hidden
     /// comes back with a hole in it, and a hole in a log is indistinguishable from a quiet host.
     /// </summary>
@@ -396,7 +408,16 @@ public partial class LogsModule : UserControl, IModule
             }
         }
 
-        var fresh = within.Where(e => _cursors.Add(e.Cursor)).ToList();
+        // Both ends are taken from what was read rather than what was kept, for the reason _oldest
+        // gives: the tail then resumes past a first page that matched nothing on this side.
+        if (page.Entries.Count > 0)
+        {
+            _oldest = page.Entries[^1].Cursor;
+            if (!paged) _newest = page.Entries[0].Cursor;
+        }
+
+        var unseen = within.Where(e => !_cursors.Contains(e.Cursor)).ToList();
+        var fresh = unseen.Where(e => _query.Matches(e) && _cursors.Add(e.Cursor)).ToList();
         AppendOlder(fresh);
         Remember(fresh);
 
@@ -404,7 +425,7 @@ public partial class LogsModule : UserControl, IModule
         // entirely entries already in hand. True of the first page too: a range with less than a
         // page in it has nothing older behind it, and saying so here is what stops a scroll to the
         // bottom from paying a round trip to be told the same thing.
-        if (truncated || page.Entries.Count < JournalService.PageSize || (paged && fresh.Count == 0))
+        if (truncated || page.Entries.Count < JournalService.PageSize || (paged && unseen.Count == 0))
             _exhausted = true;
 
         // The tail starts once the first page has landed, so it can resume from that page's newest
@@ -522,7 +543,7 @@ public partial class LogsModule : UserControl, IModule
             foreach (var row in Emit(_entries.Count - 1)) _rows.Add(row);
         }
 
-        _newest = _entries.Count > 0 ? _entries[0].Cursor : null;
+        _newest ??= _entries.Count > 0 ? _entries[0].Cursor : null;
     }
 
     /// <summary>
@@ -568,6 +589,7 @@ public partial class LogsModule : UserControl, IModule
         }
 
         while (_rows.Count > 0 && _rows[^1] is not LogRow) _rows.RemoveAt(_rows.Count - 1);
+        _oldest = _entries[^1].Cursor;
         _exhausted = false;
     }
 
@@ -579,6 +601,7 @@ public partial class LogsModule : UserControl, IModule
         _entries.Clear();
         _cursors.Clear();
         _newest = null;
+        _oldest = null;
         _scroll = null;
     }
 
@@ -613,7 +636,7 @@ public partial class LogsModule : UserControl, IModule
     {
         // Never while hidden: a module nobody is looking at costs no round trips, and rows arriving
         // from the tail move the extent whether or not the page is on screen.
-        if (!_active || _exhausted || _reading || _entries.Count == 0) return;
+        if (!_active || _exhausted || _reading || _oldest is null) return;
 
         var scroll = Scroll();
         if (scroll is null) return;
@@ -621,7 +644,7 @@ public partial class LogsModule : UserControl, IModule
         // Within a screenful of the end, so the next page is usually there by the time the scroll
         // reaches where it would have stopped.
         if (scroll.Offset.Y + scroll.Viewport.Height >= scroll.Extent.Height - 200)
-            _ = Read(_generation, _entries[^1].Cursor);
+            _ = Read(_generation, _oldest);
     }
 
     /// <summary>
@@ -631,14 +654,14 @@ public partial class LogsModule : UserControl, IModule
     /// </summary>
     private void FillViewport()
     {
-        if (!_active || _exhausted || _entries.Count == 0) return;
+        if (!_active || _exhausted || _oldest is null) return;
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (!_active || _exhausted || _reading || _entries.Count == 0) return;
+            if (!_active || _exhausted || _reading || _oldest is null) return;
             var scroll = Scroll();
             if (scroll is null || scroll.Extent.Height > scroll.Viewport.Height + 1) return;
-            _ = Read(_generation, _entries[^1].Cursor);
+            _ = Read(_generation, _oldest);
         }, DispatcherPriority.Background);
     }
 
@@ -662,6 +685,12 @@ public partial class LogsModule : UserControl, IModule
         {
             EmptyText.Text = _failure;
             EmptyText.IsVisible = true;
+        }
+        else if (!_exhausted)
+        {
+            // Nothing kept yet with older pages still to read: the paging strip says so, and
+            // "nothing from" would be a claim about pages nobody has read.
+            EmptyText.IsVisible = false;
         }
         else
         {

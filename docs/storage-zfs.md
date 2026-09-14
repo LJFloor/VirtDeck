@@ -159,7 +159,7 @@ through `AddDiskDialog`.
 **Not here yet:** starting a self-test; mounting and unmounting; formatting and partitioning; LVM,
 MD RAID and LUKS management; NFS and iSCSI; per-disk IO graphs (the sampler already reads
 `/proc/diskstats` but sums it); network filesystems, which have no block device and are already in
-the Dashboard's table; and anywhere at all to see the loop devices and optical drives this page no
+the Overview module's Filesystems table; and anywhere at all to see the loop devices and optical drives this page no
 longer lists.
 
 

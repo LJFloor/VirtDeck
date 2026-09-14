@@ -75,9 +75,19 @@ namespace VirtDeck.Services
 
         // A match goes last, after every option, which is the shape journalctl's own documentation
         // uses and the one that cannot be mistaken for a file argument.
+        //
+        // Both fields, joined by journalctl's "+" (OR), because the identifier column is
+        // SYSLOG_IDENTIFIER falling back to _COMM (see ParseEntry), and a program that writes to the
+        // journal natively, libvirtd for one, sets no SYSLOG_IDENTIFIER at all: a name the dropdown
+        // offered off _COMM would otherwise match nothing. The OR is wider than the column, since it
+        // also takes a _COMM entry tagged with another name (cron's are "CRON"), and
+        // JournalQuery.Matches narrows it back on this side.
         private static void AddMatch(List<string> argv, JournalQuery query)
         {
-            if (query.Identifier.Length > 0) argv.Add("SYSLOG_IDENTIFIER=" + query.Identifier);
+            if (query.Identifier.Length == 0) return;
+            argv.Add("SYSLOG_IDENTIFIER=" + query.Identifier);
+            argv.Add("+");
+            argv.Add("_COMM=" + query.Identifier);
         }
 
         /// <summary>
@@ -443,7 +453,7 @@ namespace VirtDeck.Services
                 if (ct.IsCancellationRequested) return;
                 if (line.Length == 0 || line[0] != '{') return;
                 var entry = ParseEntry(line);
-                if (entry != null) EntryReceived?.Invoke(entry);
+                if (entry != null && query.Matches(entry)) EntryReceived?.Invoke(entry);
             }
         }
 

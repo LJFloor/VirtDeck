@@ -44,8 +44,16 @@ narrows them for free, and the journal is the one host fact that does not fit. S
 cancels the read in flight, ends the tail, empties the list and reads the first page again. The
 identifier list is still filled from **what has been seen** rather than from a probe of its own, and
 can only grow, so a chosen identifier never disappears out of its own dropdown; choosing one is a
-host-side `SYSLOG_IDENTIFIER=` match, so it is honest about the whole range rather than about the
-300 entries on screen. See "Shared idioms".
+host-side match, so it is honest about the whole range rather than about the 300 entries on screen.
+See "Shared idioms".
+
+**The identifier match is `SYSLOG_IDENTIFIER=X + _COMM=X`, then narrowed here.** The column is
+`SYSLOG_IDENTIFIER` falling back to `_COMM`, and a program that logs natively (libvirtd) sets no
+identifier at all, so the first field alone matched nothing for a name the dropdown offered. The OR
+is wider than the column (cron's `_COMM=cron` entries are tagged `CRON`), so `JournalQuery.Matches`
+drops what the column would not say, on the page and on the tail. That is why paging resumes from
+the oldest entry **read** rather than the oldest kept: a page can end on, or be made entirely of,
+entries that were dropped.
 
 **Times are the host's, not this machine's.** The page read brings back the host's IANA timezone
 name and every row is drawn through it, so a time here and the same entry read in a terminal on the
@@ -57,12 +65,12 @@ is worse than an admitted one.
 **Pause, and no Refresh.** Nothing here can be asked again for: the list is a stream, so the button
 that matters is the one that stops it. Resuming restarts the tail from the newest entry on screen,
 so what happened while paused arrives in order rather than being lost. The tail is left running when
-the module is hidden, for the reason the dashboard's sampler is: the gap *is* the content.
+the module is hidden, for the reason the Overview module's sampler is: the gap *is* the content.
 
 **The list:**
 
 - **Three row types in one collection**, keyed by nothing: a `LogRow` per entry, a `LogDayRow` where the day changes and a `LogRebootRow` where `_BOOT_ID` changes between neighbours. A reboot is read off the boot id rather than off anything logged, because a host that lost power logged nothing on its way down.
-- **The rows are derived and patched at the ends, never rebuilt**, which is this module's form of the rule the other fourteen tables keep with `TableRows.Merge`. What one entry contributes depends on it and on the entry above it and nothing else, so appending older entries cannot change a row already drawn, and the tail can only change the separators above the old first row. A rebuild would drop the scroll position on every arriving line, and on a page that grows by itself the scroll position is what the user was reading.
+- **The rows are derived and patched at the ends, never rebuilt**, which is this module's form of the rule the other seventeen tables keep with `TableRows.Merge`. What one entry contributes depends on it and on the entry above it and nothing else, so appending older entries cannot change a row already drawn, and the tail can only change the separators above the old first row. A rebuild would drop the scroll position on every arriving line, and on a page that grows by itself the scroll position is what the user was reading.
 - **Scrolling to the bottom pages**, guarded by a read-in-flight flag and an exhausted flag; a page shorter than the one asked for is the end of the range. A first page that does not fill the window pages again by itself, since nothing can scroll and nothing would otherwise ask.
 - **10,000 entries, then the oldest go.** A page left open overnight would otherwise grow without bound, and what falls off the bottom is exactly what scrolling reads back.
 - **No sortable headings and no search box.** The order is chronological and nothing else is meaningful, so a heading offering an order it will not honour would be worse than none; the search box is the Filters feature that is not here yet.

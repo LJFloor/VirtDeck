@@ -1,0 +1,255 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:o="clr-namespace:VirtDeck.Avalonia.Views.Overview"
+             x:Class="VirtDeck.Avalonia.Views.OverviewModule"
+             x:DataType="vm:MountRow">
+
+  <UserControl.Resources>
+    <!-- Shared by the heading strip and the row template so the two stay aligned. -->
+    <x:Double x:Key="ColMount">240</x:Double>
+    <x:Double x:Key="ColSize">110</x:Double>
+    <x:Double x:Key="ColUsed">110</x:Double>
+    <x:Double x:Key="ColFree">110</x:Double>
+    <x:Double x:Key="ColPercent">60</x:Double>
+  </UserControl.Resources>
+
+  <!-- Declared here rather than per page because both tabs speak the same fact vocabulary, and
+       styles reach every descendant, so the Hardware tab's rows are these same two classes. -->
+  <UserControl.Styles>
+    <!-- One fact per line, said as a dimmed label and a plain value. -->
+    <Style Selector="TextBlock.factlabel">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Width" Value="110" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.factvalue">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- The value a graph's header carries. The header presenter makes its content SemiBold, which
+         is right for the title beside it and wrong for a live figure. -->
+    <Style Selector="TextBlock.headervalue">
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Opacity" Value="0.75" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <!-- **Two views of one machine**: what it is doing and what it is made of. No Theme, so this is
+       the implicit top-placed strip every module with pages uses. Neither page has a toolbar. The
+       Summary is fed by a tail and re-reads its counts on every visit, and the shared update listing
+       is refreshed from the Software updates module; the Hardware page re-reads on every visit, which
+       for something that changes when somebody opens the case is as often as it is worth asking. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Header="Summary">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="12" Spacing="12">
+
+          <Grid ColumnDefinitions="*,12,*">
+
+            <HeaderedContentControl Grid.Column="0" Theme="{StaticResource JbGroupBox}" Header="Host">
+              <StackPanel Spacing="4">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Name" />
+                  <TextBlock Name="HostNameText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Processor" />
+                  <TextBlock Name="CpuModelText" Classes="factvalue" />
+                </StackPanel>
+                <!-- Hidden until the host has said, the idiom every row only some hosts have
+                     follows. A machine with no display-class device at all says nothing here
+                     rather than saying it has no graphics. -->
+                <StackPanel Name="GpuRow" Orientation="Horizontal" IsVisible="False">
+                  <TextBlock Classes="factlabel" Text="Graphics" />
+                  <TextBlock Name="GpuModelText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Memory" />
+                  <TextBlock Name="MemoryTotalText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Uptime" />
+                  <TextBlock Name="UptimeText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Classes="factlabel" Text="Load average"
+                             ToolTip.Tip="Runnable and uninterruptible processes averaged over 1, 5 and 15 minutes. Compare it against the core count above." />
+                  <TextBlock Name="LoadText" Classes="factvalue" />
+                </StackPanel>
+              </StackPanel>
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Grid.Column="2" Theme="{StaticResource JbGroupBox}" Header="Status">
+              <StackPanel Spacing="4">
+                <StackPanel Name="VmRow" Orientation="Horizontal" IsVisible="False">
+                  <TextBlock Classes="factlabel" Text="Virtual machines" />
+                  <Ellipse Name="VmDot" Width="9" Height="9" Margin="0,0,5,0" VerticalAlignment="Center" />
+                  <TextBlock Name="VmText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Name="ContainerRow" Orientation="Horizontal" IsVisible="False">
+                  <TextBlock Classes="factlabel" Text="Containers" />
+                  <Ellipse Name="ContainerDot" Width="9" Height="9" Margin="0,0,5,0" VerticalAlignment="Center" />
+                  <TextBlock Name="ContainerText" Classes="factvalue" />
+                </StackPanel>
+                <StackPanel Name="UpdateRowPanel" IsVisible="False" Spacing="4">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Classes="factlabel" Text="Updates" />
+                    <TextBlock Name="UpdateText" Classes="factvalue" />
+                  </StackPanel>
+                  <!-- The count made actionable, and drawn only on the one answer this row can give
+                       that has something to act on. Not accented: that class is for the command that
+                       creates something, and this one hands the user to the page that installs, which
+                       asks before it does anything.
+
+                       Under the value and not beside it, because that value is the longest sentence
+                       in this box and a button after it is the first thing off the right-hand edge.
+                       The indent is an empty label cell rather than a margin, so it lines up with the
+                       value from the one width the .factlabel style already states. The Border is the
+                       app's usual workaround rather than padding, a disabled control not being
+                       hit-testable in Avalonia. -->
+                  <StackPanel Name="UpdateNowRow" Orientation="Horizontal" IsVisible="False">
+                    <TextBlock Classes="factlabel" />
+                    <Border Background="Transparent" ToolTip.Tip="{Binding #UpdateNowButton.Tag}">
+                      <Button Name="UpdateNowButton" Content="Update now" />
+                    </Border>
+                  </StackPanel>
+                </StackPanel>
+                <TextBlock Name="RebootText" Classes="error" IsVisible="False" Margin="0,4,0,0" />
+              </StackPanel>
+            </HeaderedContentControl>
+          </Grid>
+
+          <!-- Five subjects, five graphs. CPU, memory and GPU are percentages of a known whole and so
+               are pinned to a 0-100 scale; network and disk throughput have no ceiling to pin them to
+               and autoscale to the window's own peak, which is what the figure on the left says.
+               The GPU row is the odd one out twice over: it is the only graph carrying a line per
+               device rather than a fixed pair, which is why it takes the full width, and it is the
+               only one that is not always there, because a host with nothing that can report GPU
+               usage gets no box at all rather than an empty one. -->
+          <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,12,Auto,12,Auto">
+
+            <HeaderedContentControl Grid.Row="0" Grid.Column="0"
+                                    Theme="{StaticResource JbGroupBox}" Padding="0">
+              <HeaderedContentControl.Header>
+                <DockPanel>
+                  <TextBlock Name="CpuValue" DockPanel.Dock="Right" Classes="headervalue" />
+                  <TextBlock Text="CPU" />
+                </DockPanel>
+              </HeaderedContentControl.Header>
+              <c:MetricGraph Name="CpuGraph" Height="110" />
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Grid.Row="0" Grid.Column="2"
+                                    Theme="{StaticResource JbGroupBox}" Padding="0">
+              <HeaderedContentControl.Header>
+                <DockPanel>
+                  <TextBlock Name="MemoryValue" DockPanel.Dock="Right" Classes="headervalue" />
+                  <TextBlock Text="Memory" />
+                </DockPanel>
+              </HeaderedContentControl.Header>
+              <c:MetricGraph Name="MemoryGraph" Height="110" />
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Grid.Row="2" Grid.Column="0"
+                                    Theme="{StaticResource JbGroupBox}" Padding="0">
+              <HeaderedContentControl.Header>
+                <DockPanel>
+                  <!-- The two readings wear their own series colours, which is the whole legend this
+                       graph needs and is why the header is content rather than a string. -->
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                    <TextBlock Name="RxValue" Classes="headervalue" />
+                    <TextBlock Name="TxValue" Classes="headervalue" />
+                  </StackPanel>
+                  <TextBlock Name="NetworkTitle" Text="Network" />
+                </DockPanel>
+              </HeaderedContentControl.Header>
+              <c:MetricGraph Name="NetworkGraph" Height="110" />
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Grid.Row="2" Grid.Column="2"
+                                    Theme="{StaticResource JbGroupBox}" Padding="0">
+              <HeaderedContentControl.Header>
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                    <TextBlock Name="ReadValue" Classes="headervalue" />
+                    <TextBlock Name="WriteValue" Classes="headervalue" />
+                  </StackPanel>
+                  <TextBlock Name="DiskTitle" Text="Disk IO" />
+                </DockPanel>
+              </HeaderedContentControl.Header>
+              <c:MetricGraph Name="DiskGraph" Height="110" />
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Name="GpuBox" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3"
+                                    Theme="{StaticResource JbGroupBox}" Padding="0" IsVisible="False">
+              <HeaderedContentControl.Header>
+                <DockPanel>
+                  <TextBlock Name="GpuValue" DockPanel.Dock="Right" Classes="headervalue" />
+                  <TextBlock Name="GpuTitle" Text="GPU" />
+                </DockPanel>
+              </HeaderedContentControl.Header>
+              <c:MetricGraph Name="GpuGraph" Height="110" />
+            </HeaderedContentControl>
+          </Grid>
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Filesystems" Padding="0">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                      BorderThickness="0,0,0,1" BorderBrush="#22808080">
+                <DockPanel Name="MountHeaderStrip">
+                  <c:ColumnHeader DockPanel.Dock="Left" Text="Mount" SortKey="mount"
+                                  Width="{StaticResource ColMount}" />
+                  <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
+                                  Width="{StaticResource ColSize}" />
+                  <c:ColumnHeader DockPanel.Dock="Left" Text="Used" SortKey="used"
+                                  Width="{StaticResource ColUsed}" />
+                  <c:ColumnHeader DockPanel.Dock="Left" Text="Free" SortKey="free"
+                                  Width="{StaticResource ColFree}" />
+                  <c:ColumnHeader Text="Full" SortKey="percent" />
+                </DockPanel>
+              </Border>
+
+              <Panel>
+                <ItemsControl Name="MountList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:MountRow">
+                      <StackPanel Classes="cells" Orientation="Horizontal" Margin="12,4"
+                                  ToolTip.Tip="{Binding Summary}">
+                        <TextBlock Text="{Binding Mount}" Width="{StaticResource ColMount}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding SizeText}" Width="{StaticResource ColSize}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding UsedText}" Width="{StaticResource ColUsed}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding FreeText}" Width="{StaticResource ColFree}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding PercentText}" Width="{StaticResource ColPercent}"
+                                   VerticalAlignment="Center" />
+                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}"
+                                     Width="120" Height="6" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Name="MountsEmpty" Opacity="0.6" IsVisible="False" Margin="12"
+                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                           HorizontalAlignment="Center" />
+              </Panel>
+            </DockPanel>
+          </HeaderedContentControl>
+
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <TabItem Name="HardwareTabItem" Header="Hardware">
+      <o:HardwareTab Name="HardwarePage" />
+    </TabItem>
+
+  </TabControl>
+</UserControl>

@@ -5,7 +5,7 @@ using VirtDeck.Models;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One filesystem in the dashboard's table. The same shape as <see cref="UpdateRow"/> and
+/// One filesystem in the Overview module's Filesystems table. The same shape as <see cref="UpdateRow"/> and
 /// <see cref="ServiceRow"/>: display-only formatting plus change notification, so the sixty-second
 /// re-read updates in place rather than rebuilding rows underneath somebody reading them.
 /// </summary>

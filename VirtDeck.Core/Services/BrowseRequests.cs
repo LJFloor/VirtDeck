@@ -7,7 +7,7 @@ namespace VirtDeck.Services
     ///
     /// <para><c>IModuleNavigator</c> carries nothing beyond which page to show, so the instruction is
     /// left where both modules can see it and taken by the explorer inside its own activation, which
-    /// is the rule <see cref="PackageService.RequestInstallAll"/> set for the dashboard's Update now.
+    /// is the rule <see cref="PackageService.RequestInstallAll"/> set for the Overview module's Update now.
     /// The Containers module's Browse files on a volume is the one caller.</para>
     ///
     /// <para>Keyed on the connection for <see cref="PackageService"/>'s reason: a host switch builds a

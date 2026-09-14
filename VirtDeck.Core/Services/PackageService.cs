@@ -25,7 +25,7 @@ namespace VirtDeck.Services
     {
         /// <summary>
         /// <b>One service per host, not one per page.</b> Two modules ask this question, the
-        /// dashboard's update tile and the software updates module, and a listing is seconds of work
+        /// Overview module's update tile and the software updates module, and a listing is seconds of work
         /// holding the shared SSH lock, so two of them would be paying twice for one sentence and
         /// leaving the two pages free to disagree about it. They share the instance, so they share
         /// the catalog, the reboot reading and the probe, and <see cref="Changed"/> is how the one
@@ -93,9 +93,9 @@ namespace VirtDeck.Services
         /// <summary>
         /// A listing has been read for the manager currently in hand, so there is something to draw
         /// and nobody has to pay for it again. <b>This is what makes the listing once per session
-        /// with Refresh as the way to ask again</b>, which was the dashboard's rule while it had a
-        /// service of its own and is now the rule for both pages, since there is only one listing
-        /// between them.
+        /// with Refresh as the way to ask again</b>. That Refresh is the software updates module's: the
+        /// Overview module reads the listing only where nobody has yet and has no Refresh of its own
+        /// for it, since there is only one listing between them.
         ///
         /// A listing that failed counts as read: its reason is on screen, and a page that re-ran a
         /// failing query every time somebody looked at it would spend the session doing it. A
@@ -116,7 +116,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Everything pending should be installed, asked for from somewhere other than the page that
         /// installs. It is held on the subject rather than passed between the two modules, because
-        /// they do not know one another: the dashboard's Update now button leaves the request here,
+        /// they do not know one another: the Overview module's Update now button leaves the request here,
         /// the shell puts the updates module on screen, and that module picks it up inside its own
         /// activation, where it is already ordered against its own listing and its own confirmation.
         /// </summary>

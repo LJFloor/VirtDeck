@@ -46,7 +46,7 @@ it to see.
   zvols on it drew six rows in a table about the machine's disks, each of them a slice of the disks
   in the rows above and none of them anything SMART can be asked about. The kernel does separate
   them, by giving a virtual block device no **`device` symlink** in sysfs, which is the rule the
-  Dashboard's sampler already counts disks by and is a rule rather than a name blacklist for the
+  Overview module's sampler already counts disks by and is a rule rather than a name blacklist for the
   same reason: `zd` is a name, and the answer has to cover zram, and whatever the next such driver
   calls itself. The listing emits the **virtual** ones rather than the real ones (the `n` tag), so a
   host whose `/sys/block` could not be walked hides nothing, which is the call the shell's own
@@ -164,7 +164,7 @@ it to see.
   `ProgressBar` a `MinWidth` of 200 and a minimum outranks `Width` in measure
   (`Max(MinWidth, Min(MaxWidth, Width))`), so a bar asked for 100px lays out at 198 and runs straight
   through the column beside it. Nothing errors and nothing warns; the bar is simply somewhere else.
-  The Used bar is now the partition table's, and the Dashboard's mounts table has the same bar and
+  The Used bar is now the partition table's, and the Overview module's Filesystems table has the same bar and
   hides the same fault, its bar being the last cell in the row with nothing to its right to collide
   with.
 - **No filter box.** The rule draws that line at lists that run long, and a table of disks is single
@@ -172,7 +172,7 @@ it to see.
 - **A Refresh button, no poll and no event tail.** Nothing on a host announces a disk being plugged
   in that VirtDeck can hear without root and a `udevadm monitor` tail, and a device layout changes
   about as often as an account does, so this is the User accounts answer rather than the services one.
-  Live capacity is the **Dashboard's** job and stays there: its filesystem table rides the metrics
+  Live capacity is the **Overview module's** job and stays there: its filesystem table rides the metrics
   sampler at no round trip of its own, so the two are not one fact read twice. `Deactivate` cancels
   the read and does nothing else, and in particular **leaves the open windows alone**, which is the
   same answer the refresh policy gives for a console or a log window. `Shutdown` closes them, because

@@ -106,7 +106,7 @@ public interface IModule
 }
 
 /// <summary>
-/// A module that sometimes hands the user to another one: the dashboard's Update now button, which
+/// A module that sometimes hands the user to another one: the Overview module's Update now button, which
 /// belongs on the page that says there are updates and is carried out by the page that installs
 /// them, and the Containers module's Browse files on a volume, which the File explorer shows.
 ///

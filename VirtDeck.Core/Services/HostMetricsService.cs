@@ -15,7 +15,7 @@ namespace VirtDeck.Services
     /// container list and every file-browser read for the life of the session. The streaming
     /// runners open a client of their own and never take that lock, so one long-lived remote loop
     /// costs one connection and no round trip per sample. That is also what makes sampling while
-    /// the dashboard is hidden proportionate, which is why <c>Deactivate</c> leaves this running
+    /// the Overview module is hidden proportionate, which is why <c>Deactivate</c> leaves this running
     /// exactly as it leaves <c>docker events</c> and <c>virsh event --loop</c> running.</para>
     ///
     /// <para><b>Un-elevated</b>, because <c>/proc</c> and <c>df</c> are world-readable and a read
@@ -203,7 +203,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Opens the sampler on a connection of its own and keeps it open. Idempotent. Self-heals
         /// after an SSH blip, in <see cref="DockerService.StartEventListener"/>'s shape and for the
-        /// same reason: the alternative is a dashboard that goes quiet for the rest of a session
+        /// same reason: the alternative is a set of graphs that goes quiet for the rest of a session
         /// because one packet went missing.
         /// </summary>
         public void StartSampler()

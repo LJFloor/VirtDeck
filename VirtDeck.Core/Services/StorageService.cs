@@ -74,7 +74,7 @@ namespace VirtDeck.Services
             # Which block devices are not hardware, which is the one thing lsblk cannot say: it
             # gives a ZFS zvol and a zram device the same TYPE it gives a drive. The kernel does say
             # it, by giving a virtual block device no `device` symlink to point at, and that is the
-            # rule the Dashboard's sampler already counts disks by. The **virtual** ones are emitted
+            # rule the Overview module's sampler already counts disks by. The **virtual** ones are emitted
             # rather than the real ones, so a host whose /sys/block could not be walked hides
             # nothing. `[ -d ]` is what stops an unmatched glob being reported as a device called *.
             for p in /sys/block/*; do

@@ -2,7 +2,7 @@ namespace VirtDeck.Models
 {
     /// <summary>
     /// One reading of the host's counters, exactly as <c>/proc</c> stated them. Raw and nothing
-    /// else: every figure the dashboard draws is a rate or a percentage, and neither exists in one
+    /// else: every figure the Overview module draws is a rate or a percentage, and neither exists in one
     /// sample, so deriving anything here would mean deriving it from half the information.
     ///
     /// <para><see cref="Uptime"/> is the sample's own clock, read on the host from
@@ -14,7 +14,7 @@ namespace VirtDeck.Models
     /// <para><see cref="Gpus"/> is the one deliberate exception to "raw and nothing else". A GPU
     /// utilisation figure is a reading the tool states outright, not a counter, so it does exist in
     /// one sample and deriving it from two would be wrong. It is therefore the one field the
-    /// dashboard draws straight off a sample rather than off <see cref="HostRates"/>.</para>
+    /// Overview module draws straight off a sample rather than off <see cref="HostRates"/>.</para>
     /// </summary>
     public sealed record HostSample
     {

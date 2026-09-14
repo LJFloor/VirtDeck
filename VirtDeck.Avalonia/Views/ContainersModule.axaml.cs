@@ -2190,7 +2190,7 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
     /// <summary>
     /// Opens the volume's directory in the File explorer. The directory is left on
     /// <see cref="BrowseRequests"/> and the shell is asked for the page, which takes it in its own
-    /// activation: the dashboard's Update now, in the other direction.
+    /// activation: the Overview module's Update now, in the other direction.
     /// </summary>
     private void BrowseVolume()
     {

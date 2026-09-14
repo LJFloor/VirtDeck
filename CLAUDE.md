@@ -60,7 +60,7 @@ in this index.
 
 | File | What is in it |
 |---|---|
-| [dashboard.md](docs/dashboard.md) | The host itself over live CPU, memory, network, disk IO and GPU graphs, fed by one long-lived sampling tail rather than a poll. |
+| [host-overview.md](docs/host-overview.md) | The host itself in two tabs: a Summary over live CPU, memory, network, disk IO and GPU graphs fed by one long-lived sampling tail, and a Hardware page with the machine, its memory slots and its PCI and USB devices. |
 | [logs.md](docs/logs.md) | The host's journal: the three dropdowns that are a query rather than a filter, cursor paging, the live tail and Pause, and why every read is elevated. |
 | [containers.md](docs/containers.md) | The five tabs over one docker host, `DockerService`, the listing and the event tail, and the Docker Hub account cell in the status bar. |
 | [containers-images.md](docs/containers-images.md) | Listing, pulling, tagging, removing, pruning, and moving an image to and from this PC. |
@@ -70,7 +70,7 @@ in this index.
 | [containers-editing.md](docs/containers-editing.md) | One window for create and edit, why editing recreates, the image half of the read-back, the six newer pages, and GPU passthrough. |
 | [terminal-emulator.md](docs/terminal-emulator.md) | The three surfaces drawn by `TerminalControl`: reading a container's log, running a command in one, the PTY session, the emulator itself and mouse reporting. |
 | [services.md](docs/services.md) | systemd units in both scopes, the three read scripts and why they are three, the journal tail, and the commands. |
-| [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, and the listing the Dashboard shares. |
+| [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, and the listing the Overview shares. |
 | [user-accounts.md](docs/user-accounts.md) | Users and groups, the name suggestion, the password path over stdin, and deleting. |
 | [storage.md](docs/storage.md) | The host's disks from one `lsblk -J`, and what SMART says about each one. |
 | [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |

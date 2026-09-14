@@ -8,7 +8,7 @@
 
   <!-- Declared here rather than in each page, so no two of them can drift apart on what a
        fact looks like. Styles and data templates on a Window reach its whole tree, tab content
-       included. The pair is the Dashboard's; a storage fact is a label and a value and needs no
+       included. The pair is the Overview module's; a storage fact is a label and a value and needs no
        section heading, which is why VmDetailsView's DetailSection/DetailRow are not used. -->
   <Window.Styles>
     <Style Selector="TextBlock.factlabel">

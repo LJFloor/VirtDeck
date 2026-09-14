@@ -10,8 +10,9 @@ using VirtDeck.Updates;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// What the host is and what it is doing: identity, hardware, workload counts and pending updates
-/// over live CPU, memory, network and disk graphs.
+/// The host itself, over two tabs. <b>Summary</b> is what it is doing: identity, workload counts
+/// and pending updates over live CPU, memory, network and disk graphs. <b>Hardware</b> is what it is
+/// made of, and lives in <see cref="Overview.HardwareTab"/>.
 ///
 /// <para>It is <b>first in the side menu</b>, and that is the whole of what makes it the module the
 /// user lands on: <c>MainWindow.ApplyRelevance</c> settles the first selection onto the first
@@ -25,7 +26,7 @@ namespace VirtDeck.Avalonia.Views;
 /// policy already says a hidden module leaves its event tails running. Coming back to this page
 /// after five minutes elsewhere shows those five minutes.</para>
 /// </summary>
-public partial class DashboardModule : UserControl, IModule, IModuleNavigator
+public partial class OverviewModule : UserControl, IModule, IModuleNavigator
 {
     private HostMetricsService? _metrics;
     private PackageService? _packages;
@@ -75,7 +76,10 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
     private SamplerState _samplerState = SamplerState.Healthy;
     private string _samplerDetail = "";
 
-    public DashboardModule()
+    /// <summary>The Summary tab's half of the left slot, kept while the Hardware tab has the slot.</summary>
+    private string _summaryStatus = "";
+
+    public OverviewModule()
     {
         InitializeComponent();
 
@@ -108,9 +112,6 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
             graph.IntervalSeconds = HostMetricsService.IntervalSeconds;
         }
 
-        RefreshButton.Click += async (_, _) => await RefreshAsync(force: true);
-        RefreshButton.Tag = "Re-read the workload counts and check for updates";
-
         // The whole of what this button does. The request is left on the service the two pages
         // share and the shell is asked for the page that installs; that page picks the request up
         // in its own activation, where it is already ordered against its own listing and its own
@@ -122,6 +123,18 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
             Packages.RequestInstallAll();
             ModuleRequested?.Invoke(typeof(SoftwareUpdatesModule));
         };
+
+        // A tab switch is a module switch in miniature: the left slot is repainted from the incoming
+        // page and only that page is read. The Source test is ContainersModule's: SelectionChanged
+        // bubbles, so a selecting control inside a page would otherwise read as a tab switch.
+        Tabs.SelectionChanged += async (_, e) =>
+        {
+            if (!ReferenceEquals(e.Source, Tabs)) return;
+            PaintStatus();
+            if (_active) await ReadActiveAsync();
+        };
+
+        HardwarePage.StatusChanged += PaintStatus;
 
         DrawOverview(new HostOverview());
         DrawWorkload(new HostWorkload());
@@ -136,6 +149,8 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
 
     private PackageService Packages =>
         _packages ?? throw new InvalidOperationException("Module not attached.");
+
+    private bool HardwareOnScreen => ReferenceEquals(Tabs.SelectedItem, HardwareTabItem);
 
     // ---- IModule -----------------------------------------------------------
 
@@ -171,6 +186,13 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
     }
 
     /// <summary>
+    /// The left slot belongs to the tab on screen: the sampler's cadence on Summary, the device
+    /// counts on Hardware. The right slot is the distro and the kernel on both, being about the host
+    /// rather than about either page.
+    /// </summary>
+    private void PaintStatus() => SetStatus(HardwareOnScreen ? HardwarePage.Status : _summaryStatus);
+
+    /// <summary>
     /// The sampler starts here rather than in <see cref="ActivateAsync"/>, so the history runs from
     /// the moment the shell connected rather than from the first time somebody looked at this page.
     /// </summary>
@@ -190,6 +212,8 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         _metrics.SamplerStateChanged += OnSamplerState;
 
         _metrics.StartSampler();
+
+        HardwarePage.Attach(ssh);
     }
 
     public async Task ActivateAsync()
@@ -204,7 +228,7 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         DrawUpdates();
         PaintSamplerState();
 
-        await RefreshAsync(force: false);
+        await ReadActiveAsync();
     }
 
     /// <summary>
@@ -226,6 +250,10 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         if (_packages is not null) _packages.Changed -= OnPackagesChanged;
         try { _metrics?.StopSampler(); } catch { }
     }
+
+    /// <summary>Only the page on screen is read, the way only the incoming table is on ContainersModule.</summary>
+    private Task ReadActiveAsync() =>
+        HardwareOnScreen ? HardwarePage.ReadAsync(_cts.Token) : ReadSummaryAsync();
 
     // ---- the sampler -------------------------------------------------------
 
@@ -289,14 +317,15 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         // Failed is transient as well: the tail waits and tries again. So it names the reason
         // rather than claiming the sampling has ended, which would be the one reading somebody
         // would act on by reopening the window.
-        SetStatus(_samplerState switch
+        _summaryStatus = _samplerState switch
         {
             SamplerState.Reconnecting => "Sampler reconnecting...",
             SamplerState.Failed when _samplerDetail.Length > 0 => $"Sampler dropped: {_samplerDetail}",
             SamplerState.Failed => "Sampler dropped, retrying...",
             _ when _previous is null => "Waiting for the first sample...",
             _ => $"Sampling every {HostMetricsService.IntervalSeconds:0}s",
-        });
+        };
+        PaintStatus();
     }
 
     private void DrawOverview(HostOverview overview)
@@ -466,17 +495,16 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
 
     // ---- the reads ---------------------------------------------------------
 
-    /// <param name="force">
-    /// The user pressed Refresh, so the update listing is paid for again. Without it an activation
-    /// costs the cheap half and a probe, and draws the listing already in hand: that listing is
-    /// shared with the software updates module, so re-reading it on every visit to either page
-    /// would be the same seconds of work over and over on the same shared SSH lock.
-    /// </param>
-    private async Task RefreshAsync(bool force)
+    /// <summary>
+    /// The Summary tab's round trips: the workload counts on every visit, and the update listing
+    /// only when nobody has paid for it yet. That listing is shared with the software updates
+    /// module, so re-reading it on every visit to either page would be the same seconds of work
+    /// over and over on the same shared SSH lock.
+    /// </summary>
+    private async Task ReadSummaryAsync()
     {
         if (_metrics is null || _busy) return;
         _busy = true;
-        RefreshButton.IsEnabled = false;
 
         try
         {
@@ -488,15 +516,14 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                Diagnostics.SpiceLog.Log($"[dashboard] workload read failed: {ex.Message}");
+                Diagnostics.SpiceLog.Log($"[overview] workload read failed: {ex.Message}");
             }
 
-            await ReadUpdatesAsync(force);
+            await ReadUpdatesAsync();
         }
         finally
         {
             _busy = false;
-            RefreshButton.IsEnabled = true;
         }
     }
 
@@ -527,16 +554,17 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         running == 0 ? StateBrushes.Stopped : StateBrushes.Running;
 
     /// <summary>
-    /// The one expensive read on this page, so it is paid once and then only when asked for. It
-    /// runs after the workload counts rather than before, because the counts are cheap and the page
-    /// should stop looking empty as soon as possible.
+    /// The one expensive read on this page, so it is paid once per host. It runs after the workload
+    /// counts rather than before, because the counts are cheap and the page should stop looking empty
+    /// as soon as possible.
     ///
     /// <para><b>The listing is not this page's, it is the host's.</b> The same service answers the
     /// software updates module, so whichever page pays for a listing is the page the other one
     /// reads it from, and <see cref="PackageService.HasListed"/> is what says it has been paid for.
-    /// Refresh, on either page, is how somebody asks the host again.</para>
+    /// Refresh on the software updates module is how somebody asks the host again, and its answer
+    /// lands here through <see cref="PackageService.Changed"/>.</para>
     /// </summary>
-    private async Task ReadUpdatesAsync(bool force)
+    private async Task ReadUpdatesAsync()
     {
         if (_packages is null) return;
 
@@ -558,7 +586,7 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
             // one mid-session a dead end.
             var manager = await Packages.ProbeAsync(_cts.Token);
 
-            if (manager.Id.Length > 0 && (force || !Packages.HasListed))
+            if (manager.Id.Length > 0 && !Packages.HasListed)
             {
                 await Packages.ListAsync(_cts.Token);
                 await Packages.ReadRebootAsync(_cts.Token);
@@ -573,8 +601,8 @@ public partial class DashboardModule : UserControl, IModule, IModuleNavigator
         }
         catch (Exception ex)
         {
-            // The reason is on screen and Refresh is how somebody asks again, which is also what the
-            // service recorded: a listing that threw counts as read.
+            // The reason is on screen and the software updates module's Refresh is how somebody asks
+            // again, which is also what the service recorded: a listing that threw counts as read.
             UpdateRowPanel.IsVisible = true;
             UpdateText.Text = $"Could not read updates: {Trim(ex.Message)}";
             UpdateNowRow.IsVisible = false;

@@ -44,7 +44,7 @@
 
 `PackageService` is **one instance per connection** (`PackageService.For(ssh)`, a
 `ConditionalWeakTable` keyed on the `SshConnectionManager`, private constructor), shared by the
-Dashboard's update tile and the Software updates module. Whether a host has updates is a fact about
+Overview module's update tile and the Software updates module. Whether a host has updates is a fact about
 the host, so two of them would be two seconds-long listings on one shared SSH lock and two answers
 free to disagree about the same sentence.
 
@@ -52,7 +52,7 @@ free to disagree about the same sentence.
   listing, the reboot reading or `Running` moved, on whichever thread did the reading, so
   **subscribers marshal**, which is every event in this app. A handler that throws is swallowed
   there: a page that cannot redraw is not a reason for a listing to be reported as having failed.
-  So Refresh on either page repaints both, and an upgrade finishing repaints the tile behind it.
+  So a Refresh on the updates page repaints the Overview tile too, and an upgrade finishing repaints the tile behind it.
 - **`HasListed` is what makes a listing once per host.** It is the manager the last listing was
   attempted with, not a bool, so a probe that finds a tool where there was none invalidates the
   answer in hand by itself. A listing that **failed** counts as read, because its reason is on
@@ -61,7 +61,7 @@ free to disagree about the same sentence.
   `force: true` and is the only thing that pays again.
 - **`Running` exists because apt holds the dpkg lock.** A listing run underneath a transaction fails,
   and that failure would replace the very catalog the page reporting on the transaction is drawing.
-  So the two commands that last bracket themselves with it, the Dashboard refuses to list while it is
+  So the two commands that last bracket themselves with it, the Overview module refuses to list while it is
   set, and the Software updates module ignores its own `Changed` while its `_busy` is set, since the
   table under a transaction belongs to the transaction and the command re-lists when it finishes.
 - **The install request travels on the service, not through the shell.** `RequestInstallAll` leaves

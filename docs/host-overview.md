@@ -1,17 +1,32 @@
-# Dashboard
+# Overview
 
-`DashboardModule` is the host itself: who it is, what it is made of, what graphics cards are in
-it, how full its disks are, how many VMs and containers it is running, whether it has updates
-pending, over live CPU, memory, network, disk IO and GPU graphs. `Views/DashboardModule`,
-`Views/MountRow`, `Controls/MetricGraph`, `Core/Services/HostMetricsService`,
-`Core/Models/HostSample`.
+`OverviewModule` is the host itself, over two tabs. **Summary** is what it is doing: who it is,
+what graphics cards are in it, how full its disks are, how many VMs and containers it is running,
+whether it has updates pending, over live CPU, memory, network, disk IO and GPU graphs.
+**Hardware** is what it is made of: the machine as its firmware describes it, the processor, every
+memory slot, and every PCI and USB device. `Views/OverviewModule`, `Views/MountRow`,
+`Controls/MetricGraph`, `Core/Services/HostMetricsService`, `Core/Models/HostSample` for the
+first; `Views/Overview/HardwareTab`, `Views/Overview/HardwareRows`,
+`Core/Services/HardwareService`, `Core/Models/HostHardware` for the second.
 
 It is the module the shell lands on, and **being first in the side menu is the whole of how**.
 `ApplyRelevance` settles the first selection onto the first *visible* tab, and a module naming no
 `RequiredTools` is never hidden, so the two facts compose into a default with no line in
 `ShellView.axaml.cs` and nothing anywhere that names this module. It is also the reason the
-Dashboard must stay unconditional: a conditional module in that slot would hand the user a
+Overview must stay unconditional: a conditional module in that slot would hand the user a
 different landing page per host.
+
+- **Neither tab has a toolbar.** The Summary used to carry a Refresh button, and everything it
+  asked for is answered elsewhere: the workload counts are re-read on every visit to the tab, and
+  the update listing is the host's and is refreshed from the Software updates module, whose answer
+  lands here through `PackageService.Changed`. The Hardware tab re-reads on every visit as well.
+- **A tab switch is a module switch in miniature**, ContainersModule's shape: only the incoming page
+  is read, and the left status slot is the page's (the sampler's cadence on Summary, device counts
+  on Hardware). The right slot is the distro and the kernel on both, being about the host rather
+  than about either page. The `SelectionChanged` handler tests its `Source` for the reason that
+  module's does.
+
+## Summary
 
 - **It is a tail, not a poll, and everything else follows from that.** `RunCommand` holds `_ioLock`
   for its whole call, so a sample every two seconds through it would serialise against the VM list,
@@ -123,7 +138,7 @@ different landing page per host.
   may still touch a suspended one, and what the guard reliably buys is the all-suspended case,
   which is the laptop.
 - **A GPU reading is not a rate, and that is the one place this module departs from its own model.**
-  Every other figure the Dashboard draws is a delta between two samples, which is why `HostSample`
+  Every other figure the Summary draws is a delta between two samples, which is why `HostSample`
   is raw and nothing else; a utilisation percentage is a reading the tool states outright, so it
   exists in one sample and deriving it from two would be wrong. Three things follow. It rides
   `HostSample.Gpus` rather than `HostRates`, which is left untouched. It is drawn **above**
@@ -159,10 +174,11 @@ different landing page per host.
   looking for a graph, so this is the page-level half of the absent-tooling rule, the call the
   Status box already makes for its own rows. The Host box still names the card either way, which is
   what keeps an Intel or a vfio-bound card stated rather than silently missing.
-- **The update tile is read once per host, not once per page, and Refresh is how somebody asks
-  again.** `PackageService.ListAsync` is seconds of work holding the shared lock, and this is the
-  page the shell lands on at connect, so it runs in the background after the first paint and the
-  answer is the one the Software updates module draws too. See "One listing, two pages". It draws
+- **The update tile is read once per host, not once per page, and the Software updates module's
+  Refresh is how somebody asks again.** `PackageService.ListAsync` is seconds of work holding the
+  shared lock, and this is the page the shell lands on at connect, so it runs in the background
+  after the first paint and the answer is the one the Software updates module draws too. See "One
+  listing, two pages". It draws
   **five** answers and never collapses them into a zero: no package manager (the row is not drawn at
   all, since the Software updates module is not on this host's menu either), the listing's own
   failure in the host's words, a query that could not run, up to date, and a count. Where the
@@ -205,3 +221,75 @@ different landing page per host.
 - **No filter box.** A host has a handful of filesystems, which is where the "long lists only" rule
   already draws the line, and the graphs are not a list.
 
+## Hardware
+
+- **One un-elevated round trip, and every source was picked for that.** The DMI fields are
+  `/sys/class/dmi/id` (all but the serials and `product_uuid`, which are root's and are not asked
+  for), the topology is `/sys/devices/system/cpu`, both buses are sysfs, and Secure Boot is its
+  efivar, which is 0644. The memory slots are the one thing sysfs does not have and udev does:
+  since systemd 248 its `dmi_memory_id` builtin decodes the SMBIOS memory tables at boot into
+  `/run/udev/data/+dmi:id`, world-readable, as flat `MEMORY_DEVICE_<n>_<FIELD>` properties.
+  dmidecode reads the same tables and needs root. Measured at about 200 ms for 42 PCI functions
+  and 10 USB devices.
+- **dmidecode is the fallback and the one elevated call**, run only where udev listed no slots,
+  dmidecode is installed and the host has DMI at all, since an ARM board or a container has no
+  SMBIOS for it to find either. Its answer, a failure included, is **held for the session**: a
+  module cannot change under a running host, and a failing sudo is a line in the host's auth log per
+  attempt. Its text is parsed into the same `MemorySlot` udev's properties are, across both unit
+  spellings (`16 GB` and `16384 MB`, `MT/s` and `MHz`, `Configured Memory Speed` and the older
+  `Configured Clock Speed`), and a device whose array is not `System Memory` is dropped, because
+  some servers list a flash array beside the DIMMs.
+- **Every slot is drawn, filled or not**, which is the question the table exists for: an empty one
+  is dimmed with a grey dot and says `Empty`, and its other fields are cleared rather than drawn,
+  because some firmware states the channel's speed on a slot with nothing in it. A slot is named
+  bank then locator (`P0 CHANNEL A · DIMM 0`), since a locator alone repeats across channels. Speed
+  is what the board runs the module at; where that is below its rating, the rating is on hover.
+- **A firmware placeholder is not a fact.** `To be filled by O.E.M.`, `Default string`,
+  `System Product Name`, `Not Specified` and the rest of what turns up in practice are dropped in
+  the service, matched whole so a real name containing one of those words survives, and a fact row
+  is drawn only for what the firmware actually said, the Summary's rule for rows only some hosts
+  have. Chassis types 1 and 2 (Other, Unknown) go the same way. `None` survives for error
+  correction, where it is a real answer.
+- **Legacy BIOS is said only where there is DMI**, because no `/sys/firmware/efi` on an ARM board
+  does not mean a PC BIOS. Virtualization is asked of an x86 part only for the same shape of reason:
+  `vmx` and `svm` are x86's flags, and "not reported" would be wrong about an ARM part that states
+  its extensions another way.
+- **Cores and sockets count distinct sibling lists, not distinct ids.** `core_id` repeats across
+  the clusters of a big.LITTLE part, so counting package and core id pairs folds two different
+  cores into one; `thread_siblings_list` is unique per core and `core_siblings_list` per package by
+  construction.
+- **The devices are enumerated from sysfs and named afterwards**, the Summary's GPU rule applied to
+  the whole bus: a host with no pciutils still lists every PCI function. Names come from
+  `lspci -vmm -D` **joined by slot, never by position**, else from udev's hwdb properties in
+  `/run/udev/data/+pci:*`, else ids, with a line under the table saying so. The class falls back
+  to the base class off the code, which is a fixed table in the PCI specification rather than a
+  guess. Every attribute is read with the `read` builtin rather than `cat`, and every variable is
+  reset before its read, because a read that fails leaves the previous device's value in place;
+  `readlink` is the one process per device. A tab in a USB descriptor (whatever the device chose to
+  say) or a DMI string (whatever the vendor typed) is folded to a space before it can split a
+  record.
+- **The PCI vendor is pci.ids' bracketed short name**, so `Advanced Micro Devices, Inc. [AMD]`
+  draws `AMD`: the GPU fact row's bracket rule applied to a vendor, with the whole name on hover.
+  The model is left whole, being the fill column. **Class sorts on the class code**, so a host
+  bridge sits beside a PCI bridge where the alphabet would put the IOMMU between them.
+- **The IOMMU column exists only where some device is in a group**, the storage table's rule for
+  its SMART columns. The flag is baked into each row, so a change of it rebuilds the table rather
+  than merging, and it can only change across a reboot. Driver says `none` rather than blank,
+  because an unbound device is an answer, and a `vfio-pci` device says on hover that a guest holds
+  it. The link on hover says "now", since a card idling to save power drops its speed.
+- **Right-docked columns cost the row its right margin.** `TableSort.TakeStripInset` hands the
+  strip's right inset to the rightmost heading as padding without widening it, which is right for a
+  fill column and 12px wrong for a fixed one, so the PCI and USB rows are `12,4,0,4` and line up.
+- **USB leaves out the root hubs** (`usbN`), each of which is a controller the PCI table already
+  lists. Names prefer the database's (udev's `ID_*_FROM_DATABASE` under the device's
+  `c189:<minor>` entry) over the device's own descriptors, because the database is what `lsusb`
+  prints and the descriptors are the less consistent of the two (a Realtek hub calls itself
+  `Generic`); where they differ, the device's own words are on hover. A composite device's class is
+  its interfaces' classes. The port sorts number by number, so `1-2` comes before `1-10`.
+- **The rows are immutable and keyed on their content.** Hardware changes when somebody opens the
+  case or replugs something, and none of the three tables has a selection a rebuilt row could lose,
+  so a changed device is a new row and there is nothing to notify. A USB key carries the device
+  number, which the kernel reissues on every replug.
+- **One page and no filter box**, Cockpit's layout: a host has one of each of these, and the
+  question brought here is answered by reading down. The PCI table is the long one, and sorting it
+  on Class already puts a device among the few like it.
