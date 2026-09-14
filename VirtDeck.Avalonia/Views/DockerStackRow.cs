@@ -25,18 +25,30 @@ public sealed class DockerStackRow : INotifyPropertyChanged
     private bool _managed;
 
     /// <summary>
-    /// Whether the compose file is one of VirtDeck's own, which is the single fact deciding whether
-    /// this stack can be edited and deleted. Everything else works either way.
+    /// Whether the compose file is one of VirtDeck's own, which decides <b>how</b> this stack is
+    /// deleted rather than whether: ours goes by its directory, somebody else's file by file. It no
+    /// longer decides whether it can be edited either: see <see cref="CanEdit"/>.
     /// </summary>
     public bool Managed { get => _managed; private set { if (Set(ref _managed, value)) Raise(nameof(Source)); } }
 
+    private StackPathMapping? _mapping;
+
     /// <summary>
-    /// "VirtDeck" or "External", the column that says at a glance which stacks this app wrote and
-    /// which somebody brought up by hand. The word Portainer would use here is "limited"; this says
-    /// where the file came from instead, because that is the actual difference and it is the thing
-    /// that explains why the editor opens read-only.
+    /// How this stack's paths were mapped onto the host, or null where they needed no mapping.
+    /// Not null means the files live inside another container and the app found them there.
     /// </summary>
-    public string Source => _managed ? "VirtDeck" : "External";
+    public StackPathMapping? Mapping { get => _mapping; private set { if (Set(ref _mapping, value)) Raise(nameof(Source)); } }
+
+    /// <summary>
+    /// Where this stack's compose file came from: "VirtDeck", the name of the container holding it,
+    /// or "External".
+    ///
+    /// <para>The word Portainer would use here is "limited". This says where the file came from
+    /// instead, because that is the actual difference between the rows. A stack whose file lives
+    /// inside Portainer reads <c>portainer</c>, which answers the same question one step further on
+    /// and is also why the path in the next column is not the one in the stack's labels.</para>
+    /// </summary>
+    public string Source => _managed ? "VirtDeck" : _mapping is { } m ? m.Container : "External";
 
     private string _configPath = "";
 
@@ -46,13 +58,30 @@ public sealed class DockerStackRow : INotifyPropertyChanged
     /// <summary>Every compose file, for the tooltip and for the editor's file picker.</summary>
     public IReadOnlyList<string> ConfigFiles { get; private set; } = new List<string>();
 
+    /// <summary>What the labels said, which is what <see cref="ConfigFiles"/> is where nothing was mapped.</summary>
+    public IReadOnlyList<string> LabelConfigFiles { get; private set; } = new List<string>();
+
+    /// <summary>The candidate paths where more than one was equally good, so none was taken.</summary>
+    public IReadOnlyList<string> AmbiguousPaths { get; private set; } = new List<string>();
+
     /// <summary>What the Config file cell says on hover: the whole list where there is more than one, and the reason when it is gone.</summary>
     public string? ConfigTip
     {
         get
         {
+            if (AmbiguousPaths.Count > 1)
+                return (LabelConfigFiles.Count > 0 ? LabelConfigFiles[0] : "This stack's compose file") +
+                       " is not on the host, and more than one container holds a file that could be " +
+                       "it:\n" + string.Join("\n", AmbiguousPaths) +
+                       "\n\nBoth are real, so VirtDeck has not picked one.";
+
             if (_configPath.Length == 0) return "Nothing on the host says where this stack's compose file is.";
             var listed = ConfigFiles.Count > 1 ? string.Join("\n", ConfigFiles) : _configPath;
+
+            if (_mapping is { } m && LabelConfigFiles.Count > 0)
+                return listed + $"\n\nThe labels say {LabelConfigFiles[0]}, which is that file as " +
+                                $"{m.Container} sees it: it mounts {m.Source} at {m.Destination}.";
+
             return _configPresent
                 ? listed
                 : listed + "\n\nThis file is no longer on the host, so the stack cannot be deployed " +
@@ -153,10 +182,15 @@ public sealed class DockerStackRow : INotifyPropertyChanged
     public bool CanStop => _members.Count > 0 && RunningCount > 0;
     public bool CanRestart => _members.Count > 0;
 
-    /// <summary>Only a file VirtDeck wrote may be written back. A discovered one is shown and not edited.</summary>
-    public bool CanEdit => _managed;
-
-    public bool CanDelete => _managed;
+    /// <summary>
+    /// Whether the editor may write what it holds back to the host, which is now any compose file
+    /// that is actually there rather than only one of ours.
+    ///
+    /// <para>Reading a file and then refusing to save the edit is a worse answer than writing it, and
+    /// the window says which path it will write to either way. What VirtDeck still will not do is
+    /// <i>create</i> a file outside its own root, which is why this reads the file's presence.</para>
+    /// </summary>
+    public bool CanEdit => _managed || _configPresent;
 
     public DockerStackRow(DockerStackInfo info, bool composeAvailable)
     {
@@ -167,7 +201,10 @@ public sealed class DockerStackRow : INotifyPropertyChanged
     public void Update(DockerStackInfo info, bool composeAvailable)
     {
         Managed = info.Managed;
+        Mapping = info.Mapping;
         ConfigFiles = info.ConfigFiles;
+        LabelConfigFiles = info.LabelConfigFiles;
+        AmbiguousPaths = info.AmbiguousPaths;
         ConfigPath = info.ConfigFiles.Count > 0 ? info.ConfigFiles[0] : "";
         ConfigPresent = info.ConfigPresent;
         WorkingDir = info.WorkingDir;
@@ -194,6 +231,9 @@ public sealed class DockerStackRow : INotifyPropertyChanged
         Name = Name,
         WorkingDir = _workingDir,
         ConfigFiles = ConfigFiles,
+        LabelConfigFiles = LabelConfigFiles,
+        Mapping = _mapping,
+        AmbiguousPaths = AmbiguousPaths,
         ConfigPresent = _configPresent,
         Managed = _managed,
         Members = _members,

@@ -34,10 +34,10 @@
     <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
                IsVisible="False" Margin="0,10,0,0" />
 
-    <!-- Read-only stacks say why up here, above the file rather than under it, so the reason is
-         read before the text it applies to. -->
-    <TextBlock DockPanel.Dock="Bottom" Name="ReadOnlyNote" Classes="note"
-               IsVisible="False" Margin="0,10,0,0" />
+    <!-- A file that is not ours says so up here, above the file rather than under it, so where it
+         is going is read before the text it applies to. -->
+    <TextBlock DockPanel.Dock="Bottom" Name="PathNote" Classes="note"
+               IsVisible="False" TextWrapping="Wrap" Margin="0,10,0,0" />
 
     <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}">
       <edit:TextEditor Name="Editor" ShowLineNumbers="True"

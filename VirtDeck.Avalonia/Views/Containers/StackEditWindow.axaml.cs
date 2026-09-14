@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using VirtDeck.Models;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views.Containers;
@@ -11,11 +12,11 @@ namespace VirtDeck.Avalonia.Views.Containers;
 /// would build a second set beside the first and leave the original running. So an existing stack's
 /// name is fixed, and the way to change it is to create the new one and delete the old.</para>
 ///
-/// <para>A <b>discovered</b> stack opens read-only. VirtDeck can read its file, which is more than
-/// Portainer manages from inside a container, but reading a file the app did not create is a
-/// different thing from writing to a directory that may be somebody's git checkout. The two Save
-/// buttons are hidden rather than disabled in that case, because this is a window somebody opened
-/// to look at a file, not a form they filled in and were then refused.</para>
+/// <para>A file VirtDeck did not create is <b>still editable</b>, and the note above the editor says
+/// which path the save will land on. Reading somebody's compose file and then refusing to write the
+/// edit back is a worse answer than writing it, and the app is reaching the host over SSH with sudo
+/// either way. What it will not do is <i>create</i> a file outside its own stacks root, so a stack
+/// whose file is genuinely missing is the one case that still opens read-only, and it says so.</para>
 ///
 /// <para>The YAML is not parsed here. Compose owns that rule, it changes without us, and its
 /// refusal names the line and the reason; a validator written here would be a worse copy that
@@ -24,8 +25,15 @@ namespace VirtDeck.Avalonia.Views.Containers;
 /// </summary>
 public partial class StackEditWindow : Window
 {
-    /// <summary>What the window produced: never partially applied, so the module writes once or not at all.</summary>
-    public sealed record StackEdit(string Name, string Yaml, bool Deploy);
+    /// <summary>
+    /// What the window produced: never partially applied, so the module writes once or not at all.
+    ///
+    /// <para><c>TargetPath</c> is null for a stack of VirtDeck's own, which is written by name into
+    /// the stacks root, and is the file's own path for one that is not, which is written in place.
+    /// That is the whole of the difference between the two writes, decided here because this is what
+    /// knows which of the stack's files was loaded.</para>
+    /// </summary>
+    public sealed record StackEdit(string Name, string Yaml, bool Deploy, string? TargetPath);
 
     private const string Starter =
         "services:\n" +
@@ -37,6 +45,7 @@ public partial class StackEditWindow : Window
 
     private readonly DockerService? _docker;
     private readonly IReadOnlyList<string> _taken;
+    private readonly DockerStackInfo? _stack;
     private readonly bool _isNew;
     private readonly bool _writable;
     private readonly IReadOnlyList<string> _files;
@@ -49,7 +58,7 @@ public partial class StackEditWindow : Window
 
     /// <summary>A new stack: an empty name, a starter file, and both Save buttons.</summary>
     public StackEditWindow(DockerService? docker, IReadOnlyList<string> taken)
-        : this(docker, taken, null, new List<string>(), writable: true) { }
+        : this(docker, taken, null, writable: true) { }
 
     /// <summary>A new stack seeded from a compose file dragged in from this PC.</summary>
     public StackEditWindow(DockerService? docker, IReadOnlyList<string> taken,
@@ -61,13 +70,14 @@ public partial class StackEditWindow : Window
     }
 
     public StackEditWindow(DockerService? docker, IReadOnlyList<string> taken,
-                           string? name, IReadOnlyList<string> files, bool writable)
+                           DockerStackInfo? stack, bool writable)
     {
         InitializeComponent();
         _docker = docker;
         _taken = taken;
-        _files = files;
-        _isNew = name is null;
+        _stack = stack;
+        _files = stack?.ConfigFiles ?? new List<string>();
+        _isNew = stack is null;
         _writable = writable;
 
         if (_isNew)
@@ -77,8 +87,8 @@ public partial class StackEditWindow : Window
         }
         else
         {
-            Title = $"Stack: {name}";
-            NameBox.Text = name;
+            Title = $"Stack: {stack!.Name}";
+            NameBox.Text = stack.Name;
             // Fixed for the reason in the class summary: renaming a project builds a second one.
             NameBox.IsEnabled = false;
             ToolTip.SetTip(NameBox,
@@ -89,24 +99,15 @@ public partial class StackEditWindow : Window
         SaveButton.IsVisible = _writable;
         SaveDeployButton.IsVisible = _writable;
 
-        if (!_writable)
-        {
-            Editor.IsReadOnly = true;
-            ReadOnlyNote.IsVisible = true;
-            ReadOnlyNote.Text =
-                "This compose file was not created by VirtDeck, so it is shown and not edited. It " +
-                "lives on the host at " + (files.Count > 0 ? files[0] : "an unknown path") +
-                ". Deploy, down, start, stop and restart all still work from the list.";
-            CancelButton.Content = "Close";
-        }
+        if (stack is not null && !stack.Managed) DrawPathNote(stack);
 
         // More than one file only happens on a discovered stack: an override beside a base. The row
         // stays off the window entirely for the one-file case, which is every stack VirtDeck wrote.
-        if (files.Count > 1)
+        if (_files.Count > 1)
         {
             FileLabel.IsVisible = true;
             FileBox.IsVisible = true;
-            FileBox.ItemsSource = files;
+            FileBox.ItemsSource = _files;
             FileBox.SelectedIndex = 0;
             FileBox.SelectionChanged += async (_, _) => await LoadFileAsync();
         }
@@ -119,16 +120,63 @@ public partial class StackEditWindow : Window
         {
             if (_isNew) NameBox.Focus();
             else Editor.Focus();
-            if (files.Count > 0) await LoadFileAsync();
+
+            // Two containers hold a file that could be this one, so the listing took neither. There
+            // is nothing to load and nothing to guess: say which they are and let the window sit.
+            if (_stack is { AmbiguousPaths.Count: > 1 })
+            {
+                ErrorText.Text =
+                    (_stack.LabelConfigFiles.Count > 0 ? _stack.LabelConfigFiles[0] : "This compose file") +
+                    " is not on the host, and more than one container holds a file that could be it:\n" +
+                    string.Join("\n", _stack.AmbiguousPaths) +
+                    "\n\nBoth are real, so VirtDeck has not picked one.";
+                ErrorText.IsVisible = true;
+                return;
+            }
+
+            if (_files.Count > 0) await LoadFileAsync();
         };
     }
+
+    /// <summary>
+    /// What a file the app did not create says about itself: where the save lands, and, where the
+    /// labels name a path the host does not have, that the two are the same file.
+    /// </summary>
+    private void DrawPathNote(DockerStackInfo stack)
+    {
+        var path = stack.ConfigFiles.Count > 0 ? stack.ConfigFiles[0] : "an unknown path";
+
+        var text = _writable
+            ? $"This compose file was not created by VirtDeck. Saving writes to {path} on the host, " +
+              "in place."
+            : "This compose file was not created by VirtDeck and is not on the host, so it is shown " +
+              $"and not edited. Its stack was built from {path}. Start, stop and restart all still " +
+              "work from the list.";
+
+        if (stack.Mapping is { } m && stack.LabelConfigFiles.Count > 0)
+            text += $" The stack's labels say {stack.LabelConfigFiles[0]}, which is that same file as " +
+                    $"{m.Container} sees it: it mounts {m.Source} at {m.Destination}.";
+
+        PathNote.Text = text;
+        PathNote.IsVisible = true;
+
+        if (!_writable)
+        {
+            Editor.IsReadOnly = true;
+            CancelButton.Content = "Close";
+        }
+    }
+
+    /// <summary>The file the editor is showing, which is the one a save writes back to.</summary>
+    private string? LoadedPath =>
+        FileBox.IsVisible && FileBox.SelectedItem is string picked
+            ? picked
+            : _files.Count > 0 ? _files[0] : null;
 
     private async Task LoadFileAsync()
     {
         if (_docker is null) return;
-        var path = FileBox.IsVisible && FileBox.SelectedItem is string picked
-            ? picked
-            : _files.Count > 0 ? _files[0] : null;
+        var path = LoadedPath;
         if (path is null) return;
 
         Editor.Text = "";
@@ -183,7 +231,11 @@ public partial class StackEditWindow : Window
             return;
         }
 
-        Result = new StackEdit(name, yaml, deploy);
+        // Ours is written by name into the stacks root, which is what creates the directory for a
+        // stack that has never been deployed. Anything else is written over the file it came from.
+        var target = _isNew || _stack is null || _stack.Managed ? null : LoadedPath;
+
+        Result = new StackEdit(name, yaml, deploy, target);
         Close(true);
     }
 }

@@ -82,6 +82,13 @@ public partial class ContainersModule : UserControl, IModule
     private readonly ObservableCollection<DockerStackRow> _stackRows = new();
     private readonly Dictionary<string, DockerStackRow> _stacksByName = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The stacks whose compose file VirtDeck did not create and has already been told it may write
+    /// over. Session state on the module, the way the sorts and the filters are, so switching host
+    /// resets it by building a new shell rather than by remembering to.
+    /// </summary>
+    private readonly HashSet<string> _overwriteOk = new(StringComparer.Ordinal);
+
     /// <summary>Open log windows, keyed by container id. They outlive a module switch.</summary>
     private readonly Dictionary<string, ContainerLogsWindow> _logs = new();
 
@@ -1047,10 +1054,11 @@ public partial class ContainersModule : UserControl, IModule
 
         NewStackButton.IsEnabled = free;
 
-        // Edit and Delete are the two commands that need the compose file to be ours to write, so
-        // they are the two a discovered stack does not get. Everything else works on either kind.
+        // Edit opens for any one stack, read-only where its file is genuinely gone. Delete works on
+        // every stack: what it removes depends on whose the file is and whether there is one, and
+        // the confirmation says which.
         MenuEditStack.IsEnabled = free && stacks.Count == 1;
-        MenuDeleteStack.IsEnabled = free && stacks.Any(t => t.CanDelete);
+        MenuDeleteStack.IsEnabled = free && stacks.Count > 0;
 
         // Deploy, Down and Pull are the three that read the compose file, so they are the three the
         // plugin is needed for, and the three a stack whose file has gone cannot have. The reason
@@ -1939,10 +1947,11 @@ public partial class ContainersModule : UserControl, IModule
         if (rows.Count != 1 || _docker is null || _busy) return;
         var row = rows[0];
 
-        // A discovered stack opens read-only. VirtDeck can read the file, which Portainer cannot,
-        // but writing to a directory it did not create is a different thing from reading one.
+        // A stack whose compose file is genuinely not on the host opens read-only, because there is
+        // nothing to read and nothing to write back over. Everything else is editable, wherever its
+        // file came from; the window says which path a save will land on.
         var taken = _stackRows.Select(r => r.Name).Where(n => n != row.Name).ToList();
-        var dialog = new StackEditWindow(Docker, taken, row.Name, row.ConfigFiles, row.CanEdit);
+        var dialog = new StackEditWindow(Docker, taken, row.ToInfo(), row.CanEdit);
         if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } saved) return;
 
         await SaveStackAsync(saved);
@@ -1956,13 +1965,28 @@ public partial class ContainersModule : UserControl, IModule
     /// </summary>
     private async Task SaveStackAsync(StackEditWindow.StackEdit saved)
     {
+        // Writing over a file the app did not create is worth asking about once. Not once per
+        // window, which would be once per save, because the editor closes on Save: once per stack
+        // for as long as this shell lives. Session state on the module like the sorts and the
+        // filters, so switching host resets it by building a new one.
+        if (saved.TargetPath is { } target && !_overwriteOk.Contains(saved.Name))
+        {
+            if (!await MessageDialog.Confirm(Owner, "Save stack",
+                    $"Overwrite {target}? VirtDeck did not create this file."))
+                return;
+            _overwriteOk.Add(saved.Name);
+        }
+
         var written = false;
         _busy = true;
         UpdateMenu();
         try
         {
             SetStatus($"Writing {saved.Name}…");
-            await Docker.WriteStackAsync(saved.Name, saved.Yaml);
+            if (saved.TargetPath is { } path)
+                await Docker.WriteStackFileAsync(path, saved.Yaml);
+            else
+                await Docker.WriteStackAsync(saved.Name, saved.Yaml);
             written = true;
         }
         catch (Exception ex)
@@ -2095,8 +2119,8 @@ public partial class ContainersModule : UserControl, IModule
     }
 
     /// <summary>
-    /// Removes a stack VirtDeck created: its containers, the networks compose made for it, and its
-    /// compose file, which is what makes this app forget it exists.
+    /// Removes a stack: its containers, the networks compose made for it, and its compose file,
+    /// which is what makes it leave the list.
     ///
     /// <para><c>Choose</c> rather than <c>Confirm</c>, because a delete has a second question and
     /// asking it in a follow-up dialog would put it after the point of no return. The question is
@@ -2106,24 +2130,43 @@ public partial class ContainersModule : UserControl, IModule
     ///
     /// <para>Down is the separate, undoable command, so there is no "keep the file" answer here:
     /// that is not a delete, and offering it as one would make the two commands the same.</para>
+    ///
+    /// <para>What goes from disk depends on whose the file is, which is why the confirmation says
+    /// so for anything that is not ours. A stack of ours loses the directory VirtDeck made. Somebody
+    /// else's loses its compose files and a <c>.env</c> beside them, and its directory only if that
+    /// empties it, because that path came out of a label and <c>rm -rf</c> on it is not ours to
+    /// run. A stack with no file on the host loses nothing from disk, since there is nothing, and
+    /// is removed by its label instead of by <c>compose down</c>.</para>
     /// </summary>
     private async Task DeleteStackAsync()
     {
-        var selected = SelectedStacks;
-        var rows = selected.Where(r => r.CanDelete).ToList();
-        var skipped = selected.Count - rows.Count;
+        var rows = SelectedStacks;
         if (rows.Count == 0 || _docker is null || _busy) return;
 
         // The two buttons already say what the second question is, so the body is the question and
-        // nothing else. The one thing they cannot say is that part of the selection is being left
-        // out, which changes what happens and so stays.
+        // nothing else. What they cannot say is that a stack that is not ours is removed differently,
+        // which changes what happens on disk and so stays.
         var message = rows.Count == 1
             ? $"Delete the stack {rows[0].Name}?"
             : $"Delete {rows.Count} stacks?\n\n{Listed(rows.Select(r => r.Name))}";
 
-        if (skipped > 0)
-            message += $"\n\n{(skipped == 1 ? "One stack" : $"{skipped} stacks")} in the selection " +
-                       $"{(skipped == 1 ? "was" : "were")} not created by VirtDeck and will be left alone.";
+        var foreign = rows.Where(r => !r.Managed && r.ConfigPresent).ToList();
+        var fileless = rows.Where(r => !r.Managed && !r.ConfigPresent).ToList();
+
+        if (foreign.Count == 1)
+            message += $"\n\n{(rows.Count == 1 ? "It was" : $"{foreign[0].Name} was")} not created by VirtDeck: " +
+                       $"{foreign[0].ConfigPath} and a .env beside it are removed, and the directory " +
+                       "only if that leaves it empty.";
+        else if (foreign.Count > 1)
+            message += $"\n\n{foreign.Count} of them were not created by VirtDeck: their compose files " +
+                       "and a .env beside each are removed, and each directory only if that leaves it empty.";
+
+        if (fileless.Count == 1)
+            message += $"\n\n{(rows.Count == 1 ? "Its" : $"{fileless[0].Name}'s")} compose file is not on " +
+                       "this host, so it is removed by its label: the containers and the networks.";
+        else if (fileless.Count > 1)
+            message += $"\n\n{fileless.Count} of them have no compose file on this host, so they are " +
+                       "removed by their label: the containers and the networks.";
 
         var choice = await MessageDialog.Choose(Owner, "Delete stacks", message,
             primary: "Keep the volumes",
@@ -2133,37 +2176,44 @@ public partial class ContainersModule : UserControl, IModule
         var removeVolumes = choice == MessageDialog.Choice.Alternative;
 
         var stacks = Infos(rows);
-        var names = rows.Select(r => r.Name).ToList();
         var errors = new List<string>();
 
         await RunOpAsync("Delete stacks", "Removing", -1, async ct =>
         {
             for (var i = 0; i < stacks.Count; i++)
             {
+                var stack = stacks[i];
                 var label = stacks.Count == 1 ? "Removing" : $"Removing ({i + 1}/{stacks.Count})";
 
                 // Down before the file, always: removing a stack's compose file out from under its
                 // running containers would leave them behind with nothing in this app able to
-                // address them as a set again.
-                if (stacks[i].ConfigPresent && Docker.ComposeAvailable)
+                // address them as a set again. With no file (or no plugin) there is nothing to hand
+                // compose, so the label is the address instead.
+                try
                 {
-                    try
-                    {
-                        await Docker.ComposeDownAsync(stacks[i], removeVolumes,
+                    if (stack.ConfigPresent && Docker.ComposeAvailable)
+                        await Docker.ComposeDownAsync(stack, removeVolumes,
                                                       line => ReportLine(label, line), ct);
-                    }
-                    catch (Exception ex) when (!ct.IsCancellationRequested)
-                    {
-                        // Reported, not rethrown: a stack whose containers would not go is still a
-                        // stack the user asked to delete, and stopping here would leave both the
-                        // containers and the file.
-                        errors.Add($"{names[i]}: {ex.Message}");
-                    }
+                    else
+                        await Docker.RemoveProjectAsync(stack, removeVolumes);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    // Reported, not rethrown: a stack whose containers would not go is still a
+                    // stack the user asked to delete, and stopping here would leave both the
+                    // containers and the file.
+                    errors.Add($"{stack.Name}: {ex.Message}");
                 }
 
                 ct.ThrowIfCancellationRequested();
-                try { await Docker.DeleteStackDirAsync(names[i]); }
-                catch (Exception ex) { errors.Add($"{names[i]}: {ex.Message}"); }
+                try
+                {
+                    if (stack.Managed)
+                        await Docker.DeleteStackDirAsync(stack.Name);
+                    else if (stack.ConfigPresent)
+                        await Docker.DeleteStackFilesAsync(stack);
+                }
+                catch (Exception ex) { errors.Add($"{stack.Name}: {ex.Message}"); }
             }
         });
 

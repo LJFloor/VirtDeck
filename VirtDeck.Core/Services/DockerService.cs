@@ -2722,28 +2722,47 @@ namespace VirtDeck.Services
         public static string StackComposeFile(string name) => $"{StackDirectory(name)}/docker-compose.yml";
 
         /// <summary>
-        /// Whether a compose file path is one of ours, which is the single rule deciding whether a
-        /// stack can be edited and deleted. Read off the path rather than off which half of the
-        /// listing produced the record, so a stack sitting in the root that somebody brought up by
-        /// hand from a terminal is still correctly ours.
+        /// Whether a compose file path is one of ours, which is the rule deciding <b>which of the two
+        /// writes</b> a stack gets and <b>which of the two deletes</b>. Read off the path rather than
+        /// off which half of the listing produced the record, so a stack sitting in the root that
+        /// somebody brought up by hand from a terminal is still correctly ours.
+        ///
+        /// <para>It stopped deciding whether a stack can be <i>edited</i> or <i>deleted</i> at all.
+        /// Any compose file that is actually on the host can be edited, and
+        /// <c>WriteStackFileAsync</c> writes the ones that are not ours in place; every stack can be
+        /// deleted, and <c>DeleteStackFilesAsync</c> removes somebody else's files without removing
+        /// their directory. What is still ours alone is <b>creating</b> a file and <c>rm -rf</c> on a
+        /// directory.</para>
         /// </summary>
         public static bool IsManagedPath(string path) =>
             path.StartsWith(StacksRoot + "/", StringComparison.Ordinal);
 
-        // Six record kinds. Only the `m` command carries `|| exit $?`, because it is the one whose
+        // Seven record kinds. Only the `m` command carries `|| exit $?`, because it is the one whose
         // failure means the listing failed; everything else is a best-effort half fenced off from
         // the exit status, so a host that answers half the questions still gets a table.
         //
         // The path labels are two further `docker ps` runs rather than extra columns on `m`, so that
         // every record keeps at most one unbounded field and keeps it last. `m` needs no cap on its
         // split at all: a project, service and container name are each [a-zA-Z0-9][a-zA-Z0-9_.-]*,
-        // a state is one word and an id is hex, so no field of it can contain a tab. All three runs
+        // a state is one word and an id is hex, so no field of it can contain a tab. All the runs
         // are inside the one SSH round trip, the way NetworksScript runs three commands in one.
         //
         // The `c` half folds the [ -f ] test in on the host rather than asking a second time later:
         // the labels record where a project's files *were* when it came up, and a checkout can be
         // deleted out from under a running stack, so whether the file is still there is a live
         // question and it is what up and down are gated on.
+        //
+        // The `r` half is what makes a Portainer stack usable. A compose manager that runs in a
+        // container writes its files where only it can see them, so the labels name a path the host
+        // does not have: a missing file is a question rather than a verdict. Every such manager has
+        // to mount the directory it keeps them in, and a mount has both names, so `docker inspect`
+        // is the translation. It only runs when something is actually missing, so a host with no
+        // such manager pays nothing for it, and it emits only candidates whose file *exists*, which
+        // is what keeps the whole scan inside this one round trip. It does not rank and it does not
+        // choose: that is policy and it lives in FetchStacks where it can be read.
+        //
+        // The `c` loop moved off the end of a pipeline and onto a here-string so `gone` survives it:
+        // a pipeline's last stage is a subshell and a flag set there is lost.
         private const string StacksScript =
             "root=" + StacksRoot + "\n" +
             "L=com.docker.compose.project\n" +
@@ -2754,16 +2773,40 @@ namespace VirtDeck.Services
             "docker ps --all --no-trunc --filter \"label=$L\" --format " +
             "'w\t{{.Label \"com.docker.compose.project\"}}\t" +
             "{{.Label \"com.docker.compose.project.working_dir\"}}' 2>/dev/null | sort -u\n" +
-            "docker ps --all --no-trunc --filter \"label=$L\" --format " +
+            "pairs=$(docker ps --all --no-trunc --filter \"label=$L\" --format " +
             "'{{.Label \"com.docker.compose.project\"}}\t" +
-            "{{.Label \"com.docker.compose.project.config_files\"}}' 2>/dev/null | sort -u | " +
+            "{{.Label \"com.docker.compose.project.config_files\"}}' 2>/dev/null | sort -u)\n" +
+            "gone=\n" +
             "while IFS=$'\\t' read -r p c; do\n" +
             "  [ -n \"$p\" ] || continue\n" +
             "  first=${c%%,*}\n" +
             "  e=0\n" +
             "  if [ -n \"$first\" ] && [ -f \"$first\" ]; then e=1; fi\n" +
             "  printf 'c\\t%s\\t%s\\t%s\\n' \"$p\" \"$e\" \"$c\"\n" +
-            "done\n" +
+            "  if [ \"$e\" = 0 ] && [ -n \"$first\" ]; then gone=1; fi\n" +
+            "done <<< \"$pairs\"\n" +
+            "if [ -n \"$gone\" ]; then\n" +
+            "  ids=$(docker ps --all --quiet --no-trunc 2>/dev/null)\n" +
+            "  if [ -n \"$ids\" ]; then\n" +
+            "    mounts=$(echo \"$ids\" | xargs docker inspect --format " +
+            "'{{$n := .Name}}{{range .Mounts}}{{printf \"%s\\t%s\\t%s\\n\" $n .Destination .Source}}{{end}}'" +
+            " 2>/dev/null)\n" +
+            "    while IFS=$'\\t' read -r p c; do\n" +
+            "      [ -n \"$p\" ] || continue\n" +
+            "      first=${c%%,*}\n" +
+            "      [ -n \"$first\" ] && [ ! -f \"$first\" ] || continue\n" +
+            "      while IFS=$'\\t' read -r cn d s; do\n" +
+            "        case \"$s\" in /*) ;; *) continue ;; esac\n" +
+            "        [ -n \"$d\" ] || continue\n" +
+            "        d=${d%/}\n" +
+            "        case \"$first\" in \"$d\"/*) ;; *) continue ;; esac\n" +
+            "        cand=\"${s%/}${first#\"$d\"}\"\n" +
+            "        [ -f \"$cand\" ] || continue\n" +
+            "        printf 'r\\t%s\\t%s\\t%s\\t%s\\n' \"$p\" \"${#d}\" \"${cn#/}\" \"$cand\"\n" +
+            "      done <<< \"$mounts\"\n" +
+            "    done <<< \"$pairs\"\n" +
+            "  fi\n" +
+            "fi\n" +
             "if [ -d \"$root\" ]; then\n" +
             "  for f in \"$root\"/*/docker-compose.yml; do\n" +
             "    [ -f \"$f\" ] || continue\n" +
@@ -2774,6 +2817,82 @@ namespace VirtDeck.Services
             "cv=$(docker compose version --short 2>/dev/null) || cv=\n" +
             "[ -n \"$cv\" ] && printf 'v\\t%s\\n' \"$cv\"\n" +
             "exit 0";
+
+        /// <summary>
+        /// One container's answer to "where is this project's compose file really?": how deep into
+        /// the path its mount reached, which container it was, and the path on the host, which the
+        /// listing already checked exists.
+        /// </summary>
+        private sealed record StackCandidate(int DestLength, string Container, string Path);
+
+        /// <summary>
+        /// Picks the mount that best explains a compose path the host does not have, or answers null
+        /// and fills <paramref name="ambiguous"/> where more than one answer is equally good.
+        ///
+        /// <para>Candidates are deduplicated <b>by path</b> before anything is counted, because one
+        /// answer spelled twice is not two answers: a volume mounted at <c>/data</c> in one container
+        /// and <c>/data/</c> in another, or Portainer and its agent sharing one volume, all name the
+        /// same file. Of what is left the <b>longest mount destination</b> wins, because it is the
+        /// most specific claim on the path: a container holding the host's root at <c>/</c> explains
+        /// any path at all and must never outrank one that mounts the exact directory.</para>
+        ///
+        /// <para>A genuine tie between two <i>different</i> files resolves nothing. Both are real and
+        /// the app has nothing to prefer one by, so it says there are two rather than guessing; the
+        /// row draws them on hover. That is the same rule the rest of the app follows where an action
+        /// is ambiguous, and it is cheaper than a chooser for something this rare.</para>
+        /// </summary>
+        private static StackPathMapping? ChooseCandidate(
+            List<StackCandidate> offered, string labelPath, out IReadOnlyList<string> ambiguous)
+        {
+            ambiguous = new List<string>();
+
+            // One row per distinct path, keeping the deepest mount that reached it. Ordinal, because
+            // these are paths on a Linux host and case is significant.
+            var byPath = new Dictionary<string, StackCandidate>(StringComparer.Ordinal);
+            foreach (var c in offered)
+            {
+                if (c.Path.Length == 0 || c.DestLength > labelPath.Length) continue;
+                if (!byPath.TryGetValue(c.Path, out var seen) || c.DestLength > seen.DestLength)
+                    byPath[c.Path] = c;
+            }
+
+            if (byPath.Count == 0) return null;
+
+            var ranked = byPath.Values.OrderByDescending(c => c.DestLength).ToList();
+            if (ranked.Count > 1 && ranked[1].DestLength == ranked[0].DestLength)
+            {
+                ambiguous = ranked.Where(c => c.DestLength == ranked[0].DestLength)
+                                  .Select(c => c.Path)
+                                  .OrderBy(x => x, StringComparer.Ordinal)
+                                  .ToList();
+                return null;
+            }
+
+            // The script sent the destination's length rather than the destination itself, so that
+            // no record carried two unbounded fields. Both halves of the mount come back from it:
+            // the label path starts with the destination, and the resolved path ends with whatever
+            // followed it, so what is left in front is the source.
+            var best = ranked[0];
+            var destination = labelPath[..best.DestLength];
+            var tail = labelPath.Length - best.DestLength;
+            if (tail > best.Path.Length) return null;
+            var source = best.Path[..(best.Path.Length - tail)];
+
+            return new StackPathMapping(best.Container, destination, source);
+        }
+
+        /// <summary>
+        /// One path through a mapping. A path that is not under the mount is left exactly as it was,
+        /// so an override file somewhere else does not get a host path invented for it.
+        /// </summary>
+        private static string Remap(string path, StackPathMapping map)
+        {
+            if (path.Length == 0) return path;
+            if (path.Length == map.Destination.Length && path == map.Destination) return map.Source;
+            if (!path.StartsWith(map.Destination, StringComparison.Ordinal)) return path;
+            if (map.Destination.Length > 0 && path[map.Destination.Length] != '/') return path;
+            return map.Source + path[map.Destination.Length..];
+        }
 
         private List<DockerStackInfo> FetchStacks()
         {
@@ -2790,6 +2909,7 @@ namespace VirtDeck.Services
             var workdirs = new Dictionary<string, string>(StringComparer.Ordinal);
             var configs = new Dictionary<string, (bool Present, string Files)>(StringComparer.Ordinal);
             var dirs = new HashSet<string>(StringComparer.Ordinal);
+            var candidates = new Dictionary<string, List<StackCandidate>>(StringComparer.Ordinal);
             var membersKnown = false;
 
             foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -2822,6 +2942,21 @@ namespace VirtDeck.Services
                     case "c":
                         if (f.Length >= 4 && f[1].Trim().Length > 0)
                             configs[f[1].Trim()] = (f[2].Trim() == "1", f[3].Trim());
+                        break;
+
+                    case "r":
+                        // project, destination length, container, resolved path. Split again with a
+                        // cap rather than sharing the one above: the first three fields are bounded
+                        // (a project and container name cannot hold a tab, a length is digits) but
+                        // the path is a name off the host, so it takes whatever is left. `m` has
+                        // seven fields and `c` four, so the cap cannot be hoisted out of this case.
+                        var r = line.TrimEnd('\r').Split('\t', 5);
+                        if (r.Length < 5 || r[1].Trim().Length == 0) break;
+                        if (!int.TryParse(r[2].Trim(), out var destLen) || destLen < 0) break;
+                        var forProject = r[1].Trim();
+                        if (!candidates.TryGetValue(forProject, out var found))
+                            candidates[forProject] = found = new List<StackCandidate>();
+                        found.Add(new StackCandidate(destLen, r[3].Trim(), r[4].TrimEnd()));
                         break;
 
                     case "m":
@@ -2860,6 +2995,27 @@ namespace VirtDeck.Services
 
                 var workdir = workdirs.TryGetValue(name, out var w) ? w : string.Empty;
 
+                // The labels name a path this host does not have, and a mount somewhere says what
+                // that path is here. Applied to every file and to the working directory, because a
+                // relative bind mount and a .env resolve against the latter.
+                IReadOnlyList<string>? labelFiles = null;
+                StackPathMapping? mapping = null;
+                IReadOnlyList<string> ambiguous = new List<string>();
+
+                if (!present && files.Count > 0 &&
+                    candidates.TryGetValue(name, out var offered))
+                {
+                    var pick = ChooseCandidate(offered, files[0], out ambiguous);
+                    if (pick is not null)
+                    {
+                        mapping = pick;
+                        labelFiles = files;
+                        files = files.Select(f => Remap(f, pick)).ToList();
+                        workdir = Remap(workdir, pick);
+                        present = true;
+                    }
+                }
+
                 // Nothing said where this project's files are, but there is a directory of our own
                 // named after it. That is the down-and-still-known case, and the `d` record only
                 // fires for a directory whose compose file exists, so the file is there by
@@ -2876,6 +3032,9 @@ namespace VirtDeck.Services
                     Name = name,
                     WorkingDir = workdir,
                     ConfigFiles = files,
+                    LabelConfigFiles = labelFiles ?? files,
+                    Mapping = mapping,
+                    AmbiguousPaths = ambiguous,
                     ConfigPresent = present,
                     Managed = files.Count > 0 && IsManagedPath(files[0]),
                     Members = members.TryGetValue(name, out var m)
@@ -3099,6 +3258,67 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// The twin of <see cref="RequireStackName"/> for a path that came off the host rather than a
+        /// name VirtDeck chose.
+        ///
+        /// <para>It is not about injection: the path rides <c>ShellScript.ArrayFrom</c> like every
+        /// other value this class hands to bash. It is about never writing somewhere unintended, so
+        /// it refuses what could only be a bug in the caller. The real gate is on the host and is
+        /// <c>[ -f ]</c>: this may overwrite a file, never create one.</para>
+        /// </summary>
+        private static void RequireComposePath(string path)
+        {
+            if (path.Length == 0 || path[0] != '/' || path.IndexOf('\n') >= 0 || path.IndexOf('\0') >= 0)
+                throw new ArgumentException($"Not a compose file path: '{path}'.", nameof(path));
+        }
+
+        /// <summary>
+        /// Writes a compose file back over one the host already has, in place.
+        ///
+        /// <para>This is the half <see cref="WriteStackAsync"/> cannot do. That one owns its path and
+        /// creates what it needs; this one is handed a path off the host, which may be a git checkout
+        /// or a directory inside another app's volume, and its whole rule is that it <b>only ever
+        /// replaces a file that is already there</b>. There is no <c>mkdir</c>, and the <c>[ -f ]</c>
+        /// test is what enforces it.</para>
+        ///
+        /// <para>Through a temporary file and <c>mv</c> rather than <c>cat &gt; "$f"</c>: the
+        /// redirection truncates before a byte arrives, so an SSH stream that died mid-write would
+        /// leave somebody's stack empty. <c>mktemp</c> in the same directory keeps the rename on one
+        /// filesystem, so the file is either all of the old one or all of the new one. Mode and owner
+        /// are taken from what is being replaced instead of fixed at 0644, because this file is
+        /// somebody else's and a compose file in a Portainer volume is routinely root-owned 0600.</para>
+        ///
+        /// <para>The refusal drains stdin before it exits, so the caller gets an exit status and this
+        /// message rather than a broken pipe half way through writing the payload.</para>
+        /// </summary>
+        public Task WriteStackFileAsync(string path, string yaml)
+        {
+            RequireComposePath(path);
+
+            var body =
+                ShellScript.ArrayFrom("p", new[] { path }) +
+                "f=\"${p[0]}\"\n" +
+                "if [ ! -f \"$f\" ]; then\n" +
+                "  cat > /dev/null\n" +
+                "  echo \"There is no file at $f to write back to.\" >&2\n" +
+                "  exit 1\n" +
+                "fi\n" +
+                "d=$(dirname -- \"$f\")\n" +
+                "t=$(mktemp -- \"$d/.virtdeck-compose.XXXXXX\") || { cat > /dev/null; exit 1; }\n" +
+                "cat > \"$t\"\n" +
+                "chmod --reference=\"$f\" -- \"$t\" 2>/dev/null || chmod 0644 -- \"$t\"\n" +
+                "chown --reference=\"$f\" -- \"$t\" 2>/dev/null || true\n" +
+                "mv -f -- \"$t\" \"$f\"\n";
+
+            var bytes = Encoding.UTF8.GetBytes(yaml.Replace("\r\n", "\n"));
+
+            Diagnostics.SpiceLog.Log($"[docker] write compose file {path} ({bytes.Length} bytes)");
+            return _ssh.RunPipeInAsync(body, elevated: true,
+                async (stream, ct) => await stream.WriteAsync(bytes, ct),
+                CancellationToken.None);
+        }
+
+        /// <summary>
         /// Removes a stack's directory from the stacks root, which is what makes VirtDeck forget it.
         ///
         /// <para><see cref="RequireStackName"/> first, so the path this builds can only ever be one
@@ -3113,6 +3333,86 @@ namespace VirtDeck.Services
             Diagnostics.SpiceLog.Log($"[docker] remove stack directory {name}");
             var script = ShellScript.ArrayFrom("d", new[] { StackDirectory(name) }) +
                          "rm -rf -- \"${d[0]}\"\n";
+            _ssh.RunSudoCommand(ShellScript.Wrap(script));
+        });
+
+        /// <summary>
+        /// Removes an external stack's compose files where they lie, and the directory they sat in
+        /// if that is what empties it.
+        ///
+        /// <para>The twin of <see cref="DeleteStackDirAsync"/> for a stack VirtDeck did not create,
+        /// and deliberately <b>not</b> the same command. That one removes a directory this app made
+        /// and named; this path came out of a container label, so <c>rm -rf</c> on it would take a
+        /// home directory with a compose file loose in it. <b>Nothing here recurses.</b> The files
+        /// the labels name go, a <c>.env</c> beside each of them goes because compose reads it as
+        /// part of the same project, and the directory is only ever tried with <c>rmdir</c>, which
+        /// refuses one that still holds anything. A Portainer stack directory holds exactly those
+        /// two files and so disappears; a git-backed one keeps its checkout, which is the right
+        /// answer for a directory that is somebody's clone.</para>
+        ///
+        /// <para>The <c>rmdir</c>s are a second pass so that a <c>.env</c> belonging to the last
+        /// file is gone before the first file's directory is tried: several config files in one
+        /// directory is the ordinary case, not the odd one.</para>
+        /// </summary>
+        public Task DeleteStackFilesAsync(DockerStackInfo stack) => Task.Run(() =>
+        {
+            var files = stack.ConfigFiles.Where(f => f.Length > 0).ToList();
+            if (files.Count == 0) return;
+            foreach (var file in files) RequireComposePath(file);
+
+            Diagnostics.SpiceLog.Log($"[docker] remove {files.Count} compose file(s) of {stack.Name}");
+            var script =
+                ShellScript.ArrayFrom("p", files) +
+                "for x in \"${p[@]}\"; do\n" +
+                "  rm -f -- \"$x\" || exit $?\n" +
+                "  rm -f -- \"$(dirname -- \"$x\")/.env\" 2>/dev/null\n" +
+                "done\n" +
+                "for x in \"${p[@]}\"; do\n" +
+                "  rmdir -- \"$(dirname -- \"$x\")\" 2>/dev/null || true\n" +
+                "done\n" +
+                "exit 0\n";
+            _ssh.RunSudoCommand(ShellScript.Wrap(script));
+        });
+
+        /// <summary>
+        /// Removes everything carrying a project's label: its containers, the networks compose made
+        /// for it, and its named volumes when asked. What Delete falls back to when there is no
+        /// compose file to run <c>down</c> against.
+        ///
+        /// <para>A stack on a remote Portainer agent, one whose checkout was deleted, and one whose
+        /// label path resolved to two equally good candidates all reach this: the project is real,
+        /// its containers are on this host, and the only description of it that is left is the
+        /// label compose stamped on them. That is the same string the listing discovers it by, so
+        /// this removes exactly what the row was drawn from and the stack then leaves the list.
+        /// It needs no plugin at all, for the reason start and stop do not.</para>
+        ///
+        /// <para><c>--volumes</c> on the removal is the <b>anonymous</b> ones, which is what
+        /// <c>compose down</c> also removes unasked; named volumes are the second question and only
+        /// <paramref name="removeVolumes"/> answers it. The containers are the load-bearing half:
+        /// a network that will not go is reported by the next listing still showing nothing, but a
+        /// container that will not go means the stack is still there.</para>
+        /// </summary>
+        public Task RemoveProjectAsync(DockerStackInfo stack, bool removeVolumes) => Task.Run(() =>
+        {
+            Diagnostics.SpiceLog.Log($"[docker] remove project {stack.Name} by label volumes={removeVolumes}");
+            var script =
+                ShellScript.ArrayFrom("n", new[] { stack.Name }) +
+                "f=\"label=com.docker.compose.project=${n[0]}\"\n" +
+                "ids=$(docker ps --all --quiet --no-trunc --filter \"$f\" 2>/dev/null)\n" +
+                "if [ -n \"$ids\" ]; then\n" +
+                "  echo \"$ids\" | xargs docker rm --force --volumes > /dev/null || exit $?\n" +
+                "fi\n" +
+                "nets=$(docker network ls --quiet --filter \"$f\" 2>/dev/null)\n" +
+                "if [ -n \"$nets\" ]; then\n" +
+                "  echo \"$nets\" | xargs docker network rm > /dev/null 2>&1 || true\n" +
+                "fi\n" +
+                (removeVolumes
+                    ? "vols=$(docker volume ls --quiet --filter \"$f\" 2>/dev/null)\n" +
+                      "if [ -n \"$vols\" ]; then\n" +
+                      "  echo \"$vols\" | xargs docker volume rm > /dev/null 2>&1 || true\n" +
+                      "fi\n"
+                    : "") +
+                "exit 0\n";
             _ssh.RunSudoCommand(ShellScript.Wrap(script));
         });
     }
