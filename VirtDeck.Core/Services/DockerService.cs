@@ -42,6 +42,12 @@ namespace VirtDeck.Services
         /// </summary>
         public event Action? NetworkEventReceived;
 
+        /// <summary>
+        /// The fourth of the family, for volumes: one was created or destroyed. Same tail, same
+        /// thread, same "no payload" contract.
+        /// </summary>
+        public event Action? VolumeEventReceived;
+
         private CancellationTokenSource? _eventCts;
         private Task? _eventTask;
 
@@ -179,8 +185,14 @@ namespace VirtDeck.Services
         // cycle on docker 29.1.3, a network speaks exactly `create`, `connect`, `disconnect`,
         // `destroy` and `prune`: there is no `remove` action, `docker network rm` emits `destroy`,
         // and `docker network prune` emits a `destroy` per network as well as its own `prune`.
+        //
+        // The volume half adds nothing to the action list at all. Measured the same way through a
+        // create / container create / rm / prune cycle, a volume speaks `create`, `destroy` and
+        // `prune`, and a prune emits a `destroy` per volume too. `mount` and `unmount`, which a
+        // volume speaks on every container start and stop, are not on the list and stay out of it.
         private const string EventsCommand =
             "docker events --filter type=container --filter type=image --filter type=network " +
+            "--filter type=volume " +
             "--filter event=create --filter event=destroy --filter event=start --filter event=die " +
             "--filter event=stop --filter event=kill --filter event=pause --filter event=unpause " +
             "--filter event=restart --filter event=rename --filter event=update " +
@@ -228,6 +240,7 @@ namespace VirtDeck.Services
                                 case "container": ContainerEventReceived?.Invoke(); break;
                                 case "image": ImageEventReceived?.Invoke(); break;
                                 case "network": NetworkEventReceived?.Invoke(); break;
+                                case "volume": VolumeEventReceived?.Invoke(); break;
                             }
                         }, ct);
                     }
@@ -2088,9 +2101,21 @@ namespace VirtDeck.Services
             var name = file.Name;
             Diagnostics.SpiceLog.Log($"[docker] load {name} ({total} bytes)");
 
-            await _ssh.RunPipeInAsync("docker load", elevated: true, (stdin, token) =>
+            await _ssh.RunPipeInAsync("docker load", elevated: true, UploadFile(localPath, progress), ct);
+        }
+
+        /// <summary>
+        /// The body <see cref="SshConnectionManager.RunPipeInAsync"/> is handed to send one local file
+        /// up its stdin. Shared by <see cref="LoadImageAsync"/> and <see cref="ImportVolumeAsync"/>,
+        /// which are the same upload into a different command.
+        /// </summary>
+        private static Func<Stream, CancellationToken, Task> UploadFile(string localPath,
+                                                                         IProgress<TransferProgress>? progress) =>
+            (stdin, token) =>
             {
                 using var source = File.OpenRead(localPath);
+                var total = source.Length;
+                var name = Path.GetFileName(localPath);
                 var buffer = new byte[64 * 1024];
                 long sent = 0;
                 var since = System.Diagnostics.Stopwatch.StartNew();
@@ -2112,8 +2137,7 @@ namespace VirtDeck.Services
                 }
                 progress?.Report(new TransferProgress(sent, total, name));
                 return Task.CompletedTask;
-            }, ct);
-        }
+            };
 
         /// <summary>
         /// Loads an archive that is already on the host. Streamed rather than run through
@@ -2448,6 +2472,405 @@ namespace VirtDeck.Services
         /// </summary>
         public static bool IsPredefinedNetwork(string name) =>
             name is "bridge" or "host" or "none";
+
+        // ---- Volumes ----------------------------------------------------------
+
+        // A volume is addressed by its name, which is docker's whole identity for one: it has no id.
+        // Every command still rides ShellScript.Argv or ArrayFrom behind a literal `--` (create,
+        // inspect and rm all accept it, measured on docker 29.1.3), so create, the one carrying a name
+        // the user typed, needs no special case.
+        //
+        // The commands that read or write a volume's files (measure, export, import, clone) work on
+        // its mountpoint on the host, as root, rather than through a helper container: no image has
+        // to be on the host or pulled, and nothing depends on reaching a registry. The price is that
+        // this only means anything for a plain `local` volume. A local volume with driver options is a
+        // mount (NFS, CIFS, tmpfs) docker performs only while a container uses it, so its directory is
+        // empty the rest of the time and an archive of it would be an empty success. The row gates
+        // those commands; ResolveMountpoint is the floor under that on the host.
+
+        private List<DockerVolumeInfo> _volumes = new();
+
+        public IReadOnlyList<DockerVolumeInfo> Volumes => _volumes;
+
+        /// <summary>Raised after <see cref="RefreshVolumesAsync"/>, the twin of <see cref="NetworksChanged"/>.</summary>
+        public event Action? VolumesChanged;
+
+        // One round trip, four tags, in NetworksScript's shape:
+        //
+        //   v  a volume, from the one command whose failure means the listing failed
+        //   p  when it was created, how many driver options it carries, and its mountpoint
+        //   k  `docker ps` could be asked at all
+        //   u  one container, whether it is running, and every volume it mounts
+        //
+        // `docker volume ls` reports neither a creation time nor a mountpoint, so `p` is one batched
+        // inspect, never one per row. {{len .Options}} answers 0 for a volume whose Options is null
+        // (measured), which is every plain local volume. The mountpoint goes last because it is a path.
+        //
+        // `u` is who uses a volume, which is what `docker volume rm` refuses on and what
+        // `docker volume prune` spares, and both count a *stopped* container (measured: rm refuses a
+        // volume only a created, never started container mounts, with or without -f). So unlike the
+        // networks table there is one count here and not two. {{.Name}} on a container carries docker's
+        // leading slash, which the reader takes off.
+        //
+        // `[ -n ... ]` guards both batches for NetworksScript's reason: xargs does not imply -r.
+        // Splitting needs no cap: a volume name is [a-zA-Z0-9][a-zA-Z0-9_.-]+, a driver and a scope are
+        // one word, a compose project is [a-z0-9][a-z0-9_-]*, and the mountpoint is a path docker built
+        // under its own data root.
+        private const string VolumesScript =
+            "docker volume ls " +
+            "--format 'v\t{{.Name}}\t{{.Driver}}\t{{.Scope}}\t{{.Label \"com.docker.compose.project\"}}' || exit $?\n" +
+            "names=$(docker volume ls --quiet 2>/dev/null)\n" +
+            "if [ -n \"$names\" ]; then\n" +
+            "  printf '%s\\n' \"$names\" | xargs docker volume inspect --format " +
+            "'p\t{{.Name}}\t{{.CreatedAt}}\t{{len .Options}}\t{{.Mountpoint}}' 2>/dev/null\n" +
+            "fi\n" +
+            "ids=$(docker ps --all --quiet --no-trunc 2>/dev/null) && echo k\n" +
+            "if [ -n \"$ids\" ]; then\n" +
+            "  printf '%s\\n' \"$ids\" | xargs docker inspect --format " +
+            "'u\t{{.Id}}\t{{.Name}}\t{{.State.Running}}" +
+            "{{range .Mounts}}{{if eq .Type \"volume\"}}\t{{.Name}}{{end}}{{end}}' 2>/dev/null\n" +
+            "fi\n" +
+            "exit 0";
+
+        private List<DockerVolumeInfo> FetchVolumes()
+        {
+            var output = _ssh.RunSudoCommand(ShellScript.Wrap(VolumesScript));
+
+            var list = new List<DockerVolumeInfo>();
+            var details = new Dictionary<string, (string CreatedAt, bool HasOptions, string Mountpoint)>(StringComparer.Ordinal);
+            var users = new List<(DockerVolumeUser User, string[] Volumes)>();
+            var usersKnown = false;
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = line.TrimEnd('\r').Split('\t');
+
+                if (f[0] == "k") { usersKnown = true; continue; }
+
+                if (f[0] == "p")
+                {
+                    if (f.Length >= 5 && f[1].Trim().Length > 0)
+                        details[f[1].Trim()] = (f[2].Trim(),
+                                                int.TryParse(f[3].Trim(), out var options) && options > 0,
+                                                f[4].Trim());
+                    continue;
+                }
+
+                if (f[0] == "u")
+                {
+                    if (f.Length < 4 || f[1].Trim().Length == 0) continue;
+                    var mounted = f.Skip(4).Select(v => v.Trim()).Where(v => v.Length > 0).ToArray();
+                    if (mounted.Length == 0) continue;
+                    users.Add((new DockerVolumeUser(f[1].Trim(), f[2].Trim().TrimStart('/'),
+                                   string.Equals(f[3].Trim(), "true", StringComparison.OrdinalIgnoreCase)),
+                               mounted));
+                    continue;
+                }
+
+                // The stack field is empty on every volume compose did not make, and Split keeps it.
+                if (f.Length < 4 || f[0] != "v" || string.IsNullOrWhiteSpace(f[1])) continue;
+
+                list.Add(new DockerVolumeInfo
+                {
+                    Name = f[1].Trim(),
+                    Driver = f[2].Trim(),
+                    Scope = f[3].Trim(),
+                    Stack = f.Length > 4 ? f[4].Trim() : string.Empty,
+                });
+            }
+
+            // Only once the whole listing is read: the p, k and u records arrive after the volumes. A
+            // volume created between the two `volume ls` runs has no p record and so no mountpoint for
+            // a cycle, which keeps the host-path commands off it until the next pass settles it.
+            foreach (var volume in list)
+            {
+                if (details.TryGetValue(volume.Name, out var detail))
+                {
+                    volume.CreatedAt = detail.CreatedAt;
+                    volume.HasOptions = detail.HasOptions;
+                    volume.Mountpoint = detail.Mountpoint;
+                }
+
+                volume.UsersKnown = usersKnown;
+                volume.Users = users
+                    .Where(u => u.Volumes.Contains(volume.Name, StringComparer.Ordinal))
+                    .Select(u => u.User)
+                    .ToList();
+            }
+
+            return list;
+        }
+
+        public async Task RefreshVolumesAsync()
+        {
+            _volumes = await Task.Run(FetchVolumes);
+            VolumesChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// An anonymous volume: docker names those after 64 hex characters. What a plain
+        /// <c>docker volume prune</c> takes, and what the table dims and puts last.
+        /// </summary>
+        public static bool IsAnonymousVolume(string name) => AnonymousVolumeRegex.IsMatch(name);
+
+        /// <summary>
+        /// What <see cref="CreateVolumeAsync"/> is asked for. An empty driver means "do not pass the
+        /// flag", which is docker's <c>local</c>.
+        /// </summary>
+        public sealed record VolumeCreateRequest(
+            string Name,
+            string Driver,
+            IReadOnlyList<KeyValuePair<string, string>> Options,
+            IReadOnlyList<KeyValuePair<string, string>> Labels);
+
+        /// <summary>Creates a volume. Nothing in the request is interpolated.</summary>
+        public Task CreateVolumeAsync(VolumeCreateRequest request) => Task.Run(() =>
+        {
+            var argv = new List<string> { "docker", "volume", "create" };
+            if (request.Driver.Trim().Length > 0) { argv.Add("--driver"); argv.Add(request.Driver.Trim()); }
+            foreach (var (key, value) in request.Options) { argv.Add("--opt"); argv.Add($"{key}={value}"); }
+            foreach (var (key, value) in request.Labels) { argv.Add("--label"); argv.Add($"{key}={value}"); }
+            argv.Add("--");
+            argv.Add(request.Name.Trim());
+
+            Diagnostics.SpiceLog.Log($"[docker] volume create {request.Name.Trim()}");
+            RunArgv(argv);
+        });
+
+        /// <summary>
+        /// Removes one volume.
+        ///
+        /// <para>There is no force path, for <see cref="RemoveNetworkAsync"/>'s reason: a volume a
+        /// container mounts is refused "volume is in use" with <c>-f</c> exactly as without it
+        /// (measured), so the flag would only buy silence about a volume that is already gone.</para>
+        /// </summary>
+        public Task RemoveVolumeAsync(string name) =>
+            Task.Run(() => RunArgv("docker", "volume", "rm", "--", name));
+
+        /// <summary>
+        /// Whether <c>docker volume prune</c> spares named volumes unless told <c>--all</c>, which it
+        /// has since docker 23. Before that plain prune removed every unused volume, named ones
+        /// included, and <c>--all</c> did not exist, so the milder of the two answers could not be
+        /// offered there at all.
+        /// </summary>
+        public bool PruneDistinguishesAnonymous =>
+            int.TryParse(DockerVersion.Split('.')[0], out var major) && major >= 23;
+
+        /// <summary>
+        /// Removes unused volumes and answers docker's own report ("Deleted Volumes:", one name per
+        /// line, then the reclaimed space). <paramref name="all"/> takes named volumes too, and must
+        /// only be passed where <see cref="PruneDistinguishesAnonymous"/> says the flag exists.
+        /// </summary>
+        public Task<string> PruneVolumesAsync(bool all) => Task.Run(() =>
+            all ? RunArgv("docker", "volume", "prune", "--force", "--all")
+                : RunArgv("docker", "volume", "prune", "--force"));
+
+        private IReadOnlyList<string>? _volumeDrivers;
+
+        /// <summary>
+        /// What the create dialog's driver box suggests, in <see cref="NetworkDriversAsync"/>'s shape:
+        /// probed once per session, answered from <c>local</c> when the probe fails, and only ever a
+        /// suggestion, because the box still accepts a plugin nobody listed.
+        /// </summary>
+        public Task<IReadOnlyList<string>> VolumeDriversAsync() => Task.Run<IReadOnlyList<string>>(() =>
+        {
+            if (_volumeDrivers is { } cached) return cached;
+
+            var found = new List<string>();
+            try
+            {
+                // Prints a Go slice: "[local]".
+                var raw = _ssh.RunSudoCommand(
+                    ShellScript.Argv(new[] { "docker", "info", "--format", "{{.Plugins.Volume}}" }));
+                found = raw.Trim().Trim('[', ']')
+                           .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                           .Select(d => d.Trim())
+                           .Where(d => d.Length > 0)
+                           .Distinct(StringComparer.Ordinal)
+                           .ToList();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.SpiceLog.Log($"[docker] volume drivers unreadable: {ex.Message}");
+            }
+
+            if (found.Count == 0) found = new List<string> { "local" };
+            _volumeDrivers = found;
+            return found;
+        });
+
+        /// <summary>
+        /// A script fragment that rebuilds <paramref name="name"/> as the array <paramref name="variable"/>
+        /// and resolves its mountpoint into <c>$<paramref name="variable"/>_mp</c>, failing with
+        /// docker's own words for a volume that is not there.
+        ///
+        /// <para>Resolved on the host at run time rather than taken from the listing, which may be a
+        /// cycle old; and the directory is tested, because a mountpoint that is not a directory on this
+        /// host is not something tar or cp may be pointed at as though it were the volume.</para>
+        /// </summary>
+        private static string ResolveMountpoint(string variable, string name) =>
+            ShellScript.ArrayFrom(variable, new[] { name }) +
+            variable + "_mp=$(docker volume inspect --format '{{.Mountpoint}}' -- \"${" + variable + "[0]}\") || exit $?\n" +
+            "[ -d \"$" + variable + "_mp\" ] || " +
+            "{ echo \"The directory of ${" + variable + "[0]} is not on this host's filesystem.\" >&2; exit 1; }\n";
+
+        /// <summary>
+        /// Measures each volume with <c>du -sb</c> on its mountpoint, calling <paramref name="onSize"/>
+        /// as each one finishes, so a table of volumes fills in one row at a time.
+        ///
+        /// <para>Streamed on a connection of its own and never through <c>RunSudoCommand</c>: a
+        /// measurement walks every file in the volume, and on a media or database volume that can take
+        /// minutes, which through the shared lock would be minutes of every other module standing
+        /// still. A volume that cannot be measured is skipped rather than failing the rest, and its
+        /// cell stays blank.</para>
+        /// </summary>
+        public Task MeasureVolumesAsync(IReadOnlyList<string> names, Action<string, long> onSize, CancellationToken ct)
+        {
+            var script =
+                "export LC_ALL=C\n" +
+                ShellScript.ArrayFrom("n", names) +
+                "for v in \"${n[@]}\"; do\n" +
+                "  mp=$(docker volume inspect --format '{{.Mountpoint}}' -- \"$v\" 2>/dev/null) || continue\n" +
+                "  [ -d \"$mp\" ] || continue\n" +
+                "  b=$(du -sb -- \"$mp\" 2>/dev/null | cut -f1)\n" +
+                "  [ -n \"$b\" ] && printf 's\\t%s\\t%s\\n' \"$v\" \"$b\"\n" +
+                "done\n" +
+                "exit 0\n";
+
+            return Task.Run(() => _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(script), line =>
+            {
+                var f = line.TrimEnd('\r').Split('\t');
+                if (f.Length == 3 && f[0] == "s" && long.TryParse(f[2], out var bytes)) onSize(f[1], bytes);
+            }, ct), ct);
+        }
+
+        /// <summary>
+        /// Streams a tar of the volume's contents into <paramref name="destination"/>, a file on this
+        /// PC, on a connection of its own.
+        ///
+        /// <para><c>--numeric-owner</c> because a volume's files belong to whatever uid the container
+        /// runs as, which is usually nobody in the host's passwd, and a restore on another host must
+        /// put back the number rather than whatever that host calls the name. <c>set -o pipefail</c>
+        /// for <see cref="SaveCommand"/>'s reason: without it a tar that failed into gzip lands as a
+        /// valid, empty archive.</para>
+        ///
+        /// <para>Tar's exit status 1 is taken as success, and only that one. It means a file changed
+        /// while it was being read, which is exactly what copying a volume a running container is
+        /// writing to produces, and the user was asked about that before this ran; status 2 is a real
+        /// failure and still fails.</para>
+        /// </summary>
+        public Task ExportVolumeAsync(string name, bool gzip, Stream destination, Action<int>? onChunk,
+                                      CancellationToken ct)
+        {
+            var script =
+                "set -o pipefail\n" +
+                ResolveMountpoint("v", name) +
+                "{ tar -C \"$v_mp\" --numeric-owner -cf - .; r=$?; [ $r -eq 1 ] && r=0; exit $r; }" +
+                (gzip ? " | gzip -c" : "") + "\n";
+
+            Diagnostics.SpiceLog.Log($"[docker] volume export {name} gzip={gzip}");
+            return _ssh.RunPipeOutAsync(ShellScript.SudoWrap(script), elevated: true, destination, onChunk, ct);
+        }
+
+        /// <summary>
+        /// Creates <paramref name="name"/> and unpacks a local archive into it.
+        ///
+        /// <para>Compression is read off the file name, unlike <see cref="LoadImageAsync"/>: GNU tar
+        /// sniffs a compressed <i>file</i> but refuses one arriving on stdin ("Archive is compressed.
+        /// Use -z option", measured on tar 1.35), so the flag has to be decided here.</para>
+        ///
+        /// <para>Always into a new volume, so an import never has anything to overwrite or merge with.
+        /// If the unpack fails or is cancelled the volume is removed again: this call made it a moment
+        /// ago, so nothing else can be using it, and a half-restored volume under the name the user
+        /// chose would read as a finished one.</para>
+        /// </summary>
+        public async Task ImportVolumeAsync(string localPath, string name, IProgress<TransferProgress>? progress,
+                                            CancellationToken ct)
+        {
+            if (!File.Exists(localPath)) throw new FileNotFoundException($"{localPath} is not there.", localPath);
+
+            await CreateVolumeAsync(new VolumeCreateRequest(name, "", [], []));
+            try
+            {
+                var script =
+                    ResolveMountpoint("v", name) +
+                    "tar -C \"$v_mp\" --numeric-owner -xp" + (IsGzipArchive(localPath) ? "z" : "") + "f -\n";
+
+                Diagnostics.SpiceLog.Log($"[docker] volume import {Path.GetFileName(localPath)} into {name}");
+                await _ssh.RunPipeInAsync(script, elevated: true, UploadFile(localPath, progress), ct);
+            }
+            catch
+            {
+                await Task.Run(() => RemoveVolumeQuietly(name));
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Creates <paramref name="name"/> and unpacks an archive already on the host into it, streamed
+        /// on a connection of its own. Tar reads a file, so it sniffs the compression itself. Removes
+        /// the volume again on failure, for <see cref="ImportVolumeAsync"/>'s reason.
+        /// </summary>
+        public async Task ImportVolumeFromHostAsync(string hostPath, string name, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(hostPath))
+                throw new ArgumentException("No path was given.", nameof(hostPath));
+
+            await CreateVolumeAsync(new VolumeCreateRequest(name, "", [], []));
+            try
+            {
+                var script =
+                    ResolveMountpoint("v", name) +
+                    ShellScript.ArrayFrom("s", new[] { hostPath }) +
+                    "tar -C \"$v_mp\" --numeric-owner -xpf \"${s[0]}\"\n";
+
+                Diagnostics.SpiceLog.Log($"[docker] volume import {hostPath} into {name}");
+                await Task.Run(() => _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(script), _ => { }, ct), ct);
+            }
+            catch
+            {
+                await Task.Run(() => RemoveVolumeQuietly(name));
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Creates <paramref name="target"/> and copies <paramref name="source"/>'s files into it with
+        /// <c>cp -a</c>, which keeps owners, modes, links and timestamps, streamed on a connection of
+        /// its own. Labels are not copied: a compose label on the copy would have compose claim it as
+        /// the stack's own volume. Removes the new volume on failure, for
+        /// <see cref="ImportVolumeAsync"/>'s reason.
+        /// </summary>
+        public async Task CloneVolumeAsync(string source, string target, CancellationToken ct)
+        {
+            await CreateVolumeAsync(new VolumeCreateRequest(target, "", [], []));
+            try
+            {
+                var script =
+                    ResolveMountpoint("s", source) +
+                    ResolveMountpoint("t", target) +
+                    "cp -a -- \"$s_mp/.\" \"$t_mp/\"\n";
+
+                Diagnostics.SpiceLog.Log($"[docker] volume clone {source} to {target}");
+                await Task.Run(() => _ssh.RunSudoCommandStreaming(ShellScript.SudoWrap(script), _ => { }, ct), ct);
+            }
+            catch
+            {
+                await Task.Run(() => RemoveVolumeQuietly(target));
+                throw;
+            }
+        }
+
+        /// <summary>The clean-up half of a failed import or clone. Logged, never thrown over the failure it follows.</summary>
+        private void RemoveVolumeQuietly(string name)
+        {
+            try { RunArgv("docker", "volume", "rm", "--", name); }
+            catch (Exception ex) { Diagnostics.SpiceLog.Log($"[docker] could not remove {name} after a failure: {ex.Message}"); }
+        }
+
+        private static bool IsGzipArchive(string path) =>
+            path.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
 
         // ---- Logs -----------------------------------------------------------
 

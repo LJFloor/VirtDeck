@@ -12,7 +12,7 @@ using VirtDeck.Updates;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// The Containers module: four tabs over one docker host.
+/// The Containers module: five tabs over one docker host.
 ///
 /// <para><b>Containers</b> is what `docker ps --all` reports, plus creating, editing, starting,
 /// stopping, restarting and removing what it lists, and reading one's log.</para>
@@ -21,10 +21,15 @@ namespace VirtDeck.Avalonia.Views;
 /// needs it, moving one to and from this PC as a `docker save` archive, tagging, removing and
 /// pruning.</para>
 ///
+/// <para><b>Volumes</b> is what `docker volume ls` reports, plus creating one, removing one, pruning
+/// the unused, measuring one, moving one to and from this PC as a tar of its files, cloning one, and
+/// opening its directory in the File explorer. Everything that touches the files works on the
+/// volume's mountpoint on the host, so it is offered for plain local volumes only.</para>
+///
 /// <para><b>Networks</b> is what `docker network ls` reports, plus creating one, removing one,
 /// pruning the unused, and attaching or detaching a container. That last pair is the only route
 /// there is: <c>docker create</c> fixes a container's networks and <c>docker update</c> does not
-/// reach them. Volumes as objects of their own are still not here.</para>
+/// reach them.</para>
 ///
 /// <para><b>Stacks</b> is docker compose projects, discovered by the labels compose stamps on the
 /// containers it creates, plus writing a compose file of VirtDeck's own and bringing a project up,
@@ -32,20 +37,24 @@ namespace VirtDeck.Avalonia.Views;
 /// missing: deploy, down and pull all read the compose file through the compose plugin, so without
 /// it there is nothing on the page worth opening.</para>
 ///
-/// <para>The four tabs are four subjects on one host, not four views of one fact, which is why
+/// <para>The five tabs are five subjects on one host, not five views of one fact, which is why
 /// each carries its own toolbar and its own empty state and why only the visible one is polled.
 /// What they share is the module's status slots, the transfer strip at the bottom, and
 /// <c>_busy</c>.</para>
 /// </summary>
-public partial class ContainersModule : UserControl, IModule
+public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 {
     private DockerService? _docker;
 
-    /// <summary>Only for the host-path pickers in the image dialogs; nothing here lists a directory.</summary>
+    /// <summary>Held only to reach <see cref="BrowseRequests"/>, which is keyed on the connection.</summary>
+    private SshConnectionManager? _ssh;
+
+    /// <summary>Only for the host-path pickers in the import dialogs; nothing here lists a directory.</summary>
     private RemoteFileService? _files;
 
     private TableSort? _containerSortOrNull;
     private TableSort? _imageSortOrNull;
+    private TableSort? _volumeSortOrNull;
     private TableSort? _dockerNetSortOrNull;
     private TableSort? _stackSortOrNull;
 
@@ -57,6 +66,7 @@ public partial class ContainersModule : UserControl, IModule
     /// </summary>
     private string _containersFailure = "";
     private string _imagesFailure = "";
+    private string _volumesFailure = "";
     private string _networksFailure = "";
     private string _stacksFailure = "";
 
@@ -73,6 +83,17 @@ public partial class ContainersModule : UserControl, IModule
 
     private readonly ObservableCollection<ImageRow> _imageRows = new();
     private readonly Dictionary<string, ImageRow> _imagesByKey = new(StringComparer.Ordinal);
+
+    // Keyed by name, because docker has no id for a volume: the name is its whole identity.
+    private readonly ObservableCollection<DockerVolumeRow> _volRows = new();
+    private readonly Dictionary<string, DockerVolumeRow> _volByName = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The sizes Measure has read, keyed by volume name, and empty whenever the Volumes tab is not on
+    /// screen. Held here rather than only pushed at the rows for <see cref="_stats"/>'s reason: a
+    /// keystroke in the search box creates and destroys rows, and would blank the column.
+    /// </summary>
+    private readonly Dictionary<string, long> _volumeSizes = new(StringComparer.Ordinal);
 
     private readonly ObservableCollection<DockerNetworkRow> _netRows = new();
     private readonly Dictionary<string, DockerNetworkRow> _netById = new(StringComparer.Ordinal);
@@ -107,11 +128,13 @@ public partial class ContainersModule : UserControl, IModule
     private readonly DispatcherTimer _tickTimer;
     private readonly DispatcherTimer _eventDebounce;
     private readonly DispatcherTimer _imageDebounce;
+    private readonly DispatcherTimer _volDebounce;
     private readonly DispatcherTimer _netDebounce;
     private readonly DispatcherTimer _stackDebounce;
 
     private bool _refreshing;
     private bool _refreshingImages;
+    private bool _refreshingVols;
     private bool _refreshingNets;
     private bool _refreshingStacks;
     private bool _active;          // false while another module is on screen: no polling, no events
@@ -165,6 +188,18 @@ public partial class ContainersModule : UserControl, IModule
         MenuRemoveImage.Click += async (_, _) => await RemoveImagesAsync();
         MenuNewFromImage.Click += async (_, _) => await NewFromImageAsync();
 
+        VolumeList.ItemsSource = _volRows;
+        VolumeList.SelectionChanged += (_, _) => UpdateMenu();
+
+        CreateVolumeButton.Click += async (_, _) => await CreateVolumeAsync();
+        ImportVolumeButton.Click += async (_, _) => await ImportVolumeAsync(null);
+        PruneVolumesButton.Click += async (_, _) => await PruneVolumesAsync();
+        MenuBrowseVolume.Click += (_, _) => BrowseVolume();
+        MenuMeasureVolume.Click += async (_, _) => await MeasureVolumesAsync();
+        MenuExportVolume.Click += async (_, _) => await ExportVolumeAsync();
+        MenuCloneVolume.Click += async (_, _) => await CloneVolumeAsync();
+        MenuRemoveVolume.Click += async (_, _) => await RemoveVolumesAsync();
+
         NetworkList.ItemsSource = _netRows;
         NetworkList.SelectionChanged += (_, _) => UpdateMenu();
 
@@ -193,24 +228,28 @@ public partial class ContainersModule : UserControl, IModule
         _hub.LoginClicked += async () => await HubLoginAsync();
         _hub.LogoutClicked += async () => await HubLogoutAsync();
 
-        // All four tables sort and two of them filter, and none of it costs a round trip: a click or
+        // All five tables sort and three of them filter, and none of it costs a round trip: a click or
         // a keystroke re-renders the listing already in hand. A third click on a column returns to
         // that table's own order, which is where each page's grouping lives (running containers
-        // first, dangling images last, docker's predefined networks last, ours before discovered
-        // stacks).
+        // first, dangling images last, anonymous volumes last, docker's predefined networks last,
+        // ours before discovered stacks).
         _containerSortOrNull = new TableSort(ContainerHeaderStrip);
         _imageSortOrNull = new TableSort(ImageHeaderStrip);
+        _volumeSortOrNull = new TableSort(VolumeHeaderStrip);
         _dockerNetSortOrNull = new TableSort(DockerNetHeaderStrip);
         _stackSortOrNull = new TableSort(StackHeaderStrip);
         _containerSortOrNull.Changed += PopulateContainers;
         _imageSortOrNull.Changed += PopulateImages;
+        _volumeSortOrNull.Changed += PopulateVolumes;
         _dockerNetSortOrNull.Changed += PopulateNetworks;
         _stackSortOrNull.Changed += PopulateStacks;
         ContainerSearch.Changed += PopulateContainers;
         ImageSearch.Changed += PopulateImages;
+        VolumeSearch.Changed += PopulateVolumes;
         FilterBox.AttachFindShortcut(this, () => Current switch
         {
             Tab.Images => ImageSearch,
+            Tab.Volumes => VolumeSearch,
             Tab.Containers => ContainerSearch,
             _ => null,
         });
@@ -230,6 +269,10 @@ public partial class ContainersModule : UserControl, IModule
             SyncCaps();
             UpdateMenu();
             SyncStatsSampler();
+            // A measurement lasts until the Volumes tab is left, for the reason a CPU sample does not
+            // outlive the Containers tab: it is a reading of a moment, and a volume a database is
+            // writing to is a different size a minute later.
+            if (Current != Tab.Volumes) ClearVolumeSizes();
             await RefreshActiveAsync();
         };
 
@@ -273,6 +316,11 @@ public partial class ContainersModule : UserControl, IModule
         _netDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _netDebounce.Tick += async (_, _) => { _netDebounce.Stop(); await RefreshNetworksAsync(); };
 
+        // The volume half, debounced separately for the same reason: a prune fires a destroy per
+        // volume and must not re-list anything else.
+        _volDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _volDebounce.Tick += async (_, _) => { _volDebounce.Stop(); await RefreshVolumesAsync(); };
+
         // The stacks half. It is fed by the *container* events rather than by a type of its own:
         // compose speaks no event vocabulary, a deploy surfaces as ordinary container and network
         // events, so the tail script and its filters are unchanged.
@@ -293,14 +341,17 @@ public partial class ContainersModule : UserControl, IModule
     private List<ImageRow> SelectedImages =>
         ImageList.SelectedItems?.Cast<ImageRow>().ToList() ?? new List<ImageRow>();
 
+    private List<DockerVolumeRow> SelectedVolumes =>
+        VolumeList.SelectedItems?.Cast<DockerVolumeRow>().ToList() ?? new List<DockerVolumeRow>();
+
     private List<DockerNetworkRow> SelectedNetworks =>
         NetworkList.SelectedItems?.Cast<DockerNetworkRow>().ToList() ?? new List<DockerNetworkRow>();
 
     private List<DockerStackRow> SelectedStacks =>
         StackList.SelectedItems?.Cast<DockerStackRow>().ToList() ?? new List<DockerStackRow>();
 
-    /// <summary>The four subjects this module draws, in tab order.</summary>
-    private enum Tab { Containers, Images, Networks, Stacks }
+    /// <summary>The five subjects this module draws, in tab order.</summary>
+    private enum Tab { Containers, Images, Volumes, Networks, Stacks }
 
     /// <summary>
     /// The page on screen.
@@ -331,6 +382,13 @@ public partial class ContainersModule : UserControl, IModule
     /// </summary>
     public Control? StatusWidget => _hub;
 
+    /// <summary>
+    /// Where Browse files on a volume goes. The directory itself is left on
+    /// <see cref="BrowseRequests"/> for the explorer to take in its own activation, so this names
+    /// only the page, and the shell still names neither.
+    /// </summary>
+    public event Action<Type>? ModuleRequested;
+
     public event Action? StatusChanged;
 
     private void SetStatus(string text)
@@ -347,9 +405,11 @@ public partial class ContainersModule : UserControl, IModule
 
     public void Attach(SshConnectionManager ssh)
     {
+        _ssh = ssh;
         _docker = new DockerService(ssh);
         _docker.ContainerEventReceived += OnContainerEvent;
         _docker.ImageEventReceived += OnImageEvent;
+        _docker.VolumeEventReceived += OnVolumeEvent;
         _docker.NetworkEventReceived += OnNetworkEvent;
         _docker.StatsReceived += OnStats;
 
@@ -402,10 +462,13 @@ public partial class ContainersModule : UserControl, IModule
         _tickTimer.Stop();
         _eventDebounce.Stop();
         _imageDebounce.Stop();
+        _volDebounce.Stop();
         _netDebounce.Stop();
         _stackDebounce.Stop();
         ContainerSearch.Cancel();
         ImageSearch.Cancel();
+        VolumeSearch.Cancel();
+        ClearVolumeSizes();
     }
 
     private void StartTimers()
@@ -432,6 +495,7 @@ public partial class ContainersModule : UserControl, IModule
         if (_docker is not { } docker) return;
         docker.ContainerEventReceived -= OnContainerEvent;
         docker.ImageEventReceived -= OnImageEvent;
+        docker.VolumeEventReceived -= OnVolumeEvent;
         docker.NetworkEventReceived -= OnNetworkEvent;
         docker.StatsReceived -= OnStats;
         try { docker.StopEventListener(); } catch { /* ignore */ }
@@ -443,9 +507,9 @@ public partial class ContainersModule : UserControl, IModule
         // started here would only buy a round trip nobody sees.
         if (!_active) return;
 
-        // A container event moves the other two tables too, and in both cases only because they
-        // grew a Status column: creating or removing a container is the one thing that flips an
-        // image between "In use" and "Unused", and starting or stopping one is the one thing that
+        // A container event moves the images, volumes and networks tables too, and only because
+        // they grew a Status column: creating or removing a container is the one thing that flips an
+        // image or a volume between in use and "Unused", and starting or stopping one is the one thing that
         // flips a network between "Unused" and a count, because a stopped container holds no
         // endpoint. So the event refreshes whichever table is on screen rather than only its own,
         // which keeps the rule that the invisible ones are never polled.
@@ -460,6 +524,12 @@ public partial class ContainersModule : UserControl, IModule
     {
         if (!_active || Current != Tab.Images) return;
         Debounce(Tab.Images);
+    });
+
+    private void OnVolumeEvent() => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_active || Current != Tab.Volumes) return;
+        Debounce(Tab.Volumes);
     });
 
     private void OnNetworkEvent() => Dispatcher.UIThread.Post(() =>
@@ -528,6 +598,7 @@ public partial class ContainersModule : UserControl, IModule
         var timer = tab switch
         {
             Tab.Images => _imageDebounce,
+            Tab.Volumes => _volDebounce,
             Tab.Networks => _netDebounce,
             Tab.Stacks => _stackDebounce,
             _ => _eventDebounce,
@@ -553,6 +624,7 @@ public partial class ContainersModule : UserControl, IModule
                               "Install it there and reconnect to manage containers from here.";
                 ShowEmpty(EmptyText, message);
                 ShowEmpty(ImagesEmptyText, message);
+                ShowEmpty(VolumesEmptyText, message);
                 ShowEmpty(NetworksEmptyText, message);
                 ShowEmpty(StacksEmptyText, message);
                 SyncStacksTab();
@@ -576,6 +648,7 @@ public partial class ContainersModule : UserControl, IModule
     private Task RefreshActiveAsync() => Current switch
     {
         Tab.Images => RefreshImagesAsync(),
+        Tab.Volumes => RefreshVolumesAsync(),
         Tab.Networks => RefreshNetworksAsync(),
         Tab.Stacks => RefreshStacksAsync(),
         _ => RefreshAsync(),
@@ -624,6 +697,30 @@ public partial class ContainersModule : UserControl, IModule
         finally
         {
             _refreshingImages = false;
+            UpdateMenu();
+        }
+    }
+
+    private async Task RefreshVolumesAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _refreshingVols) return;
+        _refreshingVols = true;
+        try
+        {
+            await Docker.RefreshVolumesAsync();
+            _volumesFailure = "";
+            PopulateVolumes();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Refresh failed: {ex.Message}");
+            _volumesFailure = ex.Message;
+            if (_volRows.Count == 0)
+                ShowEmpty(VolumesEmptyText, $"Could not list volumes:\n\n{ex.Message}");
+        }
+        finally
+        {
+            _refreshingVols = false;
             UpdateMenu();
         }
     }
@@ -743,6 +840,7 @@ public partial class ContainersModule : UserControl, IModule
         var (text, filtered) = Current switch
         {
             Tab.Images => ($"{_imageRows.Count} image{(_imageRows.Count == 1 ? "" : "s")}", ImageSearch.HasNeedle),
+            Tab.Volumes => ($"{_volRows.Count} volume{(_volRows.Count == 1 ? "" : "s")}", VolumeSearch.HasNeedle),
             Tab.Networks => ($"{_netRows.Count} network{(_netRows.Count == 1 ? "" : "s")}", false),
             Tab.Stacks => ($"{_stackRows.Count} stack{(_stackRows.Count == 1 ? "" : "s")}", false),
             _ => ($"{_rows.Count} container{(_rows.Count == 1 ? "" : "s")}", ContainerSearch.HasNeedle),
@@ -759,6 +857,7 @@ public partial class ContainersModule : UserControl, IModule
 
     private TableSort ContainerSort => _containerSortOrNull!;
     private TableSort ImageSort => _imageSortOrNull!;
+    private TableSort VolumeSort => _volumeSortOrNull!;
     private TableSort DockerNetSort => _dockerNetSortOrNull!;
     private TableSort StackSort => _stackSortOrNull!;
 
@@ -906,6 +1005,66 @@ public partial class ContainersModule : UserControl, IModule
     };
 
     /// <summary>
+    /// The same for volumes, keyed by the name, which is all the identity docker gives a volume. A
+    /// size reading is applied inside the merge, for <see cref="PopulateContainers"/>'s reason: a row
+    /// the merge has just created must carry it before the table is sorted by size.
+    /// </summary>
+    private void PopulateVolumes()
+    {
+        if (_docker is null) return;
+
+        var needle = VolumeSearch.Needle;
+        var items = needle.Length == 0
+            ? Docker.Volumes.AsEnumerable()
+            : Docker.Volumes.Where(v =>
+                v.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                v.Stack.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+        TableRows.Merge(_volRows, _volByName, items,
+            v => v.Name,
+            v => { var row = new DockerVolumeRow(v); row.ApplySize(SizeOf(v.Name)); return row; },
+            (row, v) => { row.Update(v); row.ApplySize(SizeOf(v.Name)); },
+            OrderVolumes);
+
+        UpdateStatusCount();
+        DrawEmpty(VolumesEmptyText, _volRows.Count, _volumesFailure, needle,
+            "Could not list volumes", "No volume matches",
+            "No volumes on this host.\n\nCreate one, or import an archive of one.");
+    }
+
+    private long? SizeOf(string name) => _volumeSizes.TryGetValue(name, out var bytes) ? bytes : null;
+
+    /// <summary>
+    /// The volumes table's own order is named first and anonymous last, for the reason images put
+    /// dangling layers last: a volume docker named by itself is rarely what somebody came to look at.
+    /// </summary>
+    private IEnumerable<DockerVolumeRow> OrderVolumes(IEnumerable<DockerVolumeRow> rows) => VolumeSort.Key switch
+    {
+        "name" => VolumeSort.By(rows, r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "stack" => VolumeSort.By(rows, r => r.Stack, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "driver" => VolumeSort.By(rows, r => r.Driver, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "created" => VolumeSort.By(rows, r => r.CreatedTicks)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "size" => VolumeSort.By(rows, r => r.SizeBytes)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        "status" => VolumeSort.By(rows, r => r.Status, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+        _ => rows
+            .OrderBy(r => r.IsAnonymous)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+    };
+
+    /// <summary>Takes every size reading off the table. See the tab switch handler for why.</summary>
+    private void ClearVolumeSizes()
+    {
+        if (_volumeSizes.Count == 0) return;
+        _volumeSizes.Clear();
+        foreach (var row in _volRows) row.ApplySize(null);
+    }
+
+    /// <summary>
     /// The same for networks, keyed by the id alone: unlike an image, a network appears exactly once
     /// whatever it is called. No search box on this page, because a host has a handful of networks.
     /// </summary>
@@ -1028,6 +1187,36 @@ public partial class ContainersModule : UserControl, IModule
         MenuTagImage.IsEnabled = free && images.Count == 1;
         MenuRemoveImage.IsEnabled = free && images.Count > 0;
         MenuNewFromImage.IsEnabled = free && images.Count == 1;
+
+        var vols = SelectedVolumes;
+        var oneVol = vols.Count == 1 ? vols[0] : null;
+
+        CreateVolumeButton.IsEnabled = free;
+        ImportVolumeButton.IsEnabled = free;
+        PruneVolumesButton.IsEnabled = free;
+
+        // Browse, Export and Clone act on exactly one volume; Measure fans out over a selection and
+        // runs on the ones it can measure, the bulk rule. All four need the files in a directory on
+        // this host, which a plugin's volume and a local mount are not, and those carry
+        // ToolTip.ShowOnDisabled so the reason can be read on hover. Browse is not held back by
+        // _busy: it only changes page, and a transfer here goes on running behind the explorer.
+        MenuBrowseVolume.IsEnabled = usable && oneVol is { CanUseHostPath: true };
+        MenuExportVolume.IsEnabled = free && oneVol is { CanUseHostPath: true };
+        MenuCloneVolume.IsEnabled = free && oneVol is { CanUseHostPath: true };
+        MenuMeasureVolume.IsEnabled = free && vols.Any(v => v.CanUseHostPath);
+
+        var oneReason = oneVol?.HostPathReason;
+        ToolTip.SetTip(MenuBrowseVolume, oneReason);
+        ToolTip.SetTip(MenuExportVolume, oneReason);
+        ToolTip.SetTip(MenuCloneVolume, oneReason);
+        ToolTip.SetTip(MenuMeasureVolume, vols.Count > 0 && !vols.Any(v => v.CanUseHostPath)
+            ? oneReason ?? "None of the selected volumes keeps its files in a directory on this host."
+            : null);
+
+        // The bulk rule again: a volume a container mounts is refused by docker whatever is asked, so
+        // those are skipped and the confirmation says so, rather than greying the command whenever
+        // one of them is in the selection.
+        MenuRemoveVolume.IsEnabled = free && vols.Any(v => !v.IsInUse);
 
         var nets = SelectedNetworks;
 
@@ -1470,27 +1659,8 @@ public partial class ContainersModule : UserControl, IModule
 
         var references = rows.Select(r => r.Reference).ToList();
 
-        var path = await FileDialogs.SaveFileAsync(Owner, "Export image", ExportFilter,
-            suggestedName: rows[0].SuggestedFileName, defaultExtension: "tar.gz",
-            startDirectory: FileDialogs.LastTransferDir);
-        if (path is not { Length: > 0 }) return;
-
-        // The name is what says whether the archive is compressed, so the name has to be true: this
-        // reads the extension rather than deciding for itself. A name that claims neither gets the
-        // default appended rather than a gzipped archive landing under a bare name, and since the
-        // picker never asked about *that* path, a file already there is confirmed and not replaced.
-        var gzip = IsGzipName(path);
-        if (!gzip && !path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
-        {
-            path += ".tar.gz";
-            gzip = true;
-            if (File.Exists(path) &&
-                !await MessageDialog.Confirm(Owner, "Export",
-                    $"{path} already exists.\n\nReplace it?"))
-                return;
-        }
-
-        FileDialogs.RememberTransferDir(Path.GetDirectoryName(path) ?? "");
+        if (await PickExportTargetAsync("Export image", rows[0].SuggestedFileName) is not { } target) return;
+        var (path, gzip) = target;
 
         // A determinate bar only where the number is honest: MeasureImagesAsync answers -1 for more
         // than one image because layers are shared, and gzip makes the uncompressed total something
@@ -1513,6 +1683,47 @@ public partial class ContainersModule : UserControl, IModule
             }, ct);
         });
 
+        await FinishExportAsync(exported, part, path);
+    }
+
+    /// <summary>
+    /// Asks where an export goes and what that says about compression, or null when the user did
+    /// not answer. Shared by the image and the volume export, which write the same two file types.
+    ///
+    /// <para>The name is what says whether the archive is compressed, so the name has to be true: this
+    /// reads the extension rather than deciding for itself. A name that claims neither gets the
+    /// default appended rather than a gzipped archive landing under a bare name, and since the
+    /// picker never asked about *that* path, a file already there is confirmed and not replaced.</para>
+    /// </summary>
+    private async Task<(string Path, bool Gzip)?> PickExportTargetAsync(string title, string suggestedName)
+    {
+        var path = await FileDialogs.SaveFileAsync(Owner, title, ExportFilter,
+            suggestedName: suggestedName, defaultExtension: "tar.gz",
+            startDirectory: FileDialogs.LastTransferDir);
+        if (path is not { Length: > 0 }) return null;
+
+        var gzip = IsGzipName(path);
+        if (!gzip && !path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
+        {
+            path += ".tar.gz";
+            gzip = true;
+            if (File.Exists(path) &&
+                !await MessageDialog.Confirm(Owner, "Export",
+                    $"{path} already exists.\n\nReplace it?"))
+                return null;
+        }
+
+        FileDialogs.RememberTransferDir(Path.GetDirectoryName(path) ?? "");
+        return (path, gzip);
+    }
+
+    /// <summary>
+    /// The other half of <see cref="PickExportTargetAsync"/>: puts a finished archive in place over its
+    /// <c>.part</c> name, or takes away the <c>.part</c> of one that did not finish, so what is at the
+    /// chosen path is either the whole archive or the file that was already there.
+    /// </summary>
+    private async Task FinishExportAsync(bool exported, string part, string path)
+    {
         if (!exported)
         {
             try { File.Delete(part); } catch { /* nothing there, or not ours to delete */ }
@@ -1717,6 +1928,383 @@ public partial class ContainersModule : UserControl, IModule
         // The tab switch refreshes the container list by itself; see the handler in the constructor.
         Tabs.SelectedIndex = 0;
     }
+
+    // ---- Volumes ---------------------------------------------------------
+
+    // Create, remove and prune are short and set _busy by hand, the way the network commands do.
+    // Measure, export, import and clone walk or move every file in a volume, which can take minutes,
+    // so they run inside RunOpAsync with the transfer strip and its Cancel.
+
+    private async Task CreateVolumeAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        var dialog = new VolumeCreateDialog(Docker, Docker.Volumes.Select(v => v.Name).ToList());
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request)
+            return;
+
+        _busy = true;
+        UpdateMenu();
+        try
+        {
+            SetStatus($"Creating {request.Name}…");
+            await Docker.CreateVolumeAsync(request);
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "New volume", ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await RefreshVolumesAsync();
+    }
+
+    /// <summary>
+    /// Removes the selected volumes no container mounts. The mounted ones, by a stopped container as
+    /// much as by a running one, are skipped rather than sent to be refused one at a time, which is
+    /// the module's bulk rule, and the confirmation says so.
+    /// </summary>
+    private async Task RemoveVolumesAsync()
+    {
+        var selected = SelectedVolumes;
+        var rows = selected.Where(r => !r.IsInUse).ToList();
+        var skipped = selected.Count - rows.Count;
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        var message = rows.Count == 1
+            ? $"Remove the volume {rows[0].DisplayName} and its files?"
+            : $"Remove {rows.Count} volumes and their files?\n\n{Listed(rows.Select(r => r.DisplayName))}";
+
+        if (skipped > 0)
+            message += $"\n\n{(skipped == 1 ? "One volume" : $"{skipped} volumes")} in the selection " +
+                       $"{(skipped == 1 ? "is" : "are")} still mounted by a container and " +
+                       $"{(skipped == 1 ? "is" : "are")} left alone.";
+
+        if (!await MessageDialog.Confirm(Owner, "Remove volumes", message)) return;
+
+        _busy = true;
+        UpdateMenu();
+        var errors = new List<string>();
+        try
+        {
+            var n = 0;
+            foreach (var row in rows)
+            {
+                SetStatus($"Removing {row.DisplayName} ({++n}/{rows.Count})…");
+                try { await Docker.RemoveVolumeAsync(row.Name); }
+                catch (Exception ex) { errors.Add($"{row.DisplayName}: {ex.Message}"); }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await RefreshVolumesAsync();
+        if (errors.Count > 0)
+            await MessageDialog.Info(Owner, "Remove volumes", string.Join("\n\n", errors));
+    }
+
+    /// <summary>
+    /// Removes what no container mounts. Two answers where docker has two, the images prune's shape:
+    /// anonymous only is the primary, because the button Enter presses must not be the one that
+    /// deletes a named volume somebody meant to keep. Before docker 23 there is only one answer and it
+    /// is the destructive one, so there it is a plain confirmation that says so.
+    /// </summary>
+    private async Task PruneVolumesAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        bool all;
+        if (Docker.PruneDistinguishesAnonymous)
+        {
+            var choice = await MessageDialog.Choose(Owner, "Prune volumes",
+                "Remove volumes no container is using?\n\n" +
+                "Anonymous volumes are the ones docker named itself, for a container that never asked " +
+                "for a name: what a removed container left behind.\n\n" +
+                "All unused goes further and removes named volumes too, simply because no container " +
+                "mounts them right now. Their files are gone for good.",
+                primary: "Remove anonymous only", alternative: "Remove all unused");
+
+            if (choice == MessageDialog.Choice.Cancel) return;
+            all = choice == MessageDialog.Choice.Alternative;
+        }
+        else
+        {
+            if (!await MessageDialog.Confirm(Owner, "Prune volumes",
+                    "Remove every volume no container is using?\n\n" +
+                    $"Docker {Docker.DockerVersion} cannot spare named volumes here: they go too, " +
+                    "with their files."))
+                return;
+            all = false;
+        }
+
+        _busy = true;
+        UpdateMenu();
+        Cursor = new Cursor(StandardCursorType.Wait);
+        string? report = null;
+        try
+        {
+            SetStatus(all ? "Removing every unused volume…" : "Removing anonymous volumes…");
+            report = await Docker.PruneVolumesAsync(all);
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(Owner, "Prune volumes", ex.Message);
+        }
+        finally
+        {
+            Cursor = Cursor.Default;
+            _busy = false;
+        }
+
+        await RefreshVolumesAsync();
+        // Docker's own report: "Deleted Volumes:", a name per line, then the reclaimed space.
+        if (report is not null)
+            await MessageDialog.Info(Owner, "Prune volumes",
+                report.Trim().Length == 0 ? "Nothing to remove." : report.Trim());
+    }
+
+    /// <summary>
+    /// Measures the selected volumes that keep their files on this host, filling in each row as its
+    /// volume finishes. On demand and never part of the listing, because a measurement walks every
+    /// file in the volume; the reading stays on the row until the tab is left.
+    /// </summary>
+    private async Task MeasureVolumesAsync()
+    {
+        var rows = SelectedVolumes.Where(r => r.CanUseHostPath).ToList();
+        if (rows.Count == 0 || _docker is null || _busy) return;
+
+        var names = rows.Select(r => r.Name).ToList();
+        var done = 0;
+        SetStatus(rows.Count == 1 ? $"Measuring {rows[0].DisplayName}…" : $"Measuring {rows.Count} volumes…");
+
+        await RunOpAsync("Measure size", "Measuring", -1, ct =>
+            Docker.MeasureVolumesAsync(names, (name, bytes) => Dispatcher.UIThread.Post(() =>
+            {
+                done++;
+                if (XferPanel.IsVisible) XferText.Text = $"Measuring · {done} of {names.Count}";
+
+                // A reading that lands after the tab was left is dropped: leaving is what empties the
+                // column, and this would put one value back into it.
+                if (!_active || Current != Tab.Volumes) return;
+                _volumeSizes[name] = bytes;
+                if (_volByName.TryGetValue(name, out var row)) row.ApplySize(bytes);
+            }), ct));
+
+        UpdateStatusCount();
+    }
+
+    /// <summary>
+    /// Writes a tar of one volume's files to this PC, through the image export's picker and its
+    /// <c>.part</c> rename. The bar is indeterminate and counts bytes, because nothing short of a
+    /// measurement says how big the tar will be, and gzip makes even that the wrong number.
+    /// </summary>
+    private async Task ExportVolumeAsync()
+    {
+        var rows = SelectedVolumes;
+        if (rows.Count != 1 || !rows[0].CanUseHostPath || _docker is null || _busy) return;
+        var row = rows[0];
+
+        if (await PickExportTargetAsync("Export volume", row.SuggestedFileName) is not { } target) return;
+        var (path, gzip) = target;
+
+        if (await AskAboutRunningAsync(row.Name, row.DisplayName, "Export", "export") is not { } stop) return;
+
+        var part = path + ".part";
+        SetStatus($"Exporting {row.DisplayName} to {path}…");
+
+        var exported = await WhileStoppedAsync(stop, "Export", () =>
+            RunOpAsync("Export", "Exporting", -1, async ct =>
+            {
+                await using var file = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None);
+                long bytes = 0;
+                await Docker.ExportVolumeAsync(row.Name, gzip, file, n =>
+                {
+                    bytes += n;
+                    ReportBytes("Exporting", bytes, -1, Path.GetFileName(path));
+                }, ct);
+            }));
+
+        await FinishExportAsync(exported, part, path);
+    }
+
+    /// <summary>
+    /// Makes a new volume from an archive on this PC or on the host. Shared by the toolbar and by a
+    /// drop, which arrives with the file already chosen and still asks what to call the volume:
+    /// dropping a file is not naming the thing it becomes, the stacks page's rule.
+    /// </summary>
+    private async Task ImportVolumeAsync(string? localPath)
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+
+        var dialog = new VolumeImportDialog(_files, Docker.Volumes.Select(v => v.Name).ToList(), localPath);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } request)
+            return;
+
+        SetStatus($"Importing into {request.Name}…");
+        bool ok;
+        if (request.FromHost)
+        {
+            ok = await RunOpAsync("Import", "Importing", -1,
+                ct => Docker.ImportVolumeFromHostAsync(request.Path, request.Name, ct));
+        }
+        else
+        {
+            var progress = new Progress<TransferProgress>(p => PaintXfer("Importing", p));
+            ok = await RunOpAsync("Import", "Importing", LocalSize(request.Path),
+                ct => Docker.ImportVolumeAsync(request.Path, request.Name, progress, ct));
+        }
+
+        await RefreshVolumesAsync();
+        if (ok) SetStatus($"Imported into {request.Name}.");
+    }
+
+    /// <summary>Copies one volume's files into a new volume on the host.</summary>
+    private async Task CloneVolumeAsync()
+    {
+        var rows = SelectedVolumes;
+        if (rows.Count != 1 || !rows[0].CanUseHostPath || _docker is null || _busy) return;
+        var row = rows[0];
+
+        var taken = Docker.Volumes.Select(v => v.Name).ToList();
+        var suggested = $"{row.DisplayName}-copy";
+        for (var n = 2; taken.Contains(suggested, StringComparer.Ordinal); n++)
+            suggested = $"{row.DisplayName}-copy-{n}";
+
+        var dialog = new VolumeCloneDialog(row.DisplayName, suggested, taken);
+        if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } target) return;
+
+        if (await AskAboutRunningAsync(row.Name, row.DisplayName, "Clone", "clone") is not { } stop) return;
+
+        SetStatus($"Cloning {row.DisplayName} to {target}…");
+        var ok = await WhileStoppedAsync(stop, "Clone", () =>
+            RunOpAsync("Clone", "Cloning", -1, ct => Docker.CloneVolumeAsync(row.Name, target, ct)));
+
+        await RefreshVolumesAsync();
+        if (ok) SetStatus($"Cloned {row.DisplayName} to {target}.");
+    }
+
+    /// <summary>
+    /// Opens the volume's directory in the File explorer. The directory is left on
+    /// <see cref="BrowseRequests"/> and the shell is asked for the page, which takes it in its own
+    /// activation: the dashboard's Update now, in the other direction.
+    /// </summary>
+    private void BrowseVolume()
+    {
+        var rows = SelectedVolumes;
+        if (rows.Count != 1 || !rows[0].CanUseHostPath || _ssh is null) return;
+
+        BrowseRequests.For(_ssh).Request(rows[0].Mountpoint);
+        ModuleRequested?.Invoke(typeof(FileExplorerModule));
+    }
+
+    /// <summary>
+    /// Asks what to do about running containers that mount a volume about to be copied. Answers an
+    /// empty list to copy it as it is, the containers to stop around the copy, or null for cancel.
+    ///
+    /// <para>Asked every time and never decided here. A database copied while it writes can come
+    /// back as a copy that will not start, and stopping somebody's service is not this end's call
+    /// either. Copying as it is is the primary, because Enter must not be the key that takes a
+    /// running service down. The listing is read again first, because whether a container is running
+    /// is exactly the thing that may have moved since the table was drawn.</para>
+    /// </summary>
+    private async Task<IReadOnlyList<DockerVolumeUser>?> AskAboutRunningAsync(string name, string shown,
+                                                                              string title, string verb)
+    {
+        await RefreshVolumesAsync();
+
+        var running = Docker.Volumes.FirstOrDefault(v => v.Name == name)?.Users.Where(u => u.Running).ToList()
+                      ?? new List<DockerVolumeUser>();
+        if (running.Count == 0) return running;
+
+        var one = running.Count == 1;
+        var who = one
+            ? $"The container {running[0].Name} is running and uses {shown}."
+            : $"{running.Count} running containers use {shown}:\n\n{Listed(running.Select(u => u.Name))}";
+
+        var choice = await MessageDialog.Choose(Owner, title,
+            $"{who}\n\nFiles written while the {verb} runs can be copied half written, which for a " +
+            $"database can mean a copy that will not start. Stopping {(one ? "it" : "them")} first " +
+            $"gives a consistent copy, and {(one ? "it is" : "they are")} started again afterwards.",
+            primary: $"{title} while running", alternative: $"Stop, {verb}, start again");
+
+        return choice switch
+        {
+            MessageDialog.Choice.Primary => new List<DockerVolumeUser>(),
+            MessageDialog.Choice.Alternative => running,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Runs <paramref name="run"/> with <paramref name="stop"/> stopped, and starts every container it
+    /// stopped again afterwards whatever happened, a failure and a cancel included: they were running
+    /// when the user was asked, and a copy that did not work is no reason to leave their services
+    /// down. A container that will not stop means the copy would not be the consistent one that was
+    /// asked for, so then nothing is copied and the ones already stopped are started again.
+    /// </summary>
+    private async Task<bool> WhileStoppedAsync(IReadOnlyList<DockerVolumeUser> stop, string title,
+                                               Func<Task<bool>> run)
+    {
+        if (stop.Count == 0) return await run();
+
+        var stopped = new List<DockerVolumeUser>();
+        var errors = new List<string>();
+        var ok = false;
+
+        _busy = true;
+        UpdateMenu();
+        try
+        {
+            foreach (var user in stop)
+            {
+                SetStatus($"Stopping {user.Name}…");
+                try
+                {
+                    await Docker.StopAsync(user.Id);
+                    stopped.Add(user);
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{user.Name} would not stop, so nothing was copied: {ex.Message}");
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            // RunOpAsync takes the flag again the moment it starts.
+            _busy = false;
+        }
+
+        try
+        {
+            if (errors.Count == 0) ok = await run();
+        }
+        finally
+        {
+            _busy = true;
+            UpdateMenu();
+            foreach (var user in stopped)
+            {
+                SetStatus($"Starting {user.Name}…");
+                try { await Docker.StartAsync(user.Id); }
+                catch (Exception ex) { errors.Add($"{user.Name} did not start again: {ex.Message}"); }
+            }
+            _busy = false;
+            UpdateMenu();
+        }
+
+        if (errors.Count > 0) await MessageDialog.Info(Owner, title, string.Join("\n\n", errors));
+        return ok;
+    }
+
+    /// <summary>What a volume import reads: a tar, plain or gzipped, told by its extension as <see cref="IsComposeFile"/> tells YAML.</summary>
+    private static bool IsVolumeArchive(string path) =>
+        IsGzipName(path) || path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase);
 
     // ---- Networks --------------------------------------------------------
 
@@ -2243,10 +2831,10 @@ public partial class ContainersModule : UserControl, IModule
     /// <summary>
     /// What this drop would land on, or null when it would do nothing.
     ///
-    /// <para>Two tabs take a drop and they take different files: the Images page loads an archive,
-    /// the Stacks page opens a compose file in the editor. Both take real local files only, because
-    /// a directory is not an answer here, unlike in the file explorer, where there is something to
-    /// do with one.</para>
+    /// <para>Three tabs take a drop and they do different things with it: the Images page loads an
+    /// archive, the Volumes page opens its import dialog on one, and the Stacks page opens a compose
+    /// file in the editor. All three take real local files only, because a directory is not an
+    /// answer here, unlike in the file explorer, where there is something to do with one.</para>
     /// </summary>
     private List<string>? DropTarget(DragEventArgs e)
     {
@@ -2258,6 +2846,7 @@ public partial class ContainersModule : UserControl, IModule
         return Current switch
         {
             Tab.Images => files,
+            Tab.Volumes => files.Where(IsVolumeArchive).ToList() is { Count: > 0 } archives ? archives : null,
             Tab.Stacks => files.Where(IsComposeFile).ToList() is { Count: > 0 } yaml ? yaml : null,
             _ => null,
         };
@@ -2279,9 +2868,10 @@ public partial class ContainersModule : UserControl, IModule
         e.Handled = true;
         if (DropTarget(e) is not { } files) return;
 
-        // A compose file becomes one stack, so only the first is taken: several editor windows
-        // stacked on each other would be a worse answer than one.
+        // A compose file becomes one stack and an archive one volume, so only the first is taken:
+        // several windows stacked on each other would be a worse answer than one.
         if (Current == Tab.Stacks) await NewStackFromFileAsync(files[0]);
+        else if (Current == Tab.Volumes) await ImportVolumeAsync(files[0]);
         else await ImportLocalAsync(files);
     }
 

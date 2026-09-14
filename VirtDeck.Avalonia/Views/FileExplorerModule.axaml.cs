@@ -46,6 +46,9 @@ public partial class FileExplorerModule : UserControl, IModule
     private RemoteFileService? _files;
     private RemoteTransferService? _transfers;
 
+    /// <summary>Held only to reach <see cref="BrowseRequests"/>, which is keyed on the connection.</summary>
+    private SshConnectionManager? _ssh;
+
     private readonly ObservableCollection<RemoteFileRow> _rows = new();
     private List<RemoteEntry> _entries = new();
 
@@ -243,6 +246,7 @@ public partial class FileExplorerModule : UserControl, IModule
     /// </summary>
     public void Attach(SshConnectionManager ssh)
     {
+        _ssh = ssh;
         _files = new RemoteFileService(ssh);
         _transfers = new RemoteTransferService(ssh);
     }
@@ -250,6 +254,18 @@ public partial class FileExplorerModule : UserControl, IModule
     public async Task ActivateAsync()
     {
         if (_files is null) return; // design-time, or the shell never attached
+
+        // A directory another module sent the user here to look at (the Containers module's Browse
+        // files on a volume), spent by being read so it opens once. See BrowseRequests.
+        //
+        // It is approved for root up front, which is the one place this module records that answer
+        // without the retry button being pressed: what is asked for is inside docker's data root,
+        // which the login user can never list, so the first thing on screen would otherwise be a
+        // refusal and a button whose answer the user already gave by choosing Browse files. It is
+        // still only that answer being recorded. The listing is still tried as the account first,
+        // the status bar still says "listing as root", and no write path reads the set.
+        var requested = _ssh is null ? null : BrowseRequests.For(_ssh).Take();
+        if (requested is not null) ApproveRoot(requested);
 
         if (!_started)
         {
@@ -268,7 +284,15 @@ public partial class FileExplorerModule : UserControl, IModule
                 return (FileIcons.Available(wanted) ? wanted : 0, files.HomeDirectory());
             });
             _iconSize = iconSize;
-            await NavigateTo(home, record: true);
+            await NavigateTo(requested ?? home, record: true);
+            return;
+        }
+
+        // Recorded in the history like any navigation, so Back returns to wherever the user was
+        // browsing before another module sent them here.
+        if (requested is not null)
+        {
+            await NavigateTo(requested, record: true);
             return;
         }
 

@@ -108,10 +108,10 @@ public interface IModule
 /// <summary>
 /// A module that sometimes hands the user to another one: the dashboard's Update now button, which
 /// belongs on the page that says there are updates and is carried out by the page that installs
-/// them.
+/// them, and the Containers module's Browse files on a volume, which the File explorer shows.
 ///
 /// <para>It is an interface of its own rather than another member of <see cref="IModule"/> because
-/// seven of the eight never do this, and an event is the one thing that cannot be defaulted on an
+/// most modules never do this, and an event is the one thing that cannot be defaulted on an
 /// interface the way <c>RequiredTools</c>, <c>StatusWidget</c> and <c>BusyReason</c> are: it has
 /// nowhere to keep its handlers. The shell subscribes to whichever modules implement it, so adding
 /// a module is still a TabItem plus a UserControl.</para>

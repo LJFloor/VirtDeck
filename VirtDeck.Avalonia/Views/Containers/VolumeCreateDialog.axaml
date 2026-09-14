@@ -1,0 +1,104 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:rows="clr-namespace:VirtDeck.Avalonia.Views.Containers"
+        x:Class="VirtDeck.Avalonia.Views.Containers.VolumeCreateDialog"
+        Title="New volume"
+        Width="560" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="CreateButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Driver" VerticalAlignment="Center" />
+        <!-- An AutoCompleteBox rather than a ComboBox, for the network dialog's reason: it suggests
+             what the host has and still accepts a plugin that is on no list. -->
+        <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="DriverBox"
+                         FilterMode="StartsWith" MinimumPrefixLength="0" />
+      </Grid>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Driver options" Padding="0">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="OptionTools" Margin="8,6,8,6" />
+
+          <TextBlock DockPanel.Dock="Top" Classes="note" TextWrapping="Wrap" Margin="12,0,12,6"
+                     Text="Empty for a plain volume. The local driver takes type, device and o, which is how a volume mounts an NFS or CIFS share; the files of such a volume cannot be browsed, measured, exported or cloned from here." />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="180,*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Option" />
+              <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="OptionList" Background="Transparent" Padding="0" BorderThickness="0"
+                   MinHeight="36" MaxHeight="120"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:LogOptionRow">
+                <Grid ColumnDefinitions="180,*" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" PlaceholderText="type"
+                           Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <TextBox Grid.Column="1" PlaceholderText="nfs"
+                           Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Labels" Padding="0">
+        <DockPanel>
+          <c:RowToolbar DockPanel.Dock="Top" Name="LabelTools" Margin="8,6,8,6" />
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <Grid ColumnDefinitions="180,*" ColumnSpacing="6">
+              <TextBlock Grid.Column="0" Classes="columnheader" Text="Name" />
+              <TextBlock Grid.Column="1" Classes="columnheader" Text="Value" />
+            </Grid>
+          </Border>
+
+          <ListBox Name="LabelList" Background="Transparent" Padding="0" BorderThickness="0"
+                   MinHeight="36" MaxHeight="120"
+                   ItemContainerTheme="{StaticResource JbFormRow}"
+                   KeyboardNavigation.TabNavigation="Continue">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="rows:LabelRow">
+                <Grid ColumnDefinitions="180,*" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" PlaceholderText="com.example.backup"
+                           Text="{Binding Key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <TextBox Grid.Column="1" PlaceholderText="nightly"
+                           Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </HeaderedContentControl>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

@@ -62,8 +62,9 @@ in this index.
 |---|---|
 | [dashboard.md](docs/dashboard.md) | The host itself over live CPU, memory, network, disk IO and GPU graphs, fed by one long-lived sampling tail rather than a poll. |
 | [logs.md](docs/logs.md) | The host's journal: the three dropdowns that are a query rather than a filter, cursor paging, the live tail and Pause, and why every read is elevated. |
-| [containers.md](docs/containers.md) | The four tabs over one docker host, `DockerService`, the listing and the event tail, and the Docker Hub account cell in the status bar. |
+| [containers.md](docs/containers.md) | The five tabs over one docker host, `DockerService`, the listing and the event tail, and the Docker Hub account cell in the status bar. |
 | [containers-images.md](docs/containers-images.md) | Listing, pulling, tagging, removing, pruning, and moving an image to and from this PC. |
+| [containers-volumes.md](docs/containers-volumes.md) | Listing, creating, removing and pruning volumes, measuring, exporting, importing and cloning one on the host's own paths, and browsing one in the File explorer. |
 | [containers-networks.md](docs/containers-networks.md) | Listing, creating, removing and pruning networks, and attaching or detaching a container. |
 | [containers-stacks.md](docs/containers-stacks.md) | Docker compose projects: label discovery, the stacks root on the host, the editor, and deploy/down/delete. |
 | [containers-editing.md](docs/containers-editing.md) | One window for create and edit, why editing recreates, the image half of the read-back, the six newer pages, and GPU passthrough. |

@@ -22,6 +22,12 @@
     <x:Double x:Key="ColCreated">120</x:Double>
     <x:Double x:Key="ColSize">90</x:Double>
 
+    <x:Double x:Key="ColVolName">260</x:Double>
+    <x:Double x:Key="ColVolStack">150</x:Double>
+    <x:Double x:Key="ColVolDriver">80</x:Double>
+    <x:Double x:Key="ColVolCreated">130</x:Double>
+    <x:Double x:Key="ColVolSize">90</x:Double>
+
     <x:Double x:Key="ColNetName">190</x:Double>
     <x:Double x:Key="ColNetId">110</x:Double>
     <x:Double x:Key="ColNetDriver">90</x:Double>
@@ -36,8 +42,9 @@
   </UserControl.Resources>
 
   <UserControl.Styles>
-    <!-- The amber an image row wears when no container was created from it, and a network row
-         wears when nothing is running on it: in both tables exactly what Prune would take. Literal rather than themed, for the reason the state dots are:
+    <!-- The amber an image row wears when no container was created from it, a volume row when no
+         container mounts it, and a network row when nothing is running on it: in all three tables
+         exactly what Prune would take. Literal rather than themed, for the reason the state dots are:
          it is the app's transient amber and it has to mean the same thing on either face.
 
          A class rather than a brush bound off the row, because the other two states want the
@@ -272,6 +279,97 @@
             </ListBox>
 
             <TextBlock Name="ImagesEmptyText" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Volumes">
+        <DockPanel>
+
+          <!-- The three commands that need no selection, in the Images page's shape: New volume is
+               accented because it is the one that makes something new, Import makes one out of an
+               archive, and Prune sits with them because it applies to the whole host. No Refresh
+               button: the `docker events` tail carries volume events too. A search box, unlike the
+               networks page, because anonymous volumes pile up. -->
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Button Name="CreateVolumeButton" Content="New volume" Classes="accent"
+                        ToolTip.Tip="Create a volume containers can mount" />
+                <Button Name="ImportVolumeButton" Content="Import"
+                        ToolTip.Tip="Make a new volume from a .tar or .tar.gz of its files" />
+                <Button Name="PruneVolumesButton" Content="Prune unused"
+                        ToolTip.Tip="Remove volumes no container is using" />
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="VolumeSearch" Width="200" Margin="10,0,0,0"
+                           PlaceholderText="Search volumes"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the name and the stack." />
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <!-- Created sorts on the instant its cell was rendered from and Size on the byte count,
+                 with a volume nobody has measured below every measured one. A third click returns to
+                 this table's own order, named before anonymous. -->
+            <DockPanel Name="VolumeHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name"    SortKey="name"    Width="{StaticResource ColVolName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Stack"   SortKey="stack"   Width="{StaticResource ColVolStack}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Driver"  SortKey="driver"  Width="{StaticResource ColVolDriver}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Created" SortKey="created" Width="{StaticResource ColVolCreated}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Size"    SortKey="size"    Width="{StaticResource ColVolSize}" />
+              <c:ColumnHeader Text="Status" SortKey="status" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="VolumeList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <!-- The four commands that need the volume's files in a directory on this host carry
+                     ToolTip.ShowOnDisabled, the Stacks tab's escape hatch, so a plugin's volume or a
+                     local mount can say on hover why they are grey. -->
+                <ContextMenu Name="VolumeMenu">
+                  <MenuItem Name="MenuBrowseVolume" Header="Browse files" ToolTip.ShowOnDisabled="True" />
+                  <MenuItem Name="MenuMeasureVolume" Header="Measure size" ToolTip.ShowOnDisabled="True" />
+                  <Separator />
+                  <MenuItem Name="MenuExportVolume" Header="Export" ToolTip.ShowOnDisabled="True" />
+                  <MenuItem Name="MenuCloneVolume" Header="Clone" ToolTip.ShowOnDisabled="True" />
+                  <Separator />
+                  <MenuItem Name="MenuRemoveVolume" Header="Remove" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:DockerVolumeRow">
+                  <!-- No state dot: a volume is a fact. An anonymous one is dimmed whole, the way a
+                       dangling layer is on the Images page. -->
+                  <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                    <TextBlock Text="{Binding DisplayName}" Width="{StaticResource ColVolName}"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    <TextBlock Text="{Binding Stack}"   Width="{StaticResource ColVolStack}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding StackTip}" />
+                    <TextBlock Text="{Binding Driver}"  Width="{StaticResource ColVolDriver}" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Created}" Width="{StaticResource ColVolCreated}" Opacity="0.75"
+                               ToolTip.Tip="{Binding CreatedTip}" />
+                    <!-- Blank until measured, which is a different claim from empty. -->
+                    <TextBlock Text="{Binding Size}"    Width="{StaticResource ColVolSize}" Opacity="0.75" />
+                    <!-- Blank where the listing could not ask, which is a different answer from
+                         "Unused" and is why the row keeps three states rather than a bool. -->
+                    <TextBlock Text="{Binding Status}" Opacity="{Binding StatusOpacity}"
+                               Classes.unused="{Binding IsUnused}"
+                               ToolTip.Tip="{Binding StatusTip}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="VolumesEmptyText" Opacity="0.6" IsVisible="False"
                        TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Panel>

@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.Containers.VolumeImportDialog"
+        Title="Import volume"
+        Width="520" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="ImportButton" Content="Import" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="A .tar or .tar.gz of a volume's files, such as Export writes. It is unpacked into a new volume, so nothing already on the host is overwritten." />
+
+      <Grid ColumnDefinitions="90,*">
+        <TextBlock Grid.Column="0" Text="Volume" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" Name="NameBox" PlaceholderText="Name of the new volume" />
+      </Grid>
+
+      <StackPanel Classes="options">
+
+        <RadioButton Name="LocalRadio" GroupName="VolumeImportSource" IsChecked="True"
+                     Content="A file on this PC" />
+        <StackPanel Name="LocalPanel" Classes="under">
+          <DockPanel>
+            <Button Name="LocalBrowseButton" DockPanel.Dock="Right" Content="Browse" Margin="6,0,0,0" />
+            <TextBox Name="LocalPathBox" IsReadOnly="True"
+                     PlaceholderText="Choose the archive to send" />
+          </DockPanel>
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Dropping the file on the volume list opens this with it filled in." />
+        </StackPanel>
+
+        <RadioButton Name="HostRadio" GroupName="VolumeImportSource"
+                     Content="A path on the server" />
+        <StackPanel Name="HostPanel" Classes="under">
+          <c:RemotePathBox Name="HostPathPicker" BrowseText="Browse" />
+        </StackPanel>
+
+      </StackPanel>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>
