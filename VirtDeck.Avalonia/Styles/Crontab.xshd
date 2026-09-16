@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Crontab highlighting for the Cron module's raw editor. Hand written for the reason Yaml.xshd is:
+  AvaloniaEdit ships definitions for twenty-odd languages and this is not one of them, and the
+  alternative (AvaloniaEdit.TextMate plus the TextMateSharp grammar bundle) is several megabytes in
+  both release artifacts to colour one format in one window.
+
+  The colours here are placeholders. Every one is replaced at load time from the themed brushes in
+  JetBrainsClassic.axaml, because a colour fixed in this file would read as syntax on one face and
+  as noise on the other; see Controls/CodeHighlighting.
+-->
+<SyntaxDefinition name="Crontab" extensions=".cron;.crontab"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment" foreground="#808080" />
+  <Color name="Key" foreground="#0033B3" />
+  <Color name="String" foreground="#067D17" />
+  <Color name="Constant" foreground="#0033B3" fontWeight="bold" />
+  <Color name="Anchor" foreground="#9E880D" />
+
+  <RuleSet ignoreCase="false">
+
+    <!-- First, so a commented-out job is prose and not a schedule. The schedule rule below would
+         otherwise match from the same position, and among equal matches the earlier rule wins. -->
+    <Span color="Comment">
+      <Begin>\#</Begin>
+    </Span>
+
+    <!-- An environment assignment's name, which is the only other thing that may start a line. The
+         lookahead keeps the equals sign itself out of the match. -->
+    <Rule color="Key">^[A-Za-z_][A-Za-z0-9_]*(?=\s*=)</Rule>
+
+    <!-- One of cron's shorthands, whole. -->
+    <Rule color="Constant">^\s*@(reboot|yearly|annually|monthly|weekly|daily|midnight|hourly)\b</Rule>
+
+    <!-- The five time fields, as one run. Painting them together rather than field by field is
+         deliberate: what matters when reading a crontab is where the schedule ends and the command
+         begins, and five separately coloured tokens say less about that than one block does.
+
+         The fields are spelled out in cron's own alphabet rather than as \S+, and that is
+         load-bearing rather than pedantry. This engine restarts a rule after each match with ^
+         anchored at the restart, so a lenient version matched a second time part way along the
+         command and the two runs were merged into one: on Debian's own /etc/crontab it painted
+         "17 *  * * *  root  cd / && run-parts" in one colour. Minute, hour and day of month take no
+         names in any cron, so refusing letters there is what makes a second match impossible: the
+         token after a schedule is a user name or a command, and both begin with letters. -->
+    <Rule color="Anchor">^[ \t]*([0-9*,/-]+[ \t]+){3}([0-9A-Za-z*,/-]+[ \t]+)[0-9A-Za-z*,/-]+</Rule>
+
+    <Span color="String" multiline="false">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Span color="String" multiline="false">
+      <Begin>'</Begin>
+      <End>'</End>
+    </Span>
+
+  </RuleSet>
+</SyntaxDefinition>

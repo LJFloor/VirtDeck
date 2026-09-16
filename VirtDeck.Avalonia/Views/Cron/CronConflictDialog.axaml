@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+        x:Class="VirtDeck.Avalonia.Views.Cron.CronConflictDialog"
+        Title="It changed on the host"
+        Width="780" Height="520" MinWidth="480" MinHeight="300"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <!-- Overwrite is not the default and is not accented. Both answers lose something, but only
+           this one loses something that is not on this screen: what the editor holds can be typed
+           again, and what somebody else wrote on the host cannot. -->
+      <Button Name="OverwriteButton" Content="Overwrite" MinWidth="120" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #ReloadButton.Tag}">
+        <Button Name="ReloadButton" Content="Take the host's" MinWidth="120"
+                IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <TextBlock DockPanel.Dock="Top" Name="PromptText" Classes="note"
+               TextWrapping="Wrap" Margin="0,0,0,10" />
+
+    <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}">
+      <edit:TextEditor Name="Diff" IsReadOnly="True"
+                       c:CodeEditor.Language="None"
+                       HorizontalScrollBarVisibility="Auto"
+                       VerticalScrollBarVisibility="Auto" />
+    </Border>
+
+  </DockPanel>
+</Window>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  POSIX shell highlighting, for the bodies of the scripts in /etc/cron.daily and its siblings. Hand
+  written for the reason Yaml.xshd and Crontab.xshd are: AvaloniaEdit ships no shell definition, and
+  pulling in a grammar bundle to colour one language in one window is not worth the megabytes.
+
+  Deliberately modest. A shell script's hard parts (expansion inside expansion, here-documents,
+  case patterns) are exactly the parts a line-based regex definition gets wrong, so this colours the
+  four things it can be certain about and leaves the rest alone. A word painted in no colour reads
+  as ordinary code; a word painted in the wrong one reads as a bug.
+
+  The colours are placeholders, replaced at load time from the themed brushes; see
+  Controls/CodeHighlighting.
+-->
+<SyntaxDefinition name="Shell" extensions=".sh;.bash"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Comment" foreground="#808080" />
+  <Color name="String" foreground="#067D17" />
+  <Color name="Constant" foreground="#0033B3" fontWeight="bold" />
+  <Color name="Variable" foreground="#0033B3" />
+  <Color name="Number" foreground="#1750EB" />
+
+  <RuleSet ignoreCase="false">
+
+    <!-- No rule for the #! line. One was written and taken out again after measuring: this engine
+         tries every span before any rule at the same position, so the comment span below takes the
+         shebang whatever the order says, and a rule that never fires with a comment explaining what
+         it does is worse than not having it. A shebang drawn as a comment is honest anyway; it is a
+         hash line, and only the kernel reads it differently. -->
+
+    <Span color="Comment">
+      <Begin>(?&lt;=^|\s)\#</Begin>
+    </Span>
+
+    <Span color="String" multiline="false">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+        <Rule color="Variable">\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]*\}|\$\([^)]*\)</Rule>
+      </RuleSet>
+    </Span>
+
+    <!-- Single quotes expand nothing, so no variable rule inside. -->
+    <Span color="String" multiline="false">
+      <Begin>'</Begin>
+      <End>'</End>
+    </Span>
+
+    <Rule color="Variable">\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*?#!$-]|\$\{[^}]*\}</Rule>
+
+    <Rule color="Constant">\b(if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|select|time|return|break|continue|exit|local|readonly|export|unset|shift|trap|set|eval|exec|source|test)\b</Rule>
+
+    <Rule color="Number">\b[0-9]+\b</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

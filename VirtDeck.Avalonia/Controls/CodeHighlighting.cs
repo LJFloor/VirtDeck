@@ -19,7 +19,7 @@ namespace VirtDeck.Avalonia.Controls;
 /// because an <see cref="IHighlightingDefinition"/> is shared by every editor that holds it and
 /// mutating one in place would repaint a window that is not changing.</para>
 ///
-/// <para><b>Three of the definitions are ours and five are AvaloniaEdit's own.</b> Where the
+/// <para><b>Five of the definitions are ours and five are AvaloniaEdit's own.</b> Where the
 /// package ships a language it is used rather than rewritten, which is the same call
 /// <c>Styles/Yaml.xshd</c> made in the other direction: that file exists because YAML is not one of
 /// the twenty-odd AvaloniaEdit carries, and neither are cmd.exe and regedit's export format. A
@@ -43,6 +43,8 @@ internal static class CodeHighlighting
         [CodeLanguage.Yaml] = "avares://virtdeck/Styles/Yaml.xshd",
         [CodeLanguage.Batch] = "avares://virtdeck/Styles/Batch.xshd",
         [CodeLanguage.Registry] = "avares://virtdeck/Styles/Registry.xshd",
+        [CodeLanguage.Crontab] = "avares://virtdeck/Styles/Crontab.xshd",
+        [CodeLanguage.Shell] = "avares://virtdeck/Styles/Shell.xshd",
         [CodeLanguage.PowerShell] = "AvaloniaEdit.Highlighting.Resources.PowerShell.xshd",
         // VBScript is a subset of Visual Basic and there is no definition for the subset. It gets
         // the comments, the strings and most of the keywords right, and colours a handful of words

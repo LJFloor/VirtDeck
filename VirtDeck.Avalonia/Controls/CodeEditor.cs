@@ -21,6 +21,13 @@ public enum CodeLanguage
     JavaScript,
     Xml,
     Json,
+
+    /// <summary>A crontab: five time fields, the @ shorthands, environment assignments and
+    /// comments. The Cron module's raw editor.</summary>
+    Crontab,
+
+    /// <summary>POSIX shell, for the bodies of the scripts in /etc/cron.daily and its siblings.</summary>
+    Shell,
 }
 
 /// <summary>

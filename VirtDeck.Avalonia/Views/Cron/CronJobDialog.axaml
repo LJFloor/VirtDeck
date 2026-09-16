@@ -1,0 +1,94 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Cron.CronJobDialog"
+        Title="New job"
+        Width="580" SizeToContent="Height" MinWidth="560"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #AcceptButton.Tag}">
+        <Button Name="AcceptButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Header="Schedule" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto" RowSpacing="6">
+            <!-- The shorthands are first class rather than sugar the dialog expands away. A crontab
+                 that says @daily is saying something a person wrote, and rewriting it as 0 0 * * *
+                 on the way through would be this app editing a line nobody asked it to touch. -->
+            <TextBlock Grid.Column="0" Text="Runs" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" Name="PresetBox" HorizontalAlignment="Stretch" />
+          </Grid>
+
+          <Grid Name="FieldsGrid" ColumnDefinitions="*,8,*,8,*,8,*,8,*" RowDefinitions="Auto,Auto"
+                Margin="100,2,0,0">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="subnote" Text="minute" />
+            <TextBlock Grid.Row="0" Grid.Column="2" Classes="subnote" Text="hour" />
+            <TextBlock Grid.Row="0" Grid.Column="4" Classes="subnote" Text="day of month" />
+            <TextBlock Grid.Row="0" Grid.Column="6" Classes="subnote" Text="month" />
+            <TextBlock Grid.Row="0" Grid.Column="8" Classes="subnote" Text="day of week" />
+            <TextBox Grid.Row="1" Grid.Column="0" Name="MinuteBox" />
+            <TextBox Grid.Row="1" Grid.Column="2" Name="HourBox" />
+            <TextBox Grid.Row="1" Grid.Column="4" Name="DomBox" />
+            <TextBox Grid.Row="1" Grid.Column="6" Name="MonthBox" />
+            <TextBox Grid.Row="1" Grid.Column="8" Name="DowBox" />
+          </Grid>
+
+          <!-- The schedule read back as a sentence, and when it next fires. Both are computed from
+               what is in the boxes rather than from what was saved, so a mistake is visible before
+               the dialog is accepted rather than at 03:30. -->
+          <TextBlock Name="MeaningText" Classes="note" TextWrapping="Wrap" Margin="100,4,0,0" />
+          <TextBlock Name="NextRunText" Classes="subnote" TextWrapping="Wrap" Margin="100,0,0,0" />
+
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Header="Command" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Command" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="CommandBox"
+                     PlaceholderText="/usr/local/bin/backup.sh" />
+
+            <!-- cron has no end-of-line comment, so a note about a job can only be a comment line
+                 above it. That is where this is written and where it is read back from. -->
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Note" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="CommentBox"
+                     PlaceholderText="what this job is for (optional)" />
+          </Grid>
+
+          <TextBlock Name="PercentNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False"
+                     Text="A bare % does not reach the command: cron ends the command at the first one and feeds the rest to the job on standard input. Write \% for a literal percent, as date +\%Y does." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Name="WhereGroup" Header="Where" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Put it in" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="TargetBox" HorizontalAlignment="Stretch" />
+
+            <TextBlock Name="FileNameLabel" Grid.Row="1" Grid.Column="0" Text="File name" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="FileNameBox" PlaceholderText="backup" />
+
+            <TextBlock Name="OwnerLabel" Grid.Row="2" Grid.Column="0" Text="Run as" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="2" Grid.Column="1" Name="OwnerBox" HorizontalAlignment="Stretch" />
+          </Grid>
+
+          <TextBlock Name="WhereNote" Classes="subnote" TextWrapping="Wrap" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

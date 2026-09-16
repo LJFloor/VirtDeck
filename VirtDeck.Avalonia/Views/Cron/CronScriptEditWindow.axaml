@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+        x:Class="VirtDeck.Avalonia.Views.Cron.CronScriptEditWindow"
+        Title="Edit script"
+        Width="860" Height="600" MinWidth="520" MinHeight="340"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Border Background="Transparent" ToolTip.Tip="{Binding #SaveButton.Tag}">
+        <Button Name="SaveButton" Content="Save" MinWidth="88" Classes="accent" />
+      </Border>
+    </StackPanel>
+
+    <Grid DockPanel.Dock="Top" Name="WhereGrid" ColumnDefinitions="100,180,12,*"
+          RowDefinitions="Auto" Margin="0,0,0,10">
+      <TextBlock Grid.Column="0" Text="Runs" VerticalAlignment="Center" />
+      <ComboBox Grid.Column="1" Name="DirectoryBox" HorizontalAlignment="Stretch" />
+      <TextBox Grid.Column="3" Name="NameBox" PlaceholderText="name, with no dot in it" />
+    </Grid>
+
+    <TextBlock DockPanel.Dock="Top" Name="WhatText" Classes="subnote"
+               TextWrapping="Wrap" Margin="0,0,0,10" />
+
+    <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
+               TextWrapping="Wrap" IsVisible="False" Margin="0,10,0,0" />
+
+    <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}">
+      <edit:TextEditor Name="Editor" ShowLineNumbers="True"
+                       c:CodeEditor.Language="Shell"
+                       HorizontalScrollBarVisibility="Auto"
+                       VerticalScrollBarVisibility="Auto" />
+    </Border>
+
+  </DockPanel>
+</Window>

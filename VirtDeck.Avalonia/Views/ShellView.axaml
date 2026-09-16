@@ -38,6 +38,12 @@
          this size. Same 16x16 stroked box as the others, so it sits at their weight. -->
     <StreamGeometry x:Key="IconLogs">M3.5,1.5 H9.5 L12.5,4.5 V14.5 H3.5 Z M9.5,1.5 V4.5 H12.5 M5.5,8 H10.5 M5.5,11 H10.5</StreamGeometry>
 
+    <!-- A clock face with two hands, which is the one piece of art nobody has to be told the
+         meaning of. The circle is drawn as two half sweeps for the reason IconOverview and
+         IconUserAccounts give: a single 360 degree arc gives the renderer nothing to work with, and
+         a single 180 degree one leaves it no way to tell which of the two halves was meant. -->
+    <StreamGeometry x:Key="IconCron">M8,1.5 A6.5,6.5 0 0 1 8,14.5 A6.5,6.5 0 0 1 8,1.5 Z M8,4.5 V8.2 L10.8,10.2</StreamGeometry>
+
     <!-- An arrow coming down into a tray. The arrow alone is a download and the tray alone is an
          inbox; together they read as something arriving on the machine, which is what this module is
          for. Same 16x16 stroked box as the five above, so it sits at their weight. -->
@@ -153,6 +159,21 @@
           </StackPanel>
         </TabItem.Header>
         <vm:ServicesModule />
+      </TabItem>
+
+      <!-- Beside Services, because the two are the host's recurring work under its two mechanisms:
+           what systemd keeps running, and what cron starts on a clock. Somebody looking for "the
+           thing that runs at 3am" tries one of them first and the other second. -->
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconCron}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Cron" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:CronModule />
       </TabItem>
 
       <TabItem>

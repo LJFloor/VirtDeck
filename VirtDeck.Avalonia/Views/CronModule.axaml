@@ -1,0 +1,221 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.CronModule"
+             x:DataType="vm:CronJobRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. -->
+    <x:Double x:Key="ColJobSchedule">165</x:Double>
+    <x:Double x:Key="ColJobNext">180</x:Double>
+    <x:Double x:Key="ColJobOwner">110</x:Double>
+    <x:Double x:Key="ColJobWhere">170</x:Double>
+
+    <x:Double x:Key="ColScrName">280</x:Double>
+    <x:Double x:Key="ColScrPeriod">110</x:Double>
+    <x:Double x:Key="ColScrMode">80</x:Double>
+    <x:Double x:Key="ColScrSize">90</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, as the services, accounts
+       and VM modules do.
+
+       The two tabs are two kinds of thing and not two views of one list. A line in a crontab has a
+       schedule of its own; a script in /etc/cron.daily has none, and the directory it sits in is the
+       schedule. Merging them would leave half of one table's Schedule column empty and give the
+       other half a value the first kind never has.
+
+       Each page carries its own toolbar, because its search box and its create command are facts
+       about the table under it. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Header="Jobs">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <!-- A Refresh button and no poll and no tail: nothing on a host announces that a
+                   crontab changed, the way `docker events` announces a container. See the refresh
+                   policy in "Shared idioms"; this is the accounts and file-explorer shape. -->
+              <Border Background="Transparent" ToolTip.Tip="{Binding #JobRefreshButton.Tag}">
+                <Button Name="JobRefreshButton" Theme="{StaticResource JbIconButton}">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </Border>
+              <!-- Accented because on this page it is the one command that brings something into
+                   being, which is the rule the accounts and storage toolbars follow. -->
+              <Border Background="Transparent" ToolTip.Tip="{Binding #NewJobButton.Tag}">
+                <Button Name="NewJobButton" Content="New job" Classes="accent" />
+              </Border>
+              <!-- A whole crontab as text. A flyout rather than a button per file, because how many
+                   crontabs a host has is the host's business and the toolbar cannot be sized for it. -->
+              <Border Background="Transparent" ToolTip.Tip="{Binding #EditRawButton.Tag}">
+                <Button Name="EditRawButton" Content="Edit file">
+                  <Button.Flyout>
+                    <MenuFlyout />
+                  </Button.Flyout>
+                </Button>
+              </Border>
+            </StackPanel>
+            <c:FilterBox DockPanel.Dock="Right" Name="JobSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search command, owner or file"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the command, the schedule, the owner, the file and the job's own comment." />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="JobHeaderStrip">
+            <!-- Every cell sorts; a third click returns to this table's own order, which groups a
+                 file's jobs together in the order the file holds them. Indent (not Margin) puts the
+                 heading over the rows' state dot without widening the column.
+
+                 The Next run heading names the host's time zone, filled in once the host has said
+                 what it is. Cron fires on the host's clock and this PC may be somewhere else, so a
+                 bare "Next run" over a bare time would be a claim nobody could check. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Schedule" SortKey="schedule" Indent="14" Width="{StaticResource ColJobSchedule}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Name="NextHeader" Text="Next run" SortKey="next" Width="{StaticResource ColJobNext}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Owner" SortKey="owner" Width="{StaticResource ColJobOwner}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Where" SortKey="where" Width="{StaticResource ColJobWhere}" />
+            <c:ColumnHeader Text="Command" SortKey="command" />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="JobList" SelectionMode="Multiple" Background="Transparent"
+                   Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="JobMenu">
+                <MenuItem Name="MenuJobEdit" Header="Edit" />
+                <MenuItem Name="MenuJobToggle" Header="Disable" />
+                <Separator />
+                <MenuItem Name="MenuJobRun" Header="Run now" />
+                <Separator />
+                <MenuItem Name="MenuJobEditFile" Header="Edit this file as text" />
+                <MenuItem Name="MenuJobDelete" Header="Delete" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:CronJobRow">
+                <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                  <!-- The same 9px state dot the VM, container, account and service lists draw. Here
+                       it says whether cron is acting on this line at all, which a commented-out job
+                       otherwise looks exactly like. -->
+                  <DockPanel Width="{StaticResource ColJobSchedule}" ToolTip.Tip="{Binding ScheduleTip}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding Schedule}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding NextText}" Width="{StaticResource ColJobNext}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Owner}" Width="{StaticResource ColJobOwner}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Where}" Width="{StaticResource ColJobWhere}"
+                             Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Where}" />
+                  <TextBlock Text="{Binding Command}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding CommandTip}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Why the list is empty, so an unusable module never just looks broken. -->
+          <TextBlock Name="JobEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="Periodic scripts">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Border Background="Transparent" ToolTip.Tip="{Binding #ScriptRefreshButton.Tag}">
+                <Button Name="ScriptRefreshButton" Theme="{StaticResource JbIconButton}">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </Border>
+              <Border Background="Transparent" ToolTip.Tip="{Binding #NewScriptButton.Tag}">
+                <Button Name="NewScriptButton" Content="New script" Classes="accent" />
+              </Border>
+            </StackPanel>
+            <c:FilterBox DockPanel.Dock="Right" Name="ScriptSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search name or period"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="ScriptHeaderStrip">
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Script" SortKey="name" Indent="14" Width="{StaticResource ColScrName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Runs" SortKey="period" Width="{StaticResource ColScrPeriod}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Mode" SortKey="mode" Width="{StaticResource ColScrMode}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size" Width="{StaticResource ColScrSize}" />
+            <c:ColumnHeader Text="Path" SortKey="path" />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="ScriptList" SelectionMode="Multiple" Background="Transparent"
+                   Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="ScriptMenu">
+                <MenuItem Name="MenuScriptEdit" Header="Edit" />
+                <MenuItem Name="MenuScriptToggle" Header="Disable" />
+                <Separator />
+                <MenuItem Name="MenuScriptRun" Header="Run now" />
+                <Separator />
+                <MenuItem Name="MenuScriptDelete" Header="Delete" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:CronScriptRow">
+                <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                  <DockPanel Width="{StaticResource ColScrName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding StateText}" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding Period}" Width="{StaticResource ColScrPeriod}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Mode}" Width="{StaticResource ColScrMode}"
+                             Opacity="0.75" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding SizeText}" Width="{StaticResource ColScrSize}"
+                             Opacity="0.75" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Script.Path}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Script.Path}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Name="ScriptEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+  </TabControl>
+</UserControl>
