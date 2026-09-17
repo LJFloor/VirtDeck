@@ -59,14 +59,14 @@
     <!-- Every row is wrapped in a transparent Border carrying the tooltip, because a disabled control
          is not hit-testable in Avalonia and the reason it is disabled is the thing most worth reading.
          Same workaround as CheckRow's template and the Install security updates button above. -->
+    <!-- The box carries its own label, which is the container edit screen's checkbox and not the
+         label column the three rows below use. A tick needs no column to line up in: its control is
+         one glyph at the left margin, so a 220-wide label in front of it only pushes the box away
+         from the text it applies to. -->
     <DataTemplate DataType="vm:ToggleSettingRow">
       <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
-        <Grid ColumnDefinitions="220,*" Margin="0,0,0,2">
-          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
-                     VerticalAlignment="Center" />
-          <CheckBox Grid.Column="1" IsChecked="{Binding IsOn, Mode=TwoWay}"
-                    IsEnabled="{Binding IsEditable}" VerticalAlignment="Center" />
-        </Grid>
+        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsOn, Mode=TwoWay}"
+                  IsEnabled="{Binding IsEditable}" Margin="0,0,0,2" />
       </Border>
     </DataTemplate>
 
@@ -102,6 +102,26 @@
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <!-- The one row whose control is not the value. The entries are stated beside the button rather
+         than behind it, because a page about automatic updates with no visible answer to which
+         updates would be the biggest hole in it; the button is what opens the window that edits
+         them. Trimmed rather than wrapped, so a long list cannot push the rows below it apart. -->
+    <DataTemplate DataType="vm:ListSettingRow">
+      <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
+        <Grid ColumnDefinitions="220,Auto,*" Margin="0,0,0,2">
+          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <!-- The button sits against the value and not out at the page's edge: it is what edits
+               that text, and a Grid star between them would put half the window in between. -->
+          <TextBlock Grid.Column="1" Text="{Binding Summary}" MinWidth="280" MaxWidth="440"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                     Classes.stated="{Binding IsEmpty}" ToolTip.Tip="{Binding Summary}" />
+          <Button Grid.Column="2" Content="Edit" Click="EditListClicked" Margin="8,0,0,0"
+                  IsEnabled="{Binding IsEditable}" HorizontalAlignment="Left" />
         </Grid>
       </Border>
     </DataTemplate>
@@ -348,19 +368,19 @@
 
           <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
-                <!-- Not accented. The accent on this page belongs to Install all updates, on the
-                     reading that it is the one command bringing something new onto the host; a save
-                     changes what the host will do later, which is not the same kind of thing. -->
-                <Border Background="Transparent" ToolTip.Tip="{Binding #SaveSettingsButton.Tag}">
-                  <Button Name="SaveSettingsButton" Content="Save" />
-                </Border>
-                <Button Name="RevertSettingsButton" Content="Revert" />
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6"
+                          VerticalAlignment="Center">
+                <!-- No Save and no Revert: moving a control writes it. Revert went with Save rather
+                     than for its own sake, since the host already holds the value by the time
+                     anybody could press it; Refresh is the way back, and it says what the host
+                     says. -->
                 <Button Name="RefreshSettingsButton" Theme="{StaticResource JbIconButton}"
                         ToolTip.Tip="Read these settings from the host again">
                   <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
                         Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
                 </Button>
+                <TextBlock Name="SettingsSaveNote" Classes="note" VerticalAlignment="Center"
+                           Text="Changes are saved to the host as you make them." />
               </StackPanel>
               <Panel />
             </DockPanel>

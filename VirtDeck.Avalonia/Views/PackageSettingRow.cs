@@ -70,9 +70,6 @@ namespace VirtDeck.Avalonia.Views
         public PackageSettingChange? Change =>
             IsDirty ? new PackageSettingChange(Key, Value) : null;
 
-        /// <summary>Puts the row back to what the host said. What Revert does, one row at a time.</summary>
-        public abstract void Revert();
-
         /// <summary>
         /// Builds the row a setting wants. The one place a <see cref="SettingKind"/> becomes a type,
         /// so the page never switches on a kind again.
@@ -82,6 +79,7 @@ namespace VirtDeck.Avalonia.Views
             SettingKind.Toggle => new ToggleSettingRow(setting),
             SettingKind.Number => new NumberSettingRow(setting),
             SettingKind.Choice => new ChoiceSettingRow(setting),
+            SettingKind.List => new ListSettingRow(setting),
             _ => new TextSettingRow(setting),
         };
 
@@ -117,7 +115,6 @@ namespace VirtDeck.Avalonia.Views
 
         public override string Value => _on ? "1" : string.Empty;
 
-        public override void Revert() => IsOn = Setting.Value.Length > 0;
     }
 
     /// <summary>
@@ -143,8 +140,6 @@ namespace VirtDeck.Avalonia.Views
 
         public override string Value =>
             ((int)_number).ToString(CultureInfo.InvariantCulture);
-
-        public override void Revert() => Number = Parse(Setting.Value, Setting.Min);
 
         private static decimal Parse(string text, int fallback) =>
             int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
@@ -173,8 +168,6 @@ namespace VirtDeck.Avalonia.Views
 
         public override string Value => _selected.Value;
 
-        public override void Revert() => Selected = Find(Setting.Value);
-
         // A value the manager did not offer as a choice cannot happen: the manager turns such a
         // setting into a read-only text row before it ever gets here. The fallback is still the first
         // choice rather than null, because a ComboBox bound to null draws blank and reads as a value.
@@ -198,8 +191,69 @@ namespace VirtDeck.Avalonia.Views
         }
 
         public override string Value => _text;
+    }
 
-        public override void Revert() => Text = Setting.Value;
+    /// <summary>
+    /// A list of values behind an Edit button, edited in <c>ListSettingWindow</c>.
+    ///
+    /// <para><b>The only row whose control does not hold the value.</b> The other four are a tick, a
+    /// spinner, a dropdown and a box, and each is the value; this one is a button, and what it opens
+    /// hands an answer back or does not. So the row owns the entries and the window edits a copy,
+    /// which is also what makes Cancel mean something without the page having to remember a
+    /// before.</para>
+    ///
+    /// <para>The wire spelling is the entries joined by a newline, as
+    /// <see cref="SettingKind.List"/> defines it, so <see cref="PackageSettingRow.IsDirty"/> and the
+    /// change that travels on it work exactly as they do for every other row: order counts, because
+    /// the file keeps it.</para>
+    /// </summary>
+    public sealed class ListSettingRow : PackageSettingRow
+    {
+        private List<string> _items;
+
+        public ListSettingRow(PackageSetting setting) : base(setting) => _items = Split(setting.Value);
+
+        /// <summary>The entries, as the editor window's starting point and never edited in place.</summary>
+        public IReadOnlyList<string> Items => _items;
+
+        /// <summary>What the editor window puts at the top of itself.</summary>
+        public string EditorNote => Setting.EditorNote;
+
+        /// <summary>The greyed example in an empty row of the editor.</summary>
+        public string ItemPlaceholder => Setting.ItemPlaceholder;
+
+        /// <summary>
+        /// What the page shows beside the button: the entries, comma joined and trimmed by the
+        /// control. An empty list says so in words rather than leaving the cell blank, because a blank
+        /// there reads as "not read yet" and this one is a real and consequential answer.
+        /// </summary>
+        public string Summary =>
+            _items.Count > 0 ? string.Join(", ", _items) :
+            Setting.EmptySummary.Length > 0 ? Setting.EmptySummary : "Nothing configured";
+
+        public bool IsEmpty => _items.Count == 0;
+
+        /// <summary>What the editor window accepted. Raises the same three as every other setter.</summary>
+        public void Replace(IEnumerable<string> items)
+        {
+            var next = items.Select(i => i.Trim()).Where(i => i.Length > 0).ToList();
+            if (next.SequenceEqual(_items, StringComparer.Ordinal)) return;
+
+            _items = next;
+            Raise(nameof(Items));
+            Raise(nameof(Summary));
+            Raise(nameof(IsEmpty));
+            Raise(nameof(Value));
+            Raise(nameof(IsDirty));
+        }
+
+        public override string Value => string.Join("\n", _items);
+
+        private static List<string> Split(string value) =>
+            value.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                 .Select(v => v.Trim())
+                 .Where(v => v.Length > 0)
+                 .ToList();
     }
 
     /// <summary>

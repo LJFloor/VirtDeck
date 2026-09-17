@@ -1,0 +1,49 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.ListSettingWindow"
+        Title="Edit list"
+        Width="720" Height="460"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="OkButton" Content="OK" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <!-- The note is the manager's own words, so this window says what the list is for without
+         knowing which tool it belongs to. -->
+    <TextBlock Name="NoteText" DockPanel.Dock="Top" Classes="note" TextWrapping="Wrap"
+               Margin="0,0,0,12" />
+
+    <TextBlock Name="ErrorText" DockPanel.Dock="Bottom" Classes="error" TextWrapping="Wrap"
+               IsVisible="False" Margin="0,8,0,0" />
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Entries" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="EntryTools" Margin="8,6,8,6" />
+
+        <!-- A ListBox and not an ItemsControl, for RowList's own reason: a row here is both typed
+             into and pointed at, and the minus button has to mean the row the caret is in. -->
+        <ListBox Name="EntryList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:ListEntryRow">
+              <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                       PlaceholderText="{Binding Placeholder}" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</Window>

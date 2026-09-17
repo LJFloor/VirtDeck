@@ -21,6 +21,18 @@ namespace VirtDeck.Models
 
         /// <summary>A <c>TextBox</c>, for a value with no shape worth enforcing here.</summary>
         Text,
+
+        /// <summary>
+        /// A list of values, edited in a window of its own behind an Edit button.
+        ///
+        /// <para><b><see cref="PackageSetting.Value"/> holds the entries joined by a newline</b>, and
+        /// that is still the wire spelling the class remarks insist on: every line of it is one value
+        /// exactly as the host's file spells it, and the newline is only how several of them travel
+        /// through one string. A newline is safe as the separator because no value that reaches here
+        /// can contain one; a control character is what
+        /// <c>PackageSettingScripts.IsWritable</c> refuses outright.</para>
+        /// </summary>
+        List,
     }
 
     /// <summary>
@@ -62,6 +74,25 @@ namespace VirtDeck.Models
 
         /// <summary>The options of a <see cref="SettingKind.Choice"/>, and empty for every other kind.</summary>
         public IReadOnlyList<SettingChoice> Choices { get; set; } = Array.Empty<SettingChoice>();
+
+        /// <summary>
+        /// The paragraph at the top of a <see cref="SettingKind.List"/>'s editor window, and empty for
+        /// every other kind. It is a property of the setting rather than text in the markup for the
+        /// reason the whole page is built this way: the window is one window for any list any manager
+        /// declares, so what a pattern means and how the file behaves has to come from the manager
+        /// that knows, and nothing in the view names apt, dnf or pacman.
+        /// </summary>
+        public string EditorNote { get; set; } = string.Empty;
+
+        /// <summary>The greyed example in an empty row of a <see cref="SettingKind.List"/>'s editor.</summary>
+        public string ItemPlaceholder { get; set; } = string.Empty;
+
+        /// <summary>
+        /// What the page shows beside the Edit button when a <see cref="SettingKind.List"/> holds
+        /// nothing. It says what an empty list does rather than nothing at all, and it is the
+        /// manager's sentence because only the manager knows what reads the list.
+        /// </summary>
+        public string EmptySummary { get; set; } = string.Empty;
 
         public int Min { get; set; }
         public int Max { get; set; } = int.MaxValue;

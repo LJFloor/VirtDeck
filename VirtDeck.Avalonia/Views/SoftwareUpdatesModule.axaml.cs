@@ -114,6 +114,13 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private string _settingsFor = string.Empty;
 
     /// <summary>
+    /// A save is in flight, so a row raising while it runs is the save's own doing and not somebody's.
+    /// It covers the re-read at the end of one too, where every row is built afresh and announces
+    /// itself. Without it the first automatic save would start a second about rows already gone.
+    /// </summary>
+    private bool _savingSettings;
+
+    /// <summary>
     /// Which half of an upgrade is running. The one piece of state the strip keeps, because it is
     /// what decides whether Cancel is offered.
     /// </summary>
@@ -151,8 +158,6 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         RefreshHistoryButton.Click += async (_, _) => await LoadHistoryAsync(force: true);
 
         SettingsGroups.ItemsSource = _settingGroups;
-        SaveSettingsButton.Click += async (_, _) => await SaveSettingsAsync();
-        RevertSettingsButton.Click += (_, _) => RevertSettings();
         RefreshSettingsButton.Click += async (_, _) => await LoadSettingsAsync(force: true);
 
         // Issued off the UI thread: the streaming runner disconnects its own SSH client inline on
@@ -696,16 +701,13 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         RebootButton.IsEnabled = !_busy;
 
-        var changed = SettingsChanges().Count;
-        var saveReason =
-            _settings is null ? "There are no settings on screen to save." :
-            changed == 0 ? "Nothing on this page has been changed." :
-            "";
-
-        SaveSettingsButton.IsEnabled = !_busy && saveReason.Length == 0;
-        SaveSettingsButton.Tag = NullIfEmpty(saveReason);
-        RevertSettingsButton.IsEnabled = !_busy && changed > 0;
         RefreshSettingsButton.IsEnabled = !_busy;
+
+        // The page belongs to the save while one runs. With no Save button there is nothing to press
+        // twice, but a second control moved during the round trip would be written by nothing and
+        // then wiped by the re-read that ends it, which is the one way this page could lose a change
+        // without saying so.
+        SettingsGroups.IsEnabled = !_busy && !_savingSettings;
     }
 
     private static string? NullIfEmpty(string text) => text.Length == 0 ? null : text;
@@ -1002,12 +1004,6 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     {
         if (_packages is null || _busy) return;
 
-        if (!force && IsSettingsDirty())
-        {
-            SetStatus("These settings have unsaved changes, so they were left as they are.");
-            return;
-        }
-
         // A host with no package manager is never drawn this module at all, so this is the answer for
         // parity with Refresh rather than one anybody is expected to see. It is still drawn and not
         // swallowed: a page that can say why it is empty beats one that is simply empty.
@@ -1092,11 +1088,27 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         _settingsFor = string.Empty;
     }
 
-    // Only IsDirty matters here, and it is raised for every change a row makes, so the cheap test is
-    // the property name rather than recomputing the whole page on a keystroke in a text box.
-    private void OnSettingChanged(object? sender, PropertyChangedEventArgs e)
+    /// <summary>
+    /// A control moved, so the host is told. There is no Save button: this is it.
+    ///
+    /// <para><b>Every row on this page is a discrete act</b>, which is what makes writing on change
+    /// affordable. The four kinds are a tick, a dropdown, a spinner and a list edited behind an OK
+    /// button, and each of them moves once per decision; the two free-text rows that used to be here
+    /// became a dropdown and that list precisely because a keystroke is not a decision and an
+    /// elevated round trip per character is not a thing to do to a host.</para>
+    ///
+    /// <para><b>Re-entrancy is the whole hazard.</b> The save re-reads the page, which rebuilds every
+    /// row, and a rebuilt row raises for its initial value; <see cref="_savingSettings"/> is what
+    /// keeps that from writing again. It is also why this is the only place that starts a save: a
+    /// second one queued behind the first would be about rows that no longer exist.</para>
+    /// </summary>
+    private async void OnSettingChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(PackageSettingRow.IsDirty)) UpdateCommands();
+        if (e.PropertyName is not nameof(PackageSettingRow.IsDirty)) return;
+        if (_savingSettings) return;
+
+        UpdateCommands();
+        await SaveSettingsAsync();
     }
 
     private IReadOnlyList<PackageSettingChange> SettingsChanges() =>
@@ -1105,15 +1117,6 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             .Select(r => r.Change)
             .OfType<PackageSettingChange>()
             .ToList();
-
-    private bool IsSettingsDirty() => SettingsChanges().Count > 0;
-
-    private void RevertSettings()
-    {
-        foreach (var setting in _settingGroups.SelectMany(g => g.Rows)) setting.Revert();
-        UpdateCommands();
-        SetStatus("Settings put back to what the host says.");
-    }
 
     /// <summary>
     /// Writes what moved, then reads the whole page again.
@@ -1126,11 +1129,28 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// </summary>
     private async Task SaveSettingsAsync()
     {
-        if (_packages is null || _busy || _settings is not { } asRead) return;
+        if (_packages is null || _busy || _savingSettings || _settings is not { } asRead) return;
 
         var changes = SettingsChanges();
         if (changes.Count == 0) return;
 
+        _savingSettings = true;
+        UpdateCommands();
+        try
+        {
+            await WriteSettingsAsync(changes, asRead);
+        }
+        finally
+        {
+            _savingSettings = false;
+        }
+
+        UpdateCommands();
+    }
+
+    private async Task WriteSettingsAsync(
+        IReadOnlyList<PackageSettingChange> changes, PackageSettingCatalog asRead)
+    {
         var ok = await RunOpAsync("Save settings", "Saving settings", async ct =>
         {
             try
@@ -1149,9 +1169,31 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             }
         });
 
+        // Whether it worked or not: the re-read is how a key apt normalised, a timer systemd refused
+        // and a value another file outranks become visible, and with no Save button it is also the
+        // only thing that puts a refused control back where the host has it.
         await LoadSettingsAsync(force: true);
 
         if (ok) SetStatus($"{changes.Count} setting{(changes.Count == 1 ? "" : "s")} saved.");
+    }
+
+    /// <summary>
+    /// Opens the window a list row is edited in, and takes what it answers.
+    ///
+    /// <para>The row is handed its entries back rather than the window writing anything: accepting
+    /// makes the row dirty, and on this page a dirty row saves itself. Cancel answers null and
+    /// nothing moved, which is the only reason this one row can be cancelled at all when a tick two
+    /// rows up cannot.</para>
+    /// </summary>
+    private async void EditListClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ListSettingRow row }) return;
+        if (_busy || _savingSettings) return;
+
+        var window = new ListSettingWindow(row.Label, row.EditorNote, row.ItemPlaceholder, row.Items);
+        await window.ShowDialog(Owner);
+
+        if (window.Result is { } entries) row.Replace(entries);
     }
 
     /// <summary>
@@ -1174,10 +1216,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         if (_packages is null || _busy || package.Length == 0) return;
 
         if (!await MessageDialog.Confirm(Owner, "Install package",
-                $"Install {package} on this host?\n\n" +
-                $"{Packages.Manager.DisplayName} will install it and whatever it depends on. It is " +
-                "what the settings in that group need in order to do anything, and it is the only " +
-                "package this page installs by name."))
+                $"Install {package} package on this host?"))
             return;
 
         var verb = $"Installing {package}";

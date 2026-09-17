@@ -1,3 +1,4 @@
+using System.Globalization;
 using VirtDeck.Models;
 using VirtDeck.Services;
 
@@ -434,6 +435,16 @@ namespace VirtDeck.Updates
         /// <summary>The package that turns "download updates" into "install updates".</summary>
         private const string Unattended = "unattended-upgrades";
 
+        /// <summary>apt's append operator, which is how one key comes to hold several values.</summary>
+        private const string Append = "::";
+
+        /// <summary>
+        /// The keys this manager writes as a list rather than an assignment. One entry, and it is a
+        /// set rather than a comparison so the next one is a line.
+        /// </summary>
+        private static readonly HashSet<string> ListKeys =
+            new(StringComparer.Ordinal) { "Unattended-Upgrade::Allowed-Origins" };
+
         public string SettingsUnavailableReason => string.Empty;
 
         /// <summary>
@@ -484,6 +495,17 @@ namespace VirtDeck.Updates
             new("2", "Every 2 days"),
             new("7", "Every week"),
         ];
+
+        // "now" plus every hour, which is what the file takes: unattended-upgrades parses this with
+        // datetime.strptime("%H:%M"), so a half hour is legal and simply not offered here. A host
+        // already holding one keeps it, because Choice turns a value it cannot spell into a row that
+        // states the host's own words rather than rounding it.
+        private static readonly SettingChoice[] RebootTimes =
+            new[] { new SettingChoice("now", "As soon as the upgrade is done") }
+                .Concat(Enumerable.Range(0, 24)
+                    .Select(h => h.ToString("00", CultureInfo.InvariantCulture) + ":00")
+                    .Select(t => new SettingChoice(t, t)))
+                .ToArray();
 
         private static readonly SettingChoice[] CleanIntervals =
         [
@@ -573,9 +595,6 @@ namespace VirtDeck.Updates
             var group = new PackageSettingGroup
             {
                 Title = "Automatic updates",
-                Hint = $"apt's own periodic settings. VirtDeck writes them to {DropIn}, which apt " +
-                       "reads after the files the distribution ships, so nothing here overwrites " +
-                       "20auto-upgrades: deleting that one file is the whole undo.",
             };
 
             group.Settings.Add(Toggle(config, "APT::Periodic::Enable", true,
@@ -627,8 +646,6 @@ namespace VirtDeck.Updates
             var group = new PackageSettingGroup
             {
                 Title = "Unattended upgrades",
-                Hint = $"What unattended-upgrades does once apt has handed it an upgrade. Written to " +
-                       $"{DropIn}, so 50unattended-upgrades is left alone.",
             };
 
             if (!haveUnattended)
@@ -641,29 +658,52 @@ namespace VirtDeck.Updates
             }
 
             // What gets installed is the first question anybody has about automatic updates, and dnf
-            // answers it with one word (upgrade_type). apt's answer is a list option, replaced with a
-            // brace block and appended to with `::`, and getting it wrong is silent in the worst
-            // direction: too narrow and nothing is ever installed, too wide and everything is. So it
-            // is stated and not offered, which is what ReadOnly is for. The origins themselves are
-            // distribution-specific and the host has already been configured with the right ones.
-            var origins = Join(config, "Unattended-Upgrade::Allowed-Origins");
-            if (origins.Length == 0) origins = Join(config, "Unattended-Upgrade::Origins-Pattern");
+            // answers it with one word (upgrade_type). apt's answer is a list, which is why this one
+            // row is a window of its own rather than a control on the page: a comma-joined box was
+            // unreadable at this width and could not say which part of it was one entry.
+            var origins = Lines(config, "Unattended-Upgrade::Allowed-Origins");
 
-            group.Settings.Add(new PackageSetting
+            var list = new PackageSetting
             {
                 Key = "Unattended-Upgrade::Allowed-Origins",
                 Label = "Allowed origins",
                 Description = "Which suites unattended-upgrades may install from. This is the answer " +
                               "to whether automatic updates means security fixes only or everything.",
-                Kind = SettingKind.Text,
-                Value = origins.Length > 0 ? origins : "(none configured, so nothing is installed)",
-                ReadOnly = true,
-                UnavailableReason =
-                    "VirtDeck states this rather than editing it. It is a list, the patterns differ " +
-                    "between Debian and Ubuntu, and both ways of being wrong are silent: too narrow " +
-                    "and nothing is ever installed, too wide and everything is. Edit it in " +
-                    "/etc/apt/apt.conf.d/50unattended-upgrades.",
-            });
+                Kind = SettingKind.List,
+                Value = string.Join("\n", origins),
+                ItemPlaceholder = "origin=Debian,codename=${distro_codename},label=Debian-Security",
+                EmptySummary = "Nothing, so unattended-upgrades installs nothing",
+                EditorNote =
+                    "One origin per row. A pattern is a comma separated list of archive fields " +
+                    "(origin, codename, label, suite, a) and the ${distro_id} and ${distro_codename} " +
+                    "variables unattended-upgrades expands; Debian and Ubuntu spell them differently, " +
+                    "so copy the shape of what is already here rather than another machine's. Both " +
+                    "ways of being wrong are silent: too narrow and nothing is ever installed, too " +
+                    $"wide and everything is.\n\nSaving writes the whole list to {DropIn} behind a " +
+                    "#clear, which is what replaces what 50unattended-upgrades says rather than " +
+                    "adding to it. An empty list writes nothing and hands the setting back to that " +
+                    "file.",
+            };
+
+            // A host configured with Origins-Pattern instead is left alone. unattended-upgrades reads
+            // both lists and installs from either, so writing Allowed-Origins here would widen what
+            // the host does rather than change it, and the row would be a lie about which list is in
+            // force. It is the Choice helper's refusal one key over: a shape this page cannot hold is
+            // shown in the host's own words and not edited.
+            var pattern = Lines(config, "Unattended-Upgrade::Origins-Pattern");
+            if (origins.Count == 0 && pattern.Count > 0)
+            {
+                list.Kind = SettingKind.Text;
+                list.Value = string.Join(", ", pattern);
+                list.ReadOnly = true;
+                list.UnavailableReason =
+                    "This host answers with Unattended-Upgrade::Origins-Pattern rather than " +
+                    "Allowed-Origins. unattended-upgrades reads both and installs from either, so " +
+                    "anything VirtDeck wrote to Allowed-Origins would widen what this host installs " +
+                    "instead of changing it. Edit it in /etc/apt/apt.conf.d/50unattended-upgrades.";
+            }
+
+            group.Settings.Add(Outranked(list, mainConf));
 
             group.Settings.Add(Toggle(config, "Unattended-Upgrade::Automatic-Reboot", false,
                 "Reboot when an upgrade needs it",
@@ -671,15 +711,13 @@ namespace VirtDeck.Updates
                 "does. Off means the reboot notice on the Available updates tab is how you find out.",
                 mainConf));
 
-            group.Settings.Add(new PackageSetting
-            {
-                Key = "Unattended-Upgrade::Automatic-Reboot-Time",
-                Label = "Reboot at",
-                Description = "Automatic-Reboot-Time, as HH:MM on the host's own clock. Only used " +
-                              "when the reboot above is on.",
-                Kind = SettingKind.Text,
-                Value = One(config, "Unattended-Upgrade::Automatic-Reboot-Time", "now"),
-            });
+            group.Settings.Add(Choice(config, "Unattended-Upgrade::Automatic-Reboot-Time",
+                RebootTimes, "now",
+                "Reboot at",
+                "On the host's own clock, and only used when the reboot above is on",
+                mainConf,
+                "which unattended-upgrades understands (it takes any HH:MM, and the word now) but " +
+                "this dropdown cannot hold, since it offers the hour times and \"now\"."));
 
             group.Settings.Add(Toggle(config, "Unattended-Upgrade::Automatic-Reboot-WithUsers", true,
                 "Reboot even with users logged in",
@@ -729,8 +767,6 @@ namespace VirtDeck.Updates
             new()
             {
                 Title = "Every install on this host",
-                Hint = "Not about automatic updates: this one applies to anything that installs a " +
-                       "package here, including the Install all updates button.",
                 Settings =
                 {
                     Toggle(config, "APT::Install-Recommends", true,
@@ -749,6 +785,13 @@ namespace VirtDeck.Updates
 
         private static string Join(IReadOnlyDictionary<string, List<string>> config, string key) =>
             config.TryGetValue(key, out var v) ? string.Join(", ", v) : string.Empty;
+
+        // A list option's entries, in the order apt dumped them. Empty values never reach here: the
+        // parser drops them, which is what makes the empty parent apt prints ahead of every list
+        // disappear rather than become a blank first row.
+        private static IReadOnlyList<string> Lines(
+            IReadOnlyDictionary<string, List<string>> config, string key) =>
+            config.TryGetValue(key, out var v) ? v : Array.Empty<string>();
 
         private static PackageSetting Toggle(
             IReadOnlyDictionary<string, List<string>> config, string key, bool fallback,
@@ -803,7 +846,8 @@ namespace VirtDeck.Updates
         private static PackageSetting Choice(
             IReadOnlyDictionary<string, List<string>> config, string key,
             SettingChoice[] choices, string fallback,
-            string label, string description, string mainConf)
+            string label, string description, string mainConf,
+            string? cannotSpell = null)
         {
             var value = One(config, key, fallback).Trim();
 
@@ -826,9 +870,10 @@ namespace VirtDeck.Updates
                 setting.Kind = SettingKind.Text;
                 setting.ReadOnly = true;
                 setting.UnavailableReason =
-                    $"This host has {key} set to \"{value}\", which apt understands (it takes a " +
-                    "suffix of s, m, h or d, and the word always) but this dropdown cannot hold. " +
-                    "VirtDeck is leaving it exactly as it is rather than rounding it.";
+                    $"This host has {key} set to \"{value}\", " +
+                    (cannotSpell ?? "which apt understands (it takes a suffix of s, m, h or d, and " +
+                                    "the word always) but this dropdown cannot hold") +
+                    ". VirtDeck is leaving it exactly as it is rather than rounding it.";
             }
 
             return Outranked(setting, mainConf);
@@ -866,9 +911,19 @@ namespace VirtDeck.Updates
         {
             var units = new List<(string Unit, bool Enabled)>();
             var keys = new Dictionary<string, string>(StringComparer.Ordinal);
+            var lists = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
             // What the drop-in already says, so a save about one key does not drop the others.
-            foreach (var line in Existing(asRead)) keys[line.Key] = line.Value;
+            foreach (var line in Existing(asRead))
+            {
+                if (line.Key.EndsWith(Append, StringComparison.Ordinal))
+                {
+                    var name = line.Key[..^Append.Length];
+                    if (!lists.TryGetValue(name, out var had)) lists[name] = had = new List<string>();
+                    had.Add(line.Value);
+                }
+                else keys[line.Key] = line.Value;
+            }
 
             foreach (var change in changes)
             {
@@ -878,11 +933,35 @@ namespace VirtDeck.Updates
                     continue;
                 }
 
+                if (ListKeys.Contains(change.Key))
+                {
+                    // An empty list is a removal and not an empty #clear. Writing the clear with
+                    // nothing after it is legal and means unattended-upgrades installs from nowhere,
+                    // which is a thing somebody might want and not a thing an emptied editor says; the
+                    // drop-in's whole bargain is that a key VirtDeck has no opinion about is left to
+                    // the files Debian ships, and having none is how that opinion is withdrawn.
+                    var entries = change.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                             .Select(e => e.Trim())
+                                             .Where(e => e.Length > 0)
+                                             .ToList();
+
+                    // Each entry ends up inside its own quoted apt string, so the same refusal the
+                    // scalars get applies one value at a time.
+                    foreach (var entry in entries)
+                        if (!PackageSettingScripts.IsWritable(entry))
+                            throw new ArgumentException(
+                                $"{change.Key} cannot hold {entry}", nameof(changes));
+
+                    if (change.Remove || entries.Count == 0) lists.Remove(change.Key);
+                    else lists[change.Key] = entries;
+                    continue;
+                }
+
                 if (change.Remove) keys.Remove(change.Key);
                 else keys[change.Key] = Render(change.Key, change.Text);
             }
 
-            var body = keys.Count == 0 ? null : Compose(keys);
+            var body = keys.Count == 0 && lists.Count == 0 ? null : Compose(keys, lists);
 
             var script =
                 PackageScripts.Preamble + "set -e\n" +
@@ -904,7 +983,9 @@ namespace VirtDeck.Updates
             return value.Length == 0 ? "0" : value;
         }
 
-        private static string Compose(IReadOnlyDictionary<string, string> keys)
+        private static string Compose(
+            IReadOnlyDictionary<string, string> keys,
+            IReadOnlyDictionary<string, List<string>> lists)
         {
             var text = "// Written by VirtDeck. Every line here overrides the files Debian ships,\n" +
                        "// because apt reads this directory in order and 99 sorts last. Deleting\n" +
@@ -912,6 +993,19 @@ namespace VirtDeck.Updates
 
             foreach (var (key, value) in keys.OrderBy(k => k.Key, StringComparer.Ordinal))
                 text += $"{key} \"{value}\";\n";
+
+            // #clear is the whole reason a list can be edited here at all. apt composes a list by
+            // appending, so a second brace block in a later file adds to the first rather than
+            // replacing it: without the clear, writing the list somebody assembled in the editor would
+            // leave every pattern 50unattended-upgrades names still in force, and removing one here
+            // would do nothing at all. Measured against apt-config on a host with the stock file.
+            //
+            // The entries keep the order the editor left them in, so this loop does not sort.
+            foreach (var (key, values) in lists.OrderBy(k => k.Key, StringComparer.Ordinal))
+            {
+                text += $"#clear {key};\n";
+                foreach (var value in values) text += $"{key}{Append} \"{value}\";\n";
+            }
 
             return text;
         }
