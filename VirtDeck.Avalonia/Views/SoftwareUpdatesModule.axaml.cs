@@ -92,8 +92,16 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// history table's call and for the same reason: nothing polls this page, so no refresh arrives
     /// unasked to drop what somebody was in the middle of, and a read the user did ask for should
     /// replace the form wholesale rather than reconcile it.
+    ///
+    /// <para><b>Observable, and not because anything here is watching it.</b> The list is handed to
+    /// the ItemsControl once, in the constructor, and it is empty then: the read that fills it is a
+    /// round trip that has not been made yet the first time the tab is looked at. A plain
+    /// <c>List</c> announces nothing, so the presenter draws the empty list it was given and every
+    /// later Add is invisible, which is a blank page rather than a wrong one. Both tables above are
+    /// observable for the same reason and never showed it, because they are populated from a listing
+    /// the service had already made.</para>
     /// </summary>
-    private readonly List<PackageSettingGroupRow> _settingGroups = new();
+    private readonly ObservableCollection<PackageSettingGroupRow> _settingGroups = new();
 
     /// <summary>
     /// The catalog the form on screen was drawn from, or null where there is none. It is handed back
@@ -278,7 +286,12 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         // filling in must not be replaced by a read they did not ask for. What it does do is notice a
         // manager it was not read for, which is what makes installing a package manager mid-session
         // discard a page about the old one rather than save against it.
-        if (_settingsFor.Length > 0 && _settingsFor != Packages.Manager.Id) ResetSettings();
+        if (_settingsFor.Length > 0 && _settingsFor != Packages.Manager.Id)
+        {
+            ResetSettings();
+            ShowSettings("This host's package manager changed, so these settings were discarded. " +
+                         "Refresh to read the new one's.");
+        }
     });
 
     /// <summary>

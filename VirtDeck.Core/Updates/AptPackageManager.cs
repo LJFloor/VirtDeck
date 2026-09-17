@@ -515,9 +515,20 @@ namespace VirtDeck.Updates
                 {
                     case "c" when fields.Length >= 2:
                         // A list option (Allowed-Origins) arrives as the same key several times over,
-                        // so every value is kept and the row joins them.
-                        if (!config.TryGetValue(fields[0], out var values))
-                            config[fields[0]] = values = new List<string>();
+                        // so every value is kept and the row joins them. apt spells those repeats with
+                        // the append operator still on the end of the tag, so the dump is one
+                        // "Unattended-Upgrade::Allowed-Origins=" holding nothing followed by an
+                        // "Unattended-Upgrade::Allowed-Origins::=<pattern>" per entry; asking for the
+                        // key without the suffix would find only that empty parent and report a host
+                        // installing security updates as one configured to install nothing. Stripping
+                        // it merges both spellings onto the name the rows use, and the parent's empty
+                        // value drops out below.
+                        var key = fields[0].EndsWith("::", StringComparison.Ordinal)
+                            ? fields[0][..^2]
+                            : fields[0];
+
+                        if (!config.TryGetValue(key, out var values))
+                            config[key] = values = new List<string>();
                         if (fields[1].Length > 0) values.Add(fields[1]);
                         answered = true;
                         break;
