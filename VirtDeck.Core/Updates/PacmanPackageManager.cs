@@ -383,5 +383,293 @@ namespace VirtDeck.Updates
             list.Reverse();
             return list;
         }
+
+        // ---- Settings --------------------------------------------------------
+
+        private const string Conf = "/etc/pacman.conf";
+        private const string Options = "options";
+        private const string CacheTimer = "paccache.timer";
+
+        /// <summary>The package that brings <c>paccache.timer</c> with it.</summary>
+        private const string Contrib = "pacman-contrib";
+
+        public string SettingsUnavailableReason => string.Empty;
+
+        /// <summary>
+        /// <b>Arch has no automatic updates and VirtDeck will not invent them.</b> This is
+        /// <see cref="SecurityUnsupportedReason"/>'s shape one tab over and for the same reason: the
+        /// honest answer is a refusal with a reason on it, and the dishonest ones are hiding the group
+        /// so an Arch host looks like it was never asked, or quietly writing a timer.
+        ///
+        /// <para>The timer is the part worth being firm about. <c>pacman -Syu --noconfirm</c> on a
+        /// schedule is not the same offer apt and dnf make: Arch ships upgrades that need a manual
+        /// intervention announced on its news page, a partial upgrade is unsupported rather than
+        /// merely unwise, and nothing in this app would be there at 03:00 to answer a prompt or read
+        /// the news. Arch itself declines to ship this, which is the clearest evidence available about
+        /// whether it is a good idea.</para>
+        /// </summary>
+        private const string NoAutomaticUpdates =
+            "Arch ships no automatic update mechanism, and VirtDeck will not write one. An upgrade " +
+            "here can need a step announced on the Arch news page, and a partial upgrade is " +
+            "unsupported rather than just unwise, so a timer running pacman -Syu unattended is how a " +
+            "host ends up half upgraded with nobody watching. Use Install all updates, and read what " +
+            "pacman says while it runs.";
+
+        /// <summary>
+        /// One round trip, un-elevated: the config file whole, the cache timer's state, whether
+        /// pacman-contrib is installed, and what pacman itself thinks <c>ParallelDownloads</c> is.
+        ///
+        /// <para>That last record is the honesty check. The file is what gets edited, so the file is
+        /// what the page draws; but <c>pacman.conf</c> may <c>Include</c> another file, and a value
+        /// set there would outrank ours silently. Asking <c>pacman-conf</c> as well costs one fork and
+        /// turns that into a row that says so. Same call the apt manager makes about
+        /// <c>/etc/apt/apt.conf</c>.</para>
+        /// </summary>
+        public HostScript SettingsScript => new(
+            PackageScripts.Preamble +
+            PackageSettingScripts.FileRecords([Conf]) +
+            PackageSettingScripts.UnitRecords([CacheTimer]) +
+            $$"""
+            if pacman -Q -- {{Contrib}} >/dev/null 2>&1; then
+              printf 'p\t%s\t1\n' {{Contrib}}
+            else
+              printf 'p\t%s\t0\n' {{Contrib}}
+            fi
+            printf 'e\tParallelDownloads\t%s\n' "$(pacman-conf ParallelDownloads 2>/dev/null | head -n 1)"
+            exit 0
+            """,
+            Elevated: false);
+
+        public PackageSettingCatalog ParseSettings(string raw)
+        {
+            var catalog = new PackageSettingCatalog
+            {
+                ManagerId = Id,
+                ManagerName = DisplayName,
+                Read = true,
+            };
+
+            var conf = Ini.None;
+            var confRead = false;
+            var units = new Dictionary<string, UnitState>(StringComparer.Ordinal);
+            var haveContrib = false;
+            var effectiveParallel = string.Empty;
+
+            foreach (var (tag, text) in PackageScripts.Records(raw))
+            {
+                var fields = text.Split('\t', 4);
+
+                switch (tag)
+                {
+                    case "f" when fields.Length >= 2 && fields[0] == Conf:
+                        var body = PackageScripts.Decode(fields[1]);
+                        conf = Ini.Parse(body);
+                        confRead = true;
+                        catalog.Files[Conf] = body;
+                        break;
+
+                    case "x" when fields.Length >= 1:
+                        catalog.ReadFailure = $"VirtDeck could not read {fields[0]} on this host.";
+                        break;
+
+                    case "t" when fields.Length >= 3:
+                        units[fields[0]] = new UnitState(fields[0], fields[1], fields[2]);
+                        break;
+
+                    case "p" when fields.Length >= 2:
+                        haveContrib = fields[1] == "1";
+                        break;
+
+                    case "e" when fields.Length >= 2:
+                        effectiveParallel = fields[1].Trim();
+                        break;
+                }
+            }
+
+            if (!confRead && catalog.ReadFailure.Length == 0)
+                catalog.ReadFailure = $"pacman did not answer about {Conf}.";
+
+            catalog.Groups.Add(new PackageSettingGroup
+            {
+                Title = "Automatic updates",
+                UnavailableReason = NoAutomaticUpdates,
+            });
+
+            catalog.Groups.Add(DownloadsGroup(conf, effectiveParallel));
+            catalog.Groups.Add(CacheGroup(units, haveContrib));
+
+            return catalog;
+        }
+
+        private static PackageSettingGroup DownloadsGroup(Ini conf, string effectiveParallel)
+        {
+            // Unset is not five. The stock file ships "#ParallelDownloads = 5" commented out, and with
+            // the directive absent pacman fetches one package at a time, so drawing 5 for an untouched
+            // host would state a number pacman has never acted on.
+            var fileParallel = conf.Number(Options, "ParallelDownloads", 0);
+            var parallel = new PackageSetting
+            {
+                Key = "ParallelDownloads",
+                Label = "Parallel downloads",
+                Description = "ParallelDownloads in pacman.conf. Zero fetches one package at a time, " +
+                              "which is what pacman does when the directive is absent.",
+                Kind = SettingKind.Number,
+                Value = fileParallel.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Min = 0,
+                Max = 20,
+                Unit = "at a time",
+            };
+
+            // What pacman reads and what this page can edit have come apart, which an Include in
+            // pacman.conf is enough to do. Saying so beats writing a value that will not take effect.
+            if (effectiveParallel.Length > 0 &&
+                int.TryParse(effectiveParallel, out var live) && live != fileParallel)
+            {
+                parallel.Value = effectiveParallel;
+                parallel.ReadOnly = true;
+                parallel.UnavailableReason =
+                    $"pacman reads this as {live}, which is not what {Conf} says, so it is being set " +
+                    "somewhere VirtDeck is not editing: an Include, most likely. Change it there.";
+            }
+
+            return new PackageSettingGroup
+            {
+                Title = "Downloads",
+                Hint = $"The [options] section of {Conf}.",
+                Settings =
+                {
+                    parallel,
+                    Flag(conf, "CheckSpace", "Check free space first",
+                        "CheckSpace in pacman.conf: pacman works out whether the packages will fit " +
+                        "before it starts installing them."),
+                    Flag(conf, "DisableDownloadTimeout", "No download timeout",
+                        "DisableDownloadTimeout in pacman.conf. Worth turning on for a host behind a " +
+                        "slow or intermittent link, where pacman otherwise gives up on a mirror that " +
+                        "was going to answer."),
+                },
+            };
+        }
+
+        // Every pacman flag is on by being present and off by being absent: there is no "= false" to
+        // write. So the value here is the app's own "1" or empty, and the save turns that back into a
+        // line or a commented-out line.
+        private static PackageSetting Flag(Ini conf, string key, string label, string description) =>
+            new()
+            {
+                Key = key,
+                Label = label,
+                Description = description,
+                Kind = SettingKind.Toggle,
+                Value = conf.Has(Options, key) ? "1" : string.Empty,
+            };
+
+        private static PackageSettingGroup CacheGroup(
+            IReadOnlyDictionary<string, UnitState> units, bool haveContrib)
+        {
+            var group = new PackageSettingGroup
+            {
+                Title = "Cache cleaning",
+                Hint = "pacman keeps every version of every package it has ever downloaded until " +
+                       "something removes it. paccache.timer is what removes them.",
+            };
+
+            var unit = units.GetValueOrDefault(CacheTimer);
+            if (unit is null || unit.Missing)
+            {
+                group.UnavailableReason = haveContrib
+                    ? $"{Contrib} is installed on this host but brought no {CacheTimer} with it, so " +
+                      "there is nothing here to schedule."
+                    : $"pacman keeps every version of every package it has ever downloaded. The " +
+                      $"timer that clears them out, {CacheTimer}, comes from {Contrib}, which is not " +
+                      "installed on this host.";
+                group.MissingPackage = haveContrib ? string.Empty : Contrib;
+                return group;
+            }
+
+            // The keep count is deliberately not here. It lives in PACCACHE_ARGS in
+            // /etc/conf.d/pacman-contrib, which paccache.service reads through EnvironmentFile, so it
+            // is neither a unit property nor a pacman.conf key; a third file for one number is more
+            // surface than the number is worth, and paccache's own default of three versions is a
+            // reasonable answer nobody has to be asked about.
+            group.Settings.Add(new PackageSetting
+            {
+                Key = CacheTimer,
+                Label = "Clean the package cache weekly",
+                Description = "Runs paccache -r on a timer, which keeps the three most recent " +
+                              "versions of each package and removes the rest.",
+                Kind = SettingKind.Toggle,
+                Value = unit.Enabled ? "1" : string.Empty,
+                ReadOnly = unit.Frozen.Length > 0,
+                UnavailableReason = unit.Frozen,
+            });
+
+            return group;
+        }
+
+        public HostScript SaveSettingsScript(
+            IReadOnlyList<PackageSettingChange> changes, PackageSettingCatalog asRead)
+        {
+            var edits = new List<PackageSettingScripts.IniEdit>();
+            var units = new List<(string Unit, bool Enabled)>();
+
+            foreach (var change in changes)
+            {
+                switch (change.Key)
+                {
+                    case "ParallelDownloads":
+                        // Zero is the absence of the directive rather than a value to write, so it is
+                        // the one number here that comes out as a removal.
+                        var n = int.TryParse(change.Text, out var parsed) ? parsed : 0;
+                        edits.Add(n <= 0
+                            ? new PackageSettingScripts.IniEdit(Options, change.Key, string.Empty, Remove: true)
+                            : new PackageSettingScripts.IniEdit(
+                                Options, change.Key, $"ParallelDownloads = {n}"));
+                        break;
+
+                    case "CheckSpace":
+                    case "DisableDownloadTimeout":
+                        edits.Add(new PackageSettingScripts.IniEdit(
+                            Options, change.Key, change.Key, Remove: change.Text.Length == 0));
+                        break;
+
+                    case CacheTimer:
+                        units.Add((CacheTimer, change.Text.Length > 0));
+                        break;
+                }
+            }
+
+            var script =
+                PackageScripts.Preamble + "set -e\n" +
+                PackageSettingScripts.ConflictGuard(Touched(asRead, edits.Count > 0)) +
+                PackageSettingScripts.IniEditScript(
+                    Conf, "/etc", edits, "pacman-conf --config %f") +
+                PackageSettingScripts.UnitScript(units);
+
+            return edits.Count == 0 && units.Count == 0
+                ? HostScript.None
+                : new HostScript(script, Elevated: true);
+        }
+
+        // Only the file this save is about to write is guarded. A digest for a file nothing touched
+        // would turn an unrelated edit made at a terminal into a refusal of a save that never went
+        // near it.
+        private static IReadOnlyList<FileDigest> Touched(PackageSettingCatalog asRead, bool writingConf) =>
+            writingConf
+                ? asRead.DigestsFor(Conf)
+                : [];
+
+        /// <summary>
+        /// <c>pacman -S --needed --noconfirm</c>, streamed like the upgrade so
+        /// <see cref="ReadProgress"/> reads it. <c>--needed</c> so a package already there is not
+        /// reinstalled for nothing.
+        /// </summary>
+        public HostScript InstallScript(IReadOnlyList<string> packages) =>
+            packages.Count == 0
+                ? HostScript.None
+                : new HostScript(
+                    PackageScripts.Preamble +
+                    Services.ShellScript.ArrayFrom("i", packages) +
+                    "pacman -S --needed --noconfirm --noprogressbar -- \"${i[@]}\" 2>&1",
+                    Elevated: true);
     }
 }

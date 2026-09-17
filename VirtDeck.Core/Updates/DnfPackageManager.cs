@@ -407,5 +407,491 @@ namespace VirtDeck.Updates
 
             return list;
         }
+
+        // ---- Settings --------------------------------------------------------
+
+        private const string MainConf = "/etc/dnf/dnf.conf";
+        private const string AutoConf = "/etc/dnf/automatic.conf";
+
+        /// <summary>
+        /// Where dnf5 keeps the defaults <see cref="AutoConf"/> is layered over. Read so a dnf5 host
+        /// whose <c>/etc</c> file mentions two keys does not draw the other four as blank: on dnf5 that
+        /// file is an override of this one rather than the whole configuration, which dnf4 has no
+        /// equivalent of. Never written, and it would be wrong to: it belongs to the package.
+        /// </summary>
+        private const string Dnf5Defaults = "/usr/share/dnf5/dnf5-plugins/automatic.conf";
+
+        private const string Commands = "commands";
+        private const string Main = "main";
+
+        // Both names are probed whatever binary `command -v` found, because which automatic package is
+        // installed is a separate question from which dnf this host runs: dnf5 on a host that still has
+        // dnf-automatic from before the upgrade is exactly the case that a flag would get wrong.
+        private const string Dnf4Timer = "dnf-automatic.timer";
+        private const string Dnf5Timer = "dnf5-automatic.timer";
+
+        // dnf4's three variant timers pass --downloadupdates and --installupdates on the command line,
+        // so an enabled one overrides automatic.conf outright. Drawing the file's values beside one of
+        // these would be a page stating something the host is not doing.
+        private static readonly string[] VariantTimers =
+        [
+            "dnf-automatic-install.timer",
+            "dnf-automatic-download.timer",
+            "dnf-automatic-notifyonly.timer",
+        ];
+
+        private const string Dnf4Makecache = "dnf-makecache.timer";
+        private const string Dnf5Makecache = "dnf5-makecache.timer";
+
+        private bool IsDnf5 => _bin == "dnf5";
+
+        /// <summary>What to offer installing where no automatic timer exists at all.</summary>
+        private string AutomaticPackage => IsDnf5 ? "dnf5-plugin-automatic" : "dnf-automatic";
+
+        public string SettingsUnavailableReason => string.Empty;
+
+        /// <summary>
+        /// One round trip, un-elevated: the two config files it may write, dnf5's default layer, and
+        /// every timer either version could have.
+        /// </summary>
+        public HostScript SettingsScript => new(
+            PackageScripts.Preamble +
+            PackageSettingScripts.FileRecords([MainConf, AutoConf, Dnf5Defaults]) +
+            PackageSettingScripts.UnitRecords(
+                [Dnf4Timer, Dnf5Timer, Dnf4Makecache, Dnf5Makecache, .. VariantTimers]) +
+            "exit 0\n",
+            Elevated: false);
+
+        // Off is the timer being disabled and not a value in the file, because that is what actually
+        // stops it: download_updates and apply_updates decide what a run does, never whether one
+        // happens. The three on states are the two flags, which is why this is one row rather than two
+        // ticks somebody has to work out the combinations of.
+        private const string AutoKey = "automatic";
+        private const string AutoOff = "off";
+        private const string AutoNotify = "notify";
+        private const string AutoDownload = "download";
+        private const string AutoInstall = "install";
+
+        private static readonly SettingChoice[] AutoChoices =
+        [
+            new(AutoOff, "Off"),
+            new(AutoNotify, "Check and report only"),
+            new(AutoDownload, "Download, but do not install"),
+            new(AutoInstall, "Download and install"),
+        ];
+
+        private static readonly SettingChoice[] RebootChoices =
+        [
+            new("never", "Never"),
+            new("when-changed", "After any upgrade"),
+            new("when-needed", "Only when something needs it"),
+        ];
+
+        public PackageSettingCatalog ParseSettings(string raw)
+        {
+            var catalog = new PackageSettingCatalog
+            {
+                ManagerId = Id,
+                ManagerName = DisplayName,
+                Read = true,
+            };
+
+            var units = new Dictionary<string, UnitState>(StringComparer.Ordinal);
+
+            foreach (var (tag, text) in PackageScripts.Records(raw))
+            {
+                var fields = text.Split('\t', 4);
+
+                switch (tag)
+                {
+                    case "f" when fields.Length >= 2:
+                        catalog.Files[fields[0]] = PackageScripts.Decode(fields[1]);
+                        break;
+
+                    case "x" when fields.Length >= 1:
+                        // A file that is there and unreadable is not a missing package, and saying so
+                        // is the difference between an Install button that would help and one that
+                        // would install something already installed.
+                        catalog.ReadFailure =
+                            $"VirtDeck could not read {fields[0]} on this host. The settings read is " +
+                            "un-elevated, so a file only root may read cannot be drawn.";
+                        break;
+
+                    case "t" when fields.Length >= 3:
+                        units[fields[0]] = new UnitState(fields[0], fields[1], fields[2]);
+                        break;
+                }
+            }
+
+            if (catalog.Files.Count == 0 && catalog.ReadFailure.Length == 0)
+                catalog.ReadFailure = $"{_bin} did not answer about its own configuration.";
+
+            var main = Ini.Parse(catalog.Files.GetValueOrDefault(MainConf, string.Empty));
+            var auto = Ini.Parse(catalog.Files.GetValueOrDefault(AutoConf, string.Empty));
+            var shipped = Ini.Parse(catalog.Files.GetValueOrDefault(Dnf5Defaults, string.Empty));
+
+            catalog.Groups.Add(AutomaticGroup(auto, shipped, units));
+            catalog.Groups.Add(DownloadsGroup(main));
+            catalog.Groups.Add(MetadataGroup(units));
+
+            return catalog;
+        }
+
+        // /etc over the package's own file, which is the order dnf5 reads them in. On dnf4 the second
+        // one is empty and this is the plain reading.
+        private static bool Flag(Ini etc, Ini shipped, string key, bool fallback) =>
+            etc.Get(Commands, key) is not null
+                ? etc.Flag(Commands, key, fallback)
+                : shipped.Flag(Commands, key, fallback);
+
+        private static string Word(Ini etc, Ini shipped, string key, string fallback) =>
+            etc.Get(Commands, key) ?? shipped.Get(Commands, key) ?? fallback;
+
+        private PackageSettingGroup AutomaticGroup(
+            Ini auto, Ini shipped, IReadOnlyDictionary<string, UnitState> units)
+        {
+            var timer = Timer(units);
+            var group = new PackageSettingGroup
+            {
+                Title = "Automatic updates",
+                Hint = timer is null
+                    ? $"{AutoConf} and a timer to run it."
+                    : $"{AutoConf}, run by {timer.Unit}.",
+            };
+
+            if (timer is null)
+            {
+                group.UnavailableReason =
+                    $"This host has no dnf automatic timer, which comes from the " +
+                    $"{AutomaticPackage} package.";
+                group.MissingPackage = AutomaticPackage;
+                return group;
+            }
+
+            var download = Flag(auto, shipped, "download_updates", false);
+            var apply = Flag(auto, shipped, "apply_updates", false);
+
+            var mode = !timer.Enabled ? AutoOff
+                : apply ? AutoInstall
+                : download ? AutoDownload
+                : AutoNotify;
+
+            var automatic = new PackageSetting
+            {
+                Key = AutoKey,
+                Label = "Automatic updates",
+                Description = $"One row over three things: whether {timer.Unit} is enabled, and " +
+                              "download_updates and apply_updates in automatic.conf. They only make " +
+                              "sense together, which is why they are not three rows.",
+                Kind = SettingKind.Choice,
+                Choices = AutoChoices,
+                Value = mode,
+            };
+
+            // A variant timer states its intent on dnf-automatic's command line, so the file this page
+            // draws is not what decides. Saying so beats drawing values the host is overriding.
+            if (Variant(units) is { } variant)
+            {
+                automatic.ReadOnly = true;
+                automatic.Value = mode;
+                automatic.UnavailableReason =
+                    $"{variant} is enabled on this host, and that timer passes its own " +
+                    "--downloadupdates and --installupdates on the command line, so it overrules " +
+                    $"automatic.conf. Disable it in the Services module and enable {timer.Unit} " +
+                    "instead to manage this here.";
+            }
+            else if (timer.Frozen.Length > 0)
+            {
+                automatic.ReadOnly = true;
+                automatic.UnavailableReason = timer.Frozen;
+            }
+
+            group.Settings.Add(automatic);
+
+            // distro-sync is dnf5 only, so the option is not offered on a host that would refuse it.
+            var upgradeTypes = new List<SettingChoice>
+            {
+                new("default", "Every available update"),
+                new("security", "Security advisories only"),
+            };
+            if (IsDnf5) upgradeTypes.Add(new("distro-sync", "Sync to the repository's versions"));
+
+            group.Settings.Add(new PackageSetting
+            {
+                Key = "upgrade_type",
+                Label = "What to upgrade",
+                Description = "upgrade_type in automatic.conf. The counterpart of the Install " +
+                              "security updates button on the Available updates tab.",
+                Kind = SettingKind.Choice,
+                Choices = upgradeTypes,
+                Value = Word(auto, shipped, "upgrade_type", "default"),
+            });
+
+            group.Settings.Add(new PackageSetting
+            {
+                Key = "reboot",
+                Label = "Reboot afterwards",
+                Description = "reboot in automatic.conf. when-needed is the one worth having: it " +
+                              "restarts for a kernel or systemd upgrade and leaves the host alone " +
+                              "otherwise.",
+                Kind = SettingKind.Choice,
+                Choices = RebootChoices,
+                Value = Word(auto, shipped, "reboot", "never"),
+            });
+
+            group.Settings.Add(new PackageSetting
+            {
+                Key = "random_sleep",
+                Label = "Wait before starting",
+                Description = "random_sleep in automatic.conf. A random delay up to this long, so a " +
+                              "room full of hosts on the same timer does not hit the mirror at once.",
+                Kind = SettingKind.Number,
+                Value = Number(auto, shipped, "random_sleep", 0),
+                Min = 0,
+                Max = 3600,
+                Unit = "seconds at most",
+            });
+
+            return group;
+        }
+
+        private static string Number(Ini etc, Ini shipped, string key, int fallback)
+        {
+            var value = etc.Get(Commands, key) ?? shipped.Get(Commands, key);
+            return int.TryParse(value?.Trim(), System.Globalization.NumberStyles.Integer,
+                                System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? n.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : fallback.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static PackageSettingGroup DownloadsGroup(Ini main) =>
+            new()
+            {
+                Title = "Downloads and cache",
+                Hint = $"The [main] section of {MainConf}. These apply to everything dnf does here, " +
+                       "not only to an automatic run.",
+                Settings =
+                {
+                    new PackageSetting
+                    {
+                        Key = "max_parallel_downloads",
+                        Label = "Parallel downloads",
+                        Description = "max_parallel_downloads. dnf's own default is 3 and it refuses " +
+                                      "more than 20.",
+                        Kind = SettingKind.Number,
+                        Value = main.Number(Main, "max_parallel_downloads", 3)
+                                    .ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        Min = 1,
+                        Max = 20,
+                        Unit = "at a time",
+                    },
+                    new PackageSetting
+                    {
+                        Key = "installonly_limit",
+                        Label = "Kernels to keep",
+                        Description = "installonly_limit. How many versions of a package that is " +
+                                      "installed alongside rather than upgraded, which in practice " +
+                                      "means kernels, dnf keeps before removing the oldest. Its own " +
+                                      "default is 3 and its own minimum is 2.",
+                        Kind = SettingKind.Number,
+                        Value = main.Number(Main, "installonly_limit", 3)
+                                    .ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        Min = 2,
+                        Max = 10,
+                        Unit = "versions",
+                    },
+                    new PackageSetting
+                    {
+                        Key = "keepcache",
+                        Label = "Keep downloaded packages",
+                        Description = "keepcache. dnf's own default is off, which removes each rpm " +
+                                      "once it is installed.",
+                        Kind = SettingKind.Toggle,
+                        Value = main.Flag(Main, "keepcache", false) ? "1" : string.Empty,
+                    },
+                },
+            };
+
+        private PackageSettingGroup MetadataGroup(IReadOnlyDictionary<string, UnitState> units)
+        {
+            var group = new PackageSettingGroup
+            {
+                Title = "Metadata refresh",
+                Hint = "A timer that re-reads what the repositories are offering, so a listing here " +
+                       "is not the first thing to pay for it.",
+            };
+
+            var unit = units.GetValueOrDefault(Dnf4Makecache) is { Missing: false } four
+                ? four
+                : units.GetValueOrDefault(Dnf5Makecache) is { Missing: false } five
+                    ? five
+                    : null;
+
+            if (unit is null)
+            {
+                // dnf5 ships no makecache timer at all, so this is an ordinary state on a current
+                // Fedora rather than something missing that could be installed.
+                group.UnavailableReason = IsDnf5
+                    ? "dnf5 ships no makecache timer at all. It refreshes repository metadata as " +
+                      "part of the commands that need it, so there is nothing here to schedule."
+                    : "This host has no dnf-makecache.timer, so nothing refreshes repository " +
+                      "metadata on a schedule; the next command that needs it pays for it.";
+                return group;
+            }
+
+            group.Settings.Add(new PackageSetting
+            {
+                Key = unit.Unit,
+                Label = "Refresh repository metadata on a timer",
+                Description = unit.Unit,
+                Kind = SettingKind.Toggle,
+                Value = unit.Enabled ? "1" : string.Empty,
+                ReadOnly = unit.Frozen.Length > 0,
+                UnavailableReason = unit.Frozen,
+            });
+
+            return group;
+        }
+
+        // Whichever automatic timer this host actually has, preferring the one matching the binary in
+        // use where it has both.
+        private UnitState? Timer(IReadOnlyDictionary<string, UnitState> units)
+        {
+            var preferred = IsDnf5 ? Dnf5Timer : Dnf4Timer;
+            var other = IsDnf5 ? Dnf4Timer : Dnf5Timer;
+
+            if (units.GetValueOrDefault(preferred) is { Missing: false } mine) return mine;
+            return units.GetValueOrDefault(other) is { Missing: false } theirs ? theirs : null;
+        }
+
+        private static string? Variant(IReadOnlyDictionary<string, UnitState> units) =>
+            VariantTimers.FirstOrDefault(
+                v => units.GetValueOrDefault(v) is { Missing: false, Enabled: true });
+
+        public HostScript SaveSettingsScript(
+            IReadOnlyList<PackageSettingChange> changes, PackageSettingCatalog asRead)
+        {
+            var autoEdits = new List<PackageSettingScripts.IniEdit>();
+            var mainEdits = new List<PackageSettingScripts.IniEdit>();
+            var units = new List<(string Unit, bool Enabled)>();
+
+            foreach (var change in changes)
+            {
+                switch (change.Key)
+                {
+                    case AutoKey:
+                        // The one row that is three writes. The timer is what makes a run happen at
+                        // all, so Off disables it and never touches the flags: somebody who turns
+                        // this off and on again gets back what they had.
+                        var timer = asRead.Groups
+                            .SelectMany(g => g.Settings)
+                            .Any(s => s.Key == AutoKey)
+                            ? TimerName(asRead)
+                            : null;
+
+                        if (timer is not null)
+                            units.Add((timer, change.Text != AutoOff));
+
+                        if (change.Text == AutoOff) break;
+
+                        autoEdits.Add(Edit(Commands, "download_updates",
+                            change.Text is AutoDownload or AutoInstall));
+                        autoEdits.Add(Edit(Commands, "apply_updates", change.Text == AutoInstall));
+                        break;
+
+                    case "upgrade_type":
+                    case "reboot":
+                        autoEdits.Add(new PackageSettingScripts.IniEdit(
+                            Commands, change.Key, $"{change.Key} = {Safe(change)}"));
+                        break;
+
+                    case "random_sleep":
+                        autoEdits.Add(new PackageSettingScripts.IniEdit(
+                            Commands, change.Key, $"{change.Key} = {Digits(change.Text, 0)}"));
+                        break;
+
+                    case "max_parallel_downloads":
+                        mainEdits.Add(new PackageSettingScripts.IniEdit(
+                            Main, change.Key, $"{change.Key}={Digits(change.Text, 3)}"));
+                        break;
+
+                    case "installonly_limit":
+                        mainEdits.Add(new PackageSettingScripts.IniEdit(
+                            Main, change.Key, $"{change.Key}={Digits(change.Text, 3)}"));
+                        break;
+
+                    case "keepcache":
+                        mainEdits.Add(new PackageSettingScripts.IniEdit(
+                            Main, change.Key,
+                            $"{change.Key}={(change.Text.Length > 0 ? "1" : "0")}"));
+                        break;
+
+                    case Dnf4Makecache:
+                    case Dnf5Makecache:
+                        units.Add((change.Key, change.Text.Length > 0));
+                        break;
+                }
+            }
+
+            var script =
+                PackageScripts.Preamble + "set -e\n" +
+                PackageSettingScripts.ConflictGuard(asRead.DigestsFor(Guarded(mainEdits, autoEdits))) +
+                PackageSettingScripts.IniEditScript(
+                    MainConf, "/etc/dnf", mainEdits, $"{_bin} --config %f --version") +
+                // automatic.conf has no tool that will parse it on its own, so there is nothing to
+                // calibrate a validator against. The awk keeps the file structurally sound and every
+                // key written here is one of this class's own constants.
+                PackageSettingScripts.IniEditScript(AutoConf, "/etc/dnf", autoEdits, string.Empty) +
+                PackageSettingScripts.UnitScript(units);
+
+            return changes.Count == 0 ? HostScript.None : new HostScript(script, Elevated: true);
+        }
+
+        // Only the files this save is about to write are guarded. Naming one nothing touched would
+        // turn an unrelated edit somebody made at a terminal into a refusal of a save that never went
+        // near it.
+        private static string[] Guarded(
+            List<PackageSettingScripts.IniEdit> mainEdits, List<PackageSettingScripts.IniEdit> autoEdits)
+        {
+            var paths = new List<string>();
+            if (mainEdits.Count > 0) paths.Add(MainConf);
+            if (autoEdits.Count > 0) paths.Add(AutoConf);
+            return paths.ToArray();
+        }
+
+        // dnf's parser takes yes and no for a boolean, and so does its own shipped automatic.conf.
+        private static PackageSettingScripts.IniEdit Edit(string section, string key, bool on) =>
+            new(section, key, $"{key} = {(on ? "yes" : "no")}");
+
+        private static string Safe(PackageSettingChange change) =>
+            PackageSettingScripts.IsWritable(change.Text)
+                ? change.Text
+                : throw new ArgumentException($"{change.Key} cannot hold {change.Text}", nameof(change));
+
+        private static string Digits(string value, int fallback) =>
+            int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+                         System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? n.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : fallback.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // Which timer the page was drawn against, so a save turns the same one on that the read read.
+        private string TimerName(PackageSettingCatalog asRead)
+        {
+            var hint = asRead.Groups.FirstOrDefault(g => g.Title == "Automatic updates")?.Hint ?? string.Empty;
+            return hint.Contains(Dnf5Timer, StringComparison.Ordinal) ? Dnf5Timer : Dnf4Timer;
+        }
+
+        /// <summary>
+        /// <c>dnf install</c>, streamed and elevated like the upgrade so <see cref="ReadProgress"/>
+        /// reads its lines into the page's own progress strip.
+        /// </summary>
+        public HostScript InstallScript(IReadOnlyList<string> packages) =>
+            packages.Count == 0
+                ? HostScript.None
+                : new HostScript(
+                    PackageScripts.Preamble +
+                    Services.ShellScript.ArrayFrom("i", packages) +
+                    $"{_bin} -y install -- \"${{i[@]}}\" 2>&1",
+                    Elevated: true);
     }
 }

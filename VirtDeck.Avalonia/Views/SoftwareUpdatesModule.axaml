@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
              xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:m="clr-namespace:VirtDeck.Models;assembly=VirtDeck.Core"
              x:Class="VirtDeck.Avalonia.Views.SoftwareUpdatesModule"
              x:DataType="vm:UpdateRow">
 
@@ -21,6 +22,108 @@
     <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
   </UserControl.Resources>
 
+  <!-- The Settings page is an ItemsControl over groups of rows, so these five are the page. They sit
+       on the UserControl rather than on the controls that use them so there is one copy of each, and
+       Avalonia picks between the four row templates off DataType alone: nothing in the view switches
+       on a setting's kind, and nothing in it names apt, dnf or pacman. Every template states its own
+       x:DataType, because compiled bindings are on and the root declares UpdateRow. -->
+  <UserControl.DataTemplates>
+
+    <DataTemplate DataType="vm:PackageSettingGroupRow">
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="{Binding Title}">
+        <StackPanel Classes="options">
+
+          <!-- The hint describes what the group is a view of, so it is drawn only where there is
+               something to view: on a group the host cannot support the reason says everything, and
+               the two together read as the same fact twice. -->
+          <TextBlock Classes="note" Text="{Binding Hint}" IsVisible="{Binding HasHint}" />
+
+          <!-- A group nothing on this host can act on says so, and that sentence is the whole content
+               where there are no rows behind it: the Automatic updates group on an Arch host. -->
+          <TextBlock Classes="note" Text="{Binding UnavailableReason}"
+                     IsVisible="{Binding IsUnavailable}" />
+
+          <Button Content="{Binding InstallLabel}" IsVisible="{Binding CanInstall}"
+                  HorizontalAlignment="Left" Click="InstallSupportClicked"
+                  ToolTip.Tip="Installs it with this host's own package manager, and reads the page
+                               again afterwards." />
+
+          <!-- One IsEnabled over the subtree, which is what StackPanel.under is for one option: a
+               group the host cannot support greys whole rather than row by row. -->
+          <ItemsControl ItemsSource="{Binding Rows}" IsEnabled="{Binding IsEditable}" />
+
+        </StackPanel>
+      </HeaderedContentControl>
+    </DataTemplate>
+
+    <!-- Every row is wrapped in a transparent Border carrying the tooltip, because a disabled control
+         is not hit-testable in Avalonia and the reason it is disabled is the thing most worth reading.
+         Same workaround as CheckRow's template and the Install security updates button above. -->
+    <DataTemplate DataType="vm:ToggleSettingRow">
+      <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
+        <Grid ColumnDefinitions="220,*" Margin="0,0,0,2">
+          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <CheckBox Grid.Column="1" IsChecked="{Binding IsOn, Mode=TwoWay}"
+                    IsEnabled="{Binding IsEditable}" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:NumberSettingRow">
+      <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
+        <Grid ColumnDefinitions="220,Auto,*" Margin="0,0,0,2">
+          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <NumericUpDown Grid.Column="1" Width="150" Increment="1" FormatString="0"
+                         Value="{Binding Number, Mode=TwoWay}"
+                         Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
+                         IsEnabled="{Binding IsEditable}" />
+          <TextBlock Grid.Column="2" Text="{Binding Unit}" Opacity="0.7" Margin="8,0,0,0"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ChoiceSettingRow">
+      <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
+        <Grid ColumnDefinitions="220,*" Margin="0,0,0,2">
+          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <!-- Bound to the choice itself and not to an index, so nothing here depends on the order
+               the manager listed them in. -->
+          <ComboBox Grid.Column="1" HorizontalAlignment="Left" MinWidth="280"
+                    ItemsSource="{Binding Choices}"
+                    SelectedItem="{Binding Selected, Mode=TwoWay}"
+                    IsEnabled="{Binding IsEditable}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="m:SettingChoice">
+                <TextBlock Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <!-- A read-only text row stays enabled and becomes IsReadOnly instead, so its value can still be
+         selected and copied: the one row that uses it is apt's allowed origins, which is long, is the
+         answer to "which updates", and is the thing somebody will want to paste somewhere. -->
+    <DataTemplate DataType="vm:TextSettingRow">
+      <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
+        <Grid ColumnDefinitions="220,*" Margin="0,0,0,2">
+          <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <TextBox Grid.Column="1" HorizontalAlignment="Left" MinWidth="280" MaxWidth="440"
+                   Text="{Binding Text, Mode=TwoWay}"
+                   IsReadOnly="{Binding !IsEditable}"
+                   Classes.stated="{Binding !IsEditable}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+  </UserControl.DataTemplates>
+
   <UserControl.Styles>
     <!-- The amber a security row wears, literal rather than themed for the reason the state dots
          are: it is the app's transient amber and it has to mean the same thing on either face. A
@@ -29,6 +132,16 @@
          of leaving it alone. Same shape as the Images table's Unused column. -->
     <Style Selector="TextBlock.security">
       <Setter Property="Foreground" Value="#D68F00" />
+    </Style>
+
+    <!-- A settings row that states a value rather than offering to change it. It stays a TextBox and
+         stays enabled, so the text is still selectable and copyable, which is the whole point for
+         apt's allowed origins; what goes is the frame that makes a box look like an invitation. -->
+    <Style Selector="TextBox.stated">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Opacity" Value="0.75" />
     </Style>
   </UserControl.Styles>
 
@@ -223,6 +336,53 @@
             </ListBox>
 
             <TextBlock Name="HistoryEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Settings">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <!-- Not accented. The accent on this page belongs to Install all updates, on the
+                     reading that it is the one command bringing something new onto the host; a save
+                     changes what the host will do later, which is not the same kind of thing. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #SaveSettingsButton.Tag}">
+                  <Button Name="SaveSettingsButton" Content="Save" />
+                </Border>
+                <Button Name="RevertSettingsButton" Content="Revert" />
+                <Button Name="RefreshSettingsButton" Theme="{StaticResource JbIconButton}"
+                        ToolTip.Tip="Read these settings from the host again">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </StackPanel>
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ScrollViewer Padding="16">
+              <!-- Classes="page" spaces a StackPanel's own children, and an ItemsControl is one
+                   child however many groups are in it, so the spacing goes on the panel the items
+                   are laid out in or every group box sits flush against the next. -->
+              <StackPanel Classes="page">
+                <ItemsControl Name="SettingsGroups">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Spacing="12" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock Name="SettingsEmpty" Opacity="0.6" IsVisible="False"
                        TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Panel>

@@ -449,5 +449,116 @@ namespace VirtDeck.Services
             var raw = await Task.Run(() => Run(script), ct);
             return manager.ParseHistory(raw);
         }
+
+        // ---- Settings --------------------------------------------------------
+
+        /// <summary>
+        /// Whether the Settings tab has anything to draw, and why not when it has not. Only a host
+        /// with no package manager answers with a reason, and such a host is never drawn this module
+        /// at all; it exists for the same reason <see cref="RefreshUnavailableReason"/> does, which is
+        /// that a page has to be able to say why it is empty rather than simply be empty.
+        /// </summary>
+        public string SettingsUnavailableReason =>
+            Manager.Id.Length == 0
+                ? "No package manager was found on this host."
+                : Manager.SettingsUnavailableReason;
+
+        /// <summary>
+        /// Reads the host manager's own configuration.
+        ///
+        /// <para><b>This follows <see cref="ReadHistoryAsync"/> and deliberately not
+        /// <see cref="ListAsync"/>.</b> The three things that make the listing what it is are all
+        /// wrong here. It is not bracketed with <c>Begin</c>/<c>End</c>, because those set
+        /// <see cref="Running"/>, which exists to stop a listing running underneath a dpkg
+        /// transaction and would make the Overview module refuse to list for the length of a
+        /// sub-second config read. It does not raise <see cref="Changed"/>, because that event means
+        /// the manager, the listing, the reboot reading or <c>Running</c> moved, and a page's own form
+        /// is not a fact two pages share; raising it would also re-enter the updates module's handler
+        /// and have it redraw its table for something that did not change. And it caches nothing, so
+        /// every visit to the tab re-reads: a group's reason is "unattended-upgrades is not installed
+        /// on this host", which has to be a current answer, and somebody may have edited the file at a
+        /// terminal since.</para>
+        ///
+        /// <para>A manager that answered and refused is still a <b>value</b>: the reason lands on
+        /// <see cref="PackageSettingCatalog.ReadFailure"/> for the page to draw. Only a round trip that
+        /// genuinely failed throws.</para>
+        /// </summary>
+        public async Task<PackageSettingCatalog> ReadSettingsAsync(CancellationToken ct = default)
+        {
+            var manager = Manager;
+            var script = manager.SettingsScript;
+
+            if (script.IsEmpty)
+                return new PackageSettingCatalog { ManagerId = manager.Id, ManagerName = manager.DisplayName };
+
+            var raw = await Task.Run(() => Run(script), ct);
+            return manager.ParseSettings(raw);
+        }
+
+        /// <summary>
+        /// Writes back the settings that moved, elevated, and answers what the host said while doing
+        /// it.
+        ///
+        /// <para><paramref name="asRead"/> is the catalog the form was drawn from, and it is what makes
+        /// this safe twice over: the manager writes only the keys that differ from it, so a
+        /// distribution's own file keeps every line nobody came for, and the digest of each file it is
+        /// about to touch is re-checked on the host inside the same round trip. A file somebody changed
+        /// meanwhile makes the whole save exit 9 before a byte is written.</para>
+        ///
+        /// <para>Not bracketed with <c>Begin</c>/<c>End</c> either. This writes config files and
+        /// toggles timers; it never holds the dpkg or rpm lock, so a listing running beside it is not
+        /// in any danger from it.</para>
+        /// </summary>
+        public async Task SaveSettingsAsync(IReadOnlyList<PackageSettingChange> changes,
+                                            PackageSettingCatalog asRead,
+                                            CancellationToken ct = default)
+        {
+            var script = Manager.SaveSettingsScript(changes, asRead);
+            if (script.IsEmpty) return;
+
+            await Task.Run(() => Run(script), ct);
+        }
+
+        /// <summary>
+        /// Whether a save refused because a file moved under it, rather than failing.
+        ///
+        /// <para>Exit 9 is the settings write's own refusal, the same code and the same reason
+        /// <c>CronService</c> uses for a crontab that changed while somebody was editing it. It has to
+        /// be recognised from the message because <c>RunSudoCommand</c> reports a non-zero exit by
+        /// throwing, with the code in the text.</para>
+        /// </summary>
+        public static bool IsStale(string message) =>
+            message.Contains("(exit 9)", StringComparison.Ordinal);
+
+        /// <summary>
+        /// Installs the support package a settings group needs, streamed like an upgrade so the page's
+        /// own progress strip can draw it.
+        ///
+        /// <para><b>Bracketed with <c>Begin</c>/<c>End</c>, unlike the two calls above and exactly
+        /// like <see cref="UpgradeAsync"/>.</b> This one really does hold the package database, so a
+        /// listing run underneath it would fail and replace the very catalog the page reporting on it
+        /// is drawing. That is what <see cref="Running"/> is for.</para>
+        /// </summary>
+        public async Task InstallAsync(IReadOnlyList<string> packages, Action<UpgradeProgress> onProgress,
+                                       Action<string> onLine, CancellationToken ct)
+        {
+            var manager = Manager;
+            var script = manager.InstallScript(packages);
+            if (script.IsEmpty) return;
+
+            Begin();
+            try
+            {
+                await Task.Run(() => Stream(script, line =>
+                {
+                    if (manager.ReadProgress(line) is { } progress) onProgress(progress);
+                    else onLine(line);
+                }, ct), ct);
+            }
+            finally
+            {
+                End();
+            }
+        }
     }
 }

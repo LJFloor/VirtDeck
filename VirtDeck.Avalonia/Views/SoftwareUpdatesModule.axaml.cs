@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Models;
@@ -73,8 +75,35 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private bool _busy;
     private bool _active;
 
+    /// <summary>
+    /// The pages, so nothing compares <c>SelectedIndex</c> to a number any more. Two tabs got away
+    /// with that; three is where the containers and storage modules both gave up on it, and the
+    /// clamp is theirs too: <c>SelectedIndex</c> is transiently -1 while the strip is being built.
+    /// </summary>
+    private enum Tab { Updates, History, Settings }
+
+    private Tab Current => (Tab)Math.Clamp(Tabs.SelectedIndex, 0, (int)Tab.Settings);
+
     /// <summary>Whether the history tab has ever been read, so entering it twice costs one round trip.</summary>
     private bool _historyRead;
+
+    /// <summary>
+    /// The group boxes on the Settings page. Rebuilt on every read rather than merged, which is the
+    /// history table's call and for the same reason: nothing polls this page, so no refresh arrives
+    /// unasked to drop what somebody was in the middle of, and a read the user did ask for should
+    /// replace the form wholesale rather than reconcile it.
+    /// </summary>
+    private readonly List<PackageSettingGroupRow> _settingGroups = new();
+
+    /// <summary>
+    /// The catalog the form on screen was drawn from, or null where there is none. It is handed back
+    /// with a save: the manager writes only what differs from it, and the digests it carries are what
+    /// make the save refuse rather than overwrite a file somebody changed meanwhile.
+    /// </summary>
+    private PackageSettingCatalog? _settings;
+
+    /// <summary>Which manager the form was read for, so switching manager mid-session discards it.</summary>
+    private string _settingsFor = string.Empty;
 
     /// <summary>
     /// Which half of an upgrade is running. The one piece of state the strip keeps, because it is
@@ -105,13 +134,18 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         _updateSortOrNull.Changed += Populate;
         _historySortOrNull.Changed += PopulateHistory;
         UpdateSearch.Changed += Populate;
-        FilterBox.AttachFindShortcut(this, () => Tabs.SelectedIndex == 0 ? UpdateSearch : null);
+        FilterBox.AttachFindShortcut(this, () => Current == Tab.Updates ? UpdateSearch : null);
 
         InstallAllButton.Click += async (_, _) => await UpgradeAsync(securityOnly: false);
         InstallSecurityButton.Click += async (_, _) => await UpgradeAsync(securityOnly: true);
         RefreshButton.Click += async (_, _) => await RefreshAsync();
         RebootButton.Click += async (_, _) => await RebootAsync();
         RefreshHistoryButton.Click += async (_, _) => await LoadHistoryAsync(force: true);
+
+        SettingsGroups.ItemsSource = _settingGroups;
+        SaveSettingsButton.Click += async (_, _) => await SaveSettingsAsync();
+        RevertSettingsButton.Click += (_, _) => RevertSettings();
+        RefreshSettingsButton.Click += async (_, _) => await LoadSettingsAsync(force: true);
 
         // Issued off the UI thread: the streaming runner disconnects its own SSH client inline on
         // whoever calls Cancel, and doing that here would stall the strip that is showing it.
@@ -128,7 +162,14 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         // is not on screen and its round trip would buy nothing.
         Tabs.SelectionChanged += async (_, _) =>
         {
-            if (_active && Tabs.SelectedIndex == 1) await LoadHistoryAsync(force: false);
+            if (!_active) return;
+            if (Current == Tab.History) await LoadHistoryAsync(force: false);
+
+            // Unlike the history, this one re-reads on every clean entry rather than latching. Two of
+            // its answers have to be current or they are worse than nothing: whether the package a
+            // group needs is installed, and what the file says, which somebody may have edited at a
+            // terminal since. A form with unsaved changes in it is left alone; see LoadSettingsAsync.
+            if (Current == Tab.Settings) await LoadSettingsAsync(force: false);
         };
 
         UpdateCommands();
@@ -197,10 +238,11 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         if (_busy) return;
 
         // Whoever asked for this asked about the updates, not about the history.
-        if (install) Tabs.SelectedIndex = 0;
+        if (install) Tabs.SelectedIndex = (int)Tab.Updates;
 
         await LoadAsync(force: false);
-        if (_active && Tabs.SelectedIndex == 1) await LoadHistoryAsync(force: false);
+        if (_active && Current == Tab.History) await LoadHistoryAsync(force: false);
+        if (_active && Current == Tab.Settings) await LoadSettingsAsync(force: false);
 
         // Asked for from the Overview module's Update now, which is the count on that page made
         // actionable and nothing more: the install happens here, where the progress strip and the
@@ -230,6 +272,13 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         if (Packages.HasListed) Draw(Packages.Catalog);
         DrawReboot();
+
+        // The Settings page is deliberately not redrawn from here. This event fires for a probe and
+        // for the Overview module's own listing, at any moment; a form somebody is half way through
+        // filling in must not be replaced by a read they did not ask for. What it does do is notice a
+        // manager it was not read for, which is what makes installing a package manager mid-session
+        // discard a page about the old one rather than save against it.
+        if (_settingsFor.Length > 0 && _settingsFor != Packages.Manager.Id) ResetSettings();
     });
 
     /// <summary>
@@ -633,6 +682,17 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             : "Ask the repositories for a fresh list of packages";
 
         RebootButton.IsEnabled = !_busy;
+
+        var changed = SettingsChanges().Count;
+        var saveReason =
+            _settings is null ? "There are no settings on screen to save." :
+            changed == 0 ? "Nothing on this page has been changed." :
+            "";
+
+        SaveSettingsButton.IsEnabled = !_busy && saveReason.Length == 0;
+        SaveSettingsButton.Tag = NullIfEmpty(saveReason);
+        RevertSettingsButton.IsEnabled = !_busy && changed > 0;
+        RefreshSettingsButton.IsEnabled = !_busy;
     }
 
     private static string? NullIfEmpty(string text) => text.Length == 0 ? null : text;
@@ -691,7 +751,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         // An upgrade is the one thing that adds to the history, so the next visit to that tab has to
         // pay for a read again rather than showing the list from before the run.
         _historyRead = false;
-        if (_active && Tabs.SelectedIndex == 1) await LoadHistoryAsync(force: true);
+        if (_active && Current == Tab.History) await LoadHistoryAsync(force: true);
 
         // Whatever happened, the table has to stop claiming the host still wants these: a cancelled
         // or failed run has installed some of them, and only a fresh listing knows which.
@@ -914,6 +974,215 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// The host's own words, without the runner's framing. Both runners report a failure as
     /// "Command failed (exit 1): ..." and the part after the colon is the half worth reading.
     /// </summary>
+
+    // ---- Settings --------------------------------------------------------
+
+    /// <summary>
+    /// Reads the host manager's own configuration and draws it.
+    ///
+    /// <para><b>A form with unsaved changes in it is never replaced by a read nobody asked for.</b>
+    /// That is the auto-fill rule applied to a whole page: a suggestion is written until the box holds
+    /// something the user typed. Entering the tab is not asking, so it yields; Refresh, a save and an
+    /// install are asking, and they pass <c>force</c>.</para>
+    /// </summary>
+    private async Task LoadSettingsAsync(bool force)
+    {
+        if (_packages is null || _busy) return;
+
+        if (!force && IsSettingsDirty())
+        {
+            SetStatus("These settings have unsaved changes, so they were left as they are.");
+            return;
+        }
+
+        // A host with no package manager is never drawn this module at all, so this is the answer for
+        // parity with Refresh rather than one anybody is expected to see. It is still drawn and not
+        // swallowed: a page that can say why it is empty beats one that is simply empty.
+        if (Packages.SettingsUnavailableReason is { Length: > 0 } unavailable)
+        {
+            ResetSettings();
+            ShowSettings(unavailable);
+            return;
+        }
+
+        try
+        {
+            var catalog = await Packages.ReadSettingsAsync(_cts.Token);
+            _settings = catalog;
+            _settingsFor = Packages.Manager.Id;
+            PopulateSettings();
+        }
+        catch (OperationCanceledException)
+        {
+            // Nothing was learned, so nothing is claimed: the page keeps whatever it had.
+        }
+        catch (Exception ex)
+        {
+            ResetSettings();
+            ShowSettings($"Could not read the settings from this host:\n\n{Trim(ex.Message)}");
+        }
+
+        UpdateCommands();
+    }
+
+    /// <summary>
+    /// Builds the group boxes from the catalog in hand. Every row subscribes, so moving one control
+    /// is what enables Save rather than a poll or a timer noticing later.
+    /// </summary>
+    private void PopulateSettings()
+    {
+        _settingGroups.Clear();
+
+        if (_settings is not { } catalog)
+        {
+            ShowSettings("No settings have been read from this host yet.");
+            return;
+        }
+
+        // A read that failed keeps saying so, the rule every table in this app follows: replacing the
+        // reason with an empty page would be a different and wrong claim.
+        if (catalog.ReadFailure.Length > 0)
+        {
+            ShowSettings($"{Named(catalog)} could not read its own settings:\n\n{catalog.ReadFailure}");
+            return;
+        }
+
+        foreach (var group in catalog.Groups)
+        {
+            var row = new PackageSettingGroupRow(group);
+            foreach (var setting in row.Rows) setting.PropertyChanged += OnSettingChanged;
+            _settingGroups.Add(row);
+        }
+
+        ShowSettings(_settingGroups.Count == 0
+            ? $"{Named(catalog)} has nothing on this host that VirtDeck can configure."
+            : null);
+    }
+
+    private static string Named(PackageSettingCatalog catalog) =>
+        catalog.ManagerName.Length > 0 ? catalog.ManagerName : "This host's package manager";
+
+    /// <summary>Shows the centred message instead of the page, or the page instead of it.</summary>
+    private void ShowSettings(string? message)
+    {
+        SettingsEmpty.Text = message ?? string.Empty;
+        SettingsEmpty.IsVisible = message is not null;
+    }
+
+    private void ResetSettings()
+    {
+        foreach (var setting in _settingGroups.SelectMany(g => g.Rows))
+            setting.PropertyChanged -= OnSettingChanged;
+
+        _settingGroups.Clear();
+        _settings = null;
+        _settingsFor = string.Empty;
+    }
+
+    // Only IsDirty matters here, and it is raised for every change a row makes, so the cheap test is
+    // the property name rather than recomputing the whole page on a keystroke in a text box.
+    private void OnSettingChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(PackageSettingRow.IsDirty)) UpdateCommands();
+    }
+
+    private IReadOnlyList<PackageSettingChange> SettingsChanges() =>
+        _settingGroups
+            .SelectMany(g => g.Rows)
+            .Select(r => r.Change)
+            .OfType<PackageSettingChange>()
+            .ToList();
+
+    private bool IsSettingsDirty() => SettingsChanges().Count > 0;
+
+    private void RevertSettings()
+    {
+        foreach (var setting in _settingGroups.SelectMany(g => g.Rows)) setting.Revert();
+        UpdateCommands();
+        SetStatus("Settings put back to what the host says.");
+    }
+
+    /// <summary>
+    /// Writes what moved, then reads the whole page again.
+    ///
+    /// <para><b>The redraw is from the host's answer and not from the controls that asked for it</b>,
+    /// which is the rule the whole app follows about never leading the host: a key apt normalises, a
+    /// timer systemd refused to enable and a value another file outranks all look like a successful
+    /// save from here and like nothing at all on the host. It re-reads whether the save worked or
+    /// not, for the same reason the upgrade re-lists either way.</para>
+    /// </summary>
+    private async Task SaveSettingsAsync()
+    {
+        if (_packages is null || _busy || _settings is not { } asRead) return;
+
+        var changes = SettingsChanges();
+        if (changes.Count == 0) return;
+
+        var ok = await RunOpAsync("Save settings", "Saving settings", async ct =>
+        {
+            try
+            {
+                await Packages.SaveSettingsAsync(changes, asRead, ct);
+            }
+            catch (Exception ex) when (PackageService.IsStale(ex.Message))
+            {
+                // The refusal the save makes rather than a failure it hit. Reworded here because what
+                // the host says about it is an exit code, and what happened is worth a sentence.
+                throw new InvalidOperationException(
+                    "One of the files these settings live in changed on the host while this page was " +
+                    "open, so nothing at all was written. Nothing is lost on the host; the page has " +
+                    "been read again, so make the change once more if it is still the one you want.",
+                    ex);
+            }
+        });
+
+        await LoadSettingsAsync(force: true);
+
+        if (ok) SetStatus($"{changes.Count} setting{(changes.Count == 1 ? "" : "s")} saved.");
+    }
+
+    /// <summary>
+    /// Installs the one package a greyed group needs.
+    ///
+    /// <para><b>This is the module's only install of a named package and the narrowness is the
+    /// point.</b> The page is not a package browser: the name comes from a constant in the manager
+    /// class by way of the group that could not be drawn without it, never from anything the user
+    /// typed. It confirms first, like every other thing here that changes the host, and it streams
+    /// through the same progress strip an upgrade does, because that is what it is.</para>
+    /// </summary>
+    private async void InstallSupportClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: PackageSettingGroupRow group }) return;
+        await InstallSupportAsync(group.MissingPackage);
+    }
+
+    private async Task InstallSupportAsync(string package)
+    {
+        if (_packages is null || _busy || package.Length == 0) return;
+
+        if (!await MessageDialog.Confirm(Owner, "Install package",
+                $"Install {package} on this host?\n\n" +
+                $"{Packages.Manager.DisplayName} will install it and whatever it depends on. It is " +
+                "what the settings in that group need in order to do anything, and it is the only " +
+                "package this page installs by name."))
+            return;
+
+        var verb = $"Installing {package}";
+
+        var ok = await RunOpAsync("Install package", verb,
+            ct => Packages.InstallAsync([package],
+                p => ReportProgress(p),
+                line => ReportLine(verb, line),
+                ct));
+
+        // Installing a package moves both halves of this module: the group that was greyed out has
+        // its settings now, and the table has one fewer thing to install.
+        await LoadSettingsAsync(force: true);
+        await LoadAsync(force: true);
+
+        if (ok) SetStatus($"{package} installed.");
+    }
+
     private static string Trim(string message)
     {
         var at = message.IndexOf("): ", StringComparison.Ordinal);

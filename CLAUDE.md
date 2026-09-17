@@ -71,7 +71,7 @@ in this index.
 | [terminal-emulator.md](docs/terminal-emulator.md) | The three surfaces drawn by `TerminalControl`: reading a container's log, running a command in one, the PTY session, the emulator itself and mouse reporting. |
 | [services.md](docs/services.md) | systemd units in both scopes, the three read scripts and why they are three, the journal tail, and the commands. |
 | [cron.md](docs/cron.md) | every crontab on the host, the day-field rule and the next-run times, the byte-exact round trip, the conflict check, and the run-parts directories. |
-| [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, and the listing the Overview shares. |
+| [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, the listing the Overview shares, and the Settings tab over each manager's own configuration. |
 | [user-accounts.md](docs/user-accounts.md) | Users and groups, the name suggestion, the password path over stdin, and deleting. |
 | [storage.md](docs/storage.md) | The host's disks from one `lsblk -J`, and what SMART says about each one. |
 | [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |

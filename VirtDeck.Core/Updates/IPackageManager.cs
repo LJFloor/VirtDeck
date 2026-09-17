@@ -159,6 +159,56 @@ namespace VirtDeck.Updates
         HostScript HistoryScript { get; }
 
         IReadOnlyList<UpdateTransaction> ParseHistory(string raw);
+
+        /// <summary>
+        /// Why this manager has no Settings tab, or empty when it has one.
+        ///
+        /// Every real manager answers empty: all three have automatic updates or something worth a
+        /// control, and pacman, which has no automatic updates at all, says so inside its own group
+        /// rather than by taking the page away. It stays on the interface because
+        /// <see cref="NullPackageManager"/> is the case it exists for, and because a tab that can say
+        /// why it is disabled is cheaper than one that can only vanish.
+        /// </summary>
+        string SettingsUnavailableReason { get; }
+
+        /// <summary>
+        /// Reads this manager's own configuration, in tagged records. <b>Un-elevated</b>, like
+        /// <see cref="ListScript"/> and for the same reason: every file involved is world readable and
+        /// <c>systemctl is-enabled</c> answers an ordinary account, so looking at a page must not put
+        /// a sudo prompt in front of somebody who only wanted to look.
+        /// </summary>
+        HostScript SettingsScript { get; }
+
+        /// <summary>
+        /// Turns that script's output into a page. Never throws: a read that could not be made sense
+        /// of is a value the page draws, so an unrecognised record is skipped rather than taking the
+        /// whole pass with it.
+        /// </summary>
+        PackageSettingCatalog ParseSettings(string raw);
+
+        /// <summary>
+        /// Writes back the settings that moved, and nothing else. Elevated.
+        ///
+        /// <paramref name="asRead"/> is the catalog the changes were made against, which carries the
+        /// digest of every file this may rewrite. Both halves are load-bearing: only what changed is
+        /// written, so a distribution's own file keeps every line and comment it had, and the digests
+        /// are re-checked on the host in this same round trip, so an edit made at a terminal while the
+        /// page sat open is refused rather than lost.
+        /// </summary>
+        HostScript SaveSettingsScript(IReadOnlyList<PackageSettingChange> changes,
+                                      PackageSettingCatalog asRead);
+
+        /// <summary>
+        /// Installs the named packages, elevated and streamed like <see cref="UpgradeScript"/>, whose
+        /// progress lines <see cref="ReadProgress"/> already reads.
+        ///
+        /// <b>This is the module's one install of a named package, and the narrowness is the point.</b>
+        /// The page is deliberately not a package browser; what this exists for is the support package
+        /// a greyed settings group needs (<c>unattended-upgrades</c>, <c>dnf-automatic</c>,
+        /// <c>pacman-contrib</c>), whose name is a constant in this class and never anything the user
+        /// typed. Absent tooling stays a stated answer; it is now an answer with a button on it.
+        /// </summary>
+        HostScript InstallScript(IReadOnlyList<string> packages);
     }
 
     /// <summary>
@@ -250,5 +300,15 @@ namespace VirtDeck.Updates
 
         public HostScript HistoryScript => HostScript.None;
         public IReadOnlyList<UpdateTransaction> ParseHistory(string raw) => Array.Empty<UpdateTransaction>();
+
+        public string SettingsUnavailableReason => "No package manager was found on this host.";
+
+        public HostScript SettingsScript => HostScript.None;
+        public PackageSettingCatalog ParseSettings(string raw) => new();
+
+        public HostScript SaveSettingsScript(IReadOnlyList<PackageSettingChange> changes,
+                                             PackageSettingCatalog asRead) => HostScript.None;
+
+        public HostScript InstallScript(IReadOnlyList<string> packages) => HostScript.None;
     }
 }

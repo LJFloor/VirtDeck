@@ -79,3 +79,153 @@ free to disagree about the same sentence.
   A type with no visible tab is ignored, which is the right answer for a module this host has no
   tooling for.
 
+## Settings
+
+The third tab is the host manager's own configuration: whether the machine patches itself, and the
+handful of things anybody actually tunes. `Views/SoftwareUpdatesModule`, `Views/PackageSettingRow`,
+`Core/Updates/PackageSettingScripts`, `Core/Models/PackageSettings`, and four members per manager.
+
+**All three managers have settings, so the tab is never taken away, and the one interesting answer is
+pacman's.** apt has `APT::Periodic::*` driving `apt-daily.timer` and `apt-daily-upgrade.timer`, both
+shipped with apt, plus everything `unattended-upgrades` owns once it is installed; dnf has
+`dnf-automatic` over `/etc/dnf/automatic.conf` and a timer. **Arch has nothing, and the refusal is the
+point**: an upgrade there can need a step announced on the Arch news page, a partial upgrade is
+unsupported rather than merely unwise, and nothing in this app would be there at 03:00 to read the
+news. So the group is drawn with that sentence and no controls, which is
+`SecurityUnsupportedReason`'s shape one tab over. Arch declining to ship this is the clearest
+evidence available about whether it is a good idea.
+
+- **The page is a model, not a form.** `IPackageManager` gained `SettingsScript`, `ParseSettings`,
+  `SaveSettingsScript` and `InstallScript`, and a manager answers with `PackageSettingGroup`s of
+  `PackageSetting`s carrying a `SettingKind` and a value **in the host's own spelling**. The view has
+  one `DataTemplate` per kind and Avalonia picks between them off `DataType`, so **nothing in the
+  markup names apt, dnf or pacman** and adding a setting is a line in a manager class. That is the
+  interface's own rule (an implementation builds scripts and parses text and never talks to the host)
+  carried up into the page.
+- **Row types and templates rather than controls built in code.** Every form in this app is markup
+  over named controls, and its only dynamic content anywhere is a row type plus a `DataTemplate`.
+  Building `CheckBox`es in a loop would have put the layout, the theming and the disabled-tooltip
+  workaround in C# where sixteen other pages keep them in XAML.
+- **Two-way binding is right here, and the app forbids it a row away.** A table row's tick is driven
+  by `Click` rather than by its bound value, because a poll pushing a value in would generate
+  commands. Nothing polls this page and moving a control issues nothing; Save is what talks to the
+  host, which is also what makes a dirty row mean something.
+- **The read is un-elevated and pays again on every entry.** Every file involved is world readable and
+  `systemctl show` answers an ordinary account, so looking must not raise a sudo prompt. It does not
+  latch the way the History tab does, because two of its answers have to be current: whether the
+  package a group needs is installed, and what the file says, which somebody may have changed at a
+  terminal since. **A form with unsaved changes in it is left alone**, which is the auto-fill rule
+  applied to a whole page: entering the tab is not asking, and Refresh, a save and an install are.
+- **The settings are not on `PackageService.Changed`, and `ReadSettingsAsync` is `ReadHistoryAsync`'s
+  shape rather than `ListAsync`'s.** All three of the listing's habits are wrong here.
+  `Begin`/`End` set `Running`, which exists to stop a listing running underneath a dpkg transaction
+  and would make the Overview module refuse to list for the length of a sub-second config read.
+  `Changed` means the manager, the listing, the reboot reading or `Running` moved, and a page's own
+  form is not a fact two pages share; raising it would also have the updates module redraw its table
+  for something that did not change, and a probe fires it at any moment, which would wipe a form
+  somebody was half way through. And it caches nothing, per the bullet above. What the handler does
+  do is notice a manager it was not read for, so installing a package manager mid-session discards a
+  page about the old one rather than saving against it.
+- **A unit's state comes from one `systemctl show`, and the word it answers is worth five states.**
+  `Id`, `LoadState` and `UnitFileState` for every timer either version of a manager could have, in
+  one fork, reassembled into one record on the host, which is `SystemdService`'s targeted pass.
+  `not-found` is what tells a timer no package has installed from one that is installed and switched
+  off, and it is what puts an Install button on a group rather than a tick somebody would expect to
+  work; `static` and `masked` are the other two, and systemd refuses to enable either, so those rows
+  state their reason instead of offering. `list-unit-files` is the alternative and is the measured
+  disaster the services module already documents: 1150 ms against 13 ms.
+
+### Writing: three files, three different bargains
+
+**`StorageService.WriteFstabAsync` is the shape** and every part of it carries over: a `mktemp`
+candidate, `trap`, an awk pass that copies every line it did not come for **byte for byte, comments
+and blanks included**, the tool's own parser run over the candidate but **calibrated against the
+host's current file first** (where that one does not pass, its verdict on ours says nothing), a
+`.virtdeck.bak` so there is always one command back, and `cat` and never `mv`, which keeps the inode,
+the mode and the SELinux label. Two things are new. **`cp -p` and not `cp`**, because a plain copy is
+created under the current umask and `automatic.conf` can hold an SMTP password. And
+**`CronService`'s conflict guard rides in the same round trip**: the digest of every file the save is
+about to touch is re-checked on the host before a byte is written, and a mismatch exits 9 with the
+path on stderr. That case is not hypothetical, because this app has a Terminal module.
+
+- **apt gets a drop-in VirtDeck owns, `/etc/apt/apt.conf.d/99virtdeck`.** apt is the one tool of the
+  three with a real drop-in directory: it reads every file there in alphanumeric order, so `99` beats
+  `20auto-upgrades` and `50unattended-upgrades` without either being touched, and **deleting that one
+  file is the whole undo**. The file holds only the keys somebody has set through VirtDeck, and it is
+  **removed once it would be empty**, or it would quietly become the host's whole apt configuration
+  and go on masking the two files Debian ships for ever.
+- **The name carries no extension and the candidate is built in `/etc/apt`.** apt reads a file in
+  that directory only if its name has no extension or ends in `.conf`, and **prints a notice about
+  every other file it finds there**, so a `mktemp` sibling would have apt complaining on every
+  invocation for as long as the save took. The backup is the exception that proves the rule: `\.bak$`
+  is in apt's own default `Dir::Ignore-Files-Silently`, so `99virtdeck.virtdeck.bak` is ignored
+  without a word. Nothing renames that suffix.
+- **apt's values are read with `apt-config dump`, not from a file.** apt composes its configuration
+  from a directory of fragments in a defined order, so any one file is a claim about that
+  configuration rather than a statement of it. Only the named subtrees are dumped, because a bare
+  `apt-config dump` is hundreds of lines of `Dir::` and compressor settings. A key the dump does not
+  mention is not zero, it is whatever `/usr/lib/apt/apt.systemd.daily` starts it at, and those
+  defaults are stated in the rows rather than guessed at.
+- **dnf and pacman have no drop-in directory, so their keys are edited in place.** One awk program
+  does it for both, and four of its decisions are load-bearing. A key already there is replaced
+  **wherever it appears in its section**, which is deliberately neither the first nor the last: a key
+  stated twice would otherwise need this to guess which one the tool reads, and writing the same line
+  over both is the one answer that is right either way. A key the distribution shipped **commented
+  out** is uncommented in place, which is what `#ParallelDownloads = 5` in the stock `pacman.conf`
+  asks for and is far better than appending a second one three lines below it. A key in neither state
+  is appended at the end of **its own section**, where a later section header would otherwise have
+  swallowed it. And a section that is not there at all is created, which is what a host with no
+  `[commands]` block in `automatic.conf` needs. Sections are not defensive: `dnf.conf` may carry
+  repository sections after `[main]`, and `keepcache` is a legal key in both.
+- **Each write block is a subshell.** A dnf save edits two files, so two of them end up in one script:
+  without the parentheses the second `trap` would replace the first and leak its temporary files, and
+  the second `f=` would reassign the variable the first block's backup line reads.
+- **A pacman flag is on by being present.** `CheckSpace` and `DisableDownloadTimeout` have no
+  `= false` to write, so off is the line commented out rather than deleted: reversible, and it reads
+  as what somebody would have typed, where deleting it would lose the comment above it that explained
+  it. `ParallelDownloads` is the same shape one level up, since unset is what makes pacman fetch one
+  package at a time, so zero comes out as a removal and **not as a value**. Unset is also not five:
+  the stock file ships that number commented out, and drawing 5 for an untouched host would state
+  something pacman has never acted on.
+- **Where the page and the tool disagree, the row says so rather than offering an edit that would not
+  take.** `/etc/apt/apt.conf` is read **after** the whole drop-in directory, so a key named there
+  outranks `99virtdeck`; a `ParallelDownloads` that `pacman-conf` reports differently from the file
+  is being set by an `Include`; a dnf4 variant timer (`dnf-automatic-install.timer`) passes its own
+  `--installupdates` on the command line and overrules `automatic.conf` outright. Each of those makes
+  one read-only row with the reason on it.
+- **An apt interval this page cannot spell is left exactly as it is.** The periodic options take a
+  suffix of `s`, `m`, `h` or `d` and the word `always`, which apt's own script documents and acts on.
+  A dropdown cannot hold either, and rounding `4h` to a day would change what the host does without
+  saying so, so such a value is shown as the host's own words and refused an edit.
+- **Two things are stated rather than offered, and both are the same refusal.** apt's
+  `Unattended-Upgrade::Allowed-Origins` is the answer to "which updates", the counterpart of dnf's
+  `upgrade_type`, and it is a list option whose patterns differ between Debian and Ubuntu where both
+  ways of being wrong are silent: too narrow and nothing is ever installed, too wide and everything
+  is. So it is drawn, and drawn as a value rather than a box, because a page about automatic updates
+  with no visible answer to which updates would be the biggest hole in it. paccache's keep count is
+  the other, and it is simply in a third file: `PACCACHE_ARGS` in `/etc/conf.d/pacman-contrib`, which
+  the service reads through `EnvironmentFile`, so it is neither a unit property nor a `pacman.conf`
+  key and paccache's own default of three versions is a reasonable answer nobody has to be asked
+  about.
+- **The save redraws from the host's answer and not from the controls that asked for it.** A key apt
+  normalises, a timer systemd refused to enable and a value another file outranks all look like a
+  successful save from here and like nothing at all on the host. It re-reads whether the save worked
+  or not, which is what the upgrade does about its own table for the same reason. A unit that fails to
+  enable after the files are already written leaves a partial save, and the re-read is what makes
+  that visible rather than something to be inferred.
+
+### Installing the one package a group needs
+
+**This is the module's only install of a named package, and the narrowness is what makes it
+allowable.** The page is deliberately not a package browser and there is still no install of an
+arbitrary package: the name is a constant inside the manager class
+(`unattended-upgrades`, `dnf-automatic`, `pacman-contrib`), reached only through the group that could
+not be drawn without it, and never anything the user typed. Absent tooling is still a stated answer;
+it is now an answer with a button on it.
+
+It confirms first, like everything else here that changes the host, and it streams through the same
+transfer strip and the same `ReadProgress` an upgrade does, because that is what it is. It is the one
+of the three new service calls that **is** bracketed with `Begin`/`End`: this one really does hold the
+package database, so a listing run underneath it would fail and replace the very catalog the page
+reporting on it is drawing. `BusyReason` needed no change for the same reason, since it already
+answers off the phase those same progress lines set.
