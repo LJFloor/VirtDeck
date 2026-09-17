@@ -439,11 +439,28 @@ namespace VirtDeck.Updates
         private const string Append = "::";
 
         /// <summary>
-        /// The keys this manager writes as a list rather than an assignment. One entry, and it is a
-        /// set rather than a comparison so the next one is a line.
+        /// Ubuntu's spelling of which archives unattended-upgrades may install from: one
+        /// <c>origin:archive</c> pair per entry.
+        /// </summary>
+        private const string AllowedKey = "Unattended-Upgrade::Allowed-Origins";
+
+        /// <summary>
+        /// Debian's spelling of the same question, and the more expressive one: one entry is a comma
+        /// separated list of <c>field=value</c> pairs, all of which have to match.
+        ///
+        /// <para>unattended-upgrades reads <b>both</b> lists and installs from either, which is why
+        /// the row follows whichever the host actually names rather than picking one: writing the
+        /// other key would widen what the host installs instead of changing it.</para>
+        /// </summary>
+        private const string PatternKey = "Unattended-Upgrade::Origins-Pattern";
+
+        /// <summary>
+        /// The keys this manager writes as a list rather than an assignment. Both spellings of the
+        /// allowed origins, since a host answers with one or the other and the save has to be able to
+        /// replace whichever it is.
         /// </summary>
         private static readonly HashSet<string> ListKeys =
-            new(StringComparer.Ordinal) { "Unattended-Upgrade::Allowed-Origins" };
+            new(StringComparer.Ordinal) { AllowedKey, PatternKey };
 
         public string SettingsUnavailableReason => string.Empty;
 
@@ -536,11 +553,11 @@ namespace VirtDeck.Updates
                 switch (tag)
                 {
                     case "c" when fields.Length >= 2:
-                        // A list option (Allowed-Origins) arrives as the same key several times over,
-                        // so every value is kept and the row joins them. apt spells those repeats with
+                        // A list option (either allowed-origins key) arrives as the same key
+                        // several times over, so every value is kept and the row joins them. apt spells those repeats with
                         // the append operator still on the end of the tag, so the dump is one
-                        // "Unattended-Upgrade::Allowed-Origins=" holding nothing followed by an
-                        // "Unattended-Upgrade::Allowed-Origins::=<pattern>" per entry; asking for the
+                        // "Unattended-Upgrade::Origins-Pattern=" holding nothing followed by an
+                        // "Unattended-Upgrade::Origins-Pattern::=<pattern>" per entry; asking for the
                         // key without the suffix would find only that empty parent and report a host
                         // installing security updates as one configured to install nothing. Stripping
                         // it merges both spellings onto the name the rows use, and the parent's empty
@@ -660,50 +677,26 @@ namespace VirtDeck.Updates
             // What gets installed is the first question anybody has about automatic updates, and dnf
             // answers it with one word (upgrade_type). apt's answer is a list, which is why this one
             // row is a window of its own rather than a control on the page: a comma-joined box was
-            // unreadable at this width and could not say which part of it was one entry.
-            var origins = Lines(config, "Unattended-Upgrade::Allowed-Origins");
+            // unreadable at this width and could not say which part of it was one entry, and so was
+            // the same line with the box taken off it.
+            //
+            // And it is a list under two names. Ubuntu ships Allowed-Origins, Debian ships
+            // Origins-Pattern, unattended-upgrades reads both and installs from either. So the row
+            // follows whichever the host names rather than picking one: anything VirtDeck wrote to
+            // the other key would widen what this host installs instead of changing it. A host
+            // naming both gets a row each, since neither is the whole answer on its own.
+            var origins = Lines(config, AllowedKey);
+            var pattern = Lines(config, PatternKey);
+            var both = origins.Count > 0 && pattern.Count > 0;
 
-            var list = new PackageSetting
-            {
-                Key = "Unattended-Upgrade::Allowed-Origins",
-                Label = "Allowed origins",
-                Description = "Which suites unattended-upgrades may install from. This is the answer " +
-                              "to whether automatic updates means security fixes only or everything.",
-                Kind = SettingKind.List,
-                Value = string.Join("\n", origins),
-                ItemPlaceholder = "origin=Debian,codename=${distro_codename},label=Debian-Security",
-                EmptySummary = "Nothing, so unattended-upgrades installs nothing",
-                EditorNote =
-                    "One origin per row. A pattern is a comma separated list of archive fields " +
-                    "(origin, codename, label, suite, a) and the ${distro_id} and ${distro_codename} " +
-                    "variables unattended-upgrades expands; Debian and Ubuntu spell them differently, " +
-                    "so copy the shape of what is already here rather than another machine's. Both " +
-                    "ways of being wrong are silent: too narrow and nothing is ever installed, too " +
-                    $"wide and everything is.\n\nSaving writes the whole list to {DropIn} behind a " +
-                    "#clear, which is what replaces what 50unattended-upgrades says rather than " +
-                    "adding to it. An empty list writes nothing and hands the setting back to that " +
-                    "file.",
-            };
+            // The empty case is Allowed-Origins' rather than the pattern list's for no better reason
+            // than that something has to be offered on a host that says neither, and one pair of
+            // columns is the easier thing to be handed.
+            if (origins.Count > 0 || pattern.Count == 0)
+                group.Settings.Add(Outranked(Origins(AllowedKey, origins, both), mainConf));
 
-            // A host configured with Origins-Pattern instead is left alone. unattended-upgrades reads
-            // both lists and installs from either, so writing Allowed-Origins here would widen what
-            // the host does rather than change it, and the row would be a lie about which list is in
-            // force. It is the Choice helper's refusal one key over: a shape this page cannot hold is
-            // shown in the host's own words and not edited.
-            var pattern = Lines(config, "Unattended-Upgrade::Origins-Pattern");
-            if (origins.Count == 0 && pattern.Count > 0)
-            {
-                list.Kind = SettingKind.Text;
-                list.Value = string.Join(", ", pattern);
-                list.ReadOnly = true;
-                list.UnavailableReason =
-                    "This host answers with Unattended-Upgrade::Origins-Pattern rather than " +
-                    "Allowed-Origins. unattended-upgrades reads both and installs from either, so " +
-                    "anything VirtDeck wrote to Allowed-Origins would widen what this host installs " +
-                    "instead of changing it. Edit it in /etc/apt/apt.conf.d/50unattended-upgrades.";
-            }
-
-            group.Settings.Add(Outranked(list, mainConf));
+            if (pattern.Count > 0)
+                group.Settings.Add(Outranked(Origins(PatternKey, pattern, both), mainConf));
 
             group.Settings.Add(Toggle(config, "Unattended-Upgrade::Automatic-Reboot", false,
                 "Reboot when an upgrade needs it",
@@ -877,6 +870,204 @@ namespace VirtDeck.Updates
             }
 
             return Outranked(setting, mainConf);
+        }
+
+        private static readonly ListEntryShape AllowedShape = new OriginArchiveShape();
+        private static readonly ListEntryShape PatternShape = new OriginPatternShape();
+
+        /// <summary>
+        /// Saving one of these writes the whole list, which is what the note has to say out loud.
+        /// </summary>
+        private const string ListSaveNote =
+            "Saving writes the whole list to " + DropIn + " behind a #clear, which is what replaces " +
+            "what 50unattended-upgrades says rather than adding to it. An empty list writes nothing " +
+            "and hands the setting back to that file.";
+
+        /// <summary>
+        /// One of the two allowed-origins lists as a row.
+        ///
+        /// <para><paramref name="both"/> is whether this host names both keys, which is the only case
+        /// where the labels have to tell them apart: on every ordinary host there is one list and it
+        /// is simply the allowed origins.</para>
+        /// </summary>
+        private static PackageSetting Origins(string key, IReadOnlyList<string> entries, bool both)
+        {
+            var pattern = key == PatternKey;
+            var shape = pattern ? PatternShape : AllowedShape;
+
+            var setting = new PackageSetting
+            {
+                Key = key,
+                Label = both && pattern ? "Allowed origin patterns" : "Allowed origins",
+                Description =
+                    "Which suites unattended-upgrades may install from. This is the answer to whether " +
+                    "automatic updates means security fixes only or everything." +
+                    (both
+                        ? " This host names both lists and unattended-upgrades installs from either, " +
+                          $"so this row is half of what it may install ({key})."
+                        : $" ({key})"),
+                Kind = SettingKind.List,
+                Shape = shape,
+                Value = string.Join("\n", entries),
+                EditorNote = pattern
+                    ? "One pattern per row, and every cell filled in on a row has to match before " +
+                      "unattended-upgrades will install from an archive; an empty cell is not looked " +
+                      "at. The ${distro_id} and ${distro_codename} variables are expanded on the host, " +
+                      "and Debian and Ubuntu spell their origins and labels differently, so copy the " +
+                      "shape of what is already here rather than another machine's. Both ways of being " +
+                      "wrong are silent: too narrow and nothing is ever installed, too wide and " +
+                      "everything is.\n\n" + ListSaveNote
+                    : "One origin per row: the origin an archive states it comes from, and the " +
+                      "archive (its suite) within that. The " +
+                      "${distro_id} and ${distro_codename} variables are expanded on the host, and " +
+                      "Debian and Ubuntu spell their origins differently, so copy the shape of what is " +
+                      "already here rather than another machine's. Both ways of being wrong are " +
+                      "silent: too narrow and nothing is ever installed, too wide and everything " +
+                      "is.\n\n" + ListSaveNote,
+            };
+
+            // An entry no column can hold is the Choice helper's refusal one key over: the table
+            // would have to drop the half of it that does not fit and the save would write that loss
+            // back, so the whole list is stated in the host's own words and left alone instead.
+            foreach (var entry in entries)
+            {
+                if (shape.TryParse(entry, out _)) continue;
+
+                setting.Kind = SettingKind.Text;
+                setting.Value = string.Join(", ", entries);
+                setting.Shape = null;
+                setting.ReadOnly = true;
+                setting.UnavailableReason =
+                    $"This host has \"{entry}\" in {key}, which is an entry the editor's columns " +
+                    "cannot hold: it names a field unattended-upgrades does not match on, or names " +
+                    "one twice. VirtDeck is leaving the whole list exactly as it is rather than " +
+                    "writing back the part of it that fits. Edit it in " +
+                    "/etc/apt/apt.conf.d/50unattended-upgrades.";
+                break;
+            }
+
+            return setting;
+        }
+
+        /// <summary>
+        /// An <c>Origins-Pattern</c> entry, which reads
+        /// <c>origin=Debian,codename=${distro_codename},label=Debian</c>.
+        ///
+        /// <para>The six columns are exactly the matchers unattended-upgrades knows, which is what
+        /// makes a free-text key column wrong here: it parses each comma separated pair itself and
+        /// raises on a name that is not one of these, so a column per matcher is the only spelling
+        /// that cannot be typed wrong. The short forms are read and the long ones written, so a list
+        /// saved from here comes back in one spelling.</para>
+        /// </summary>
+        private sealed class OriginPatternShape : ListEntryShape
+        {
+            private static readonly SettingField[] Columns =
+            [
+                new("origin", "Origin", "Debian", 130) { Aliases = ["o"] },
+                new("codename", "Codename", "${distro_codename}", 180) { Aliases = ["n"] },
+                new("archive", "Archive", "${distro_codename}-security", 180)
+                    { Aliases = ["a", "suite"] },
+                new("label", "Label", "Debian-Security", 150) { Aliases = ["l"] },
+                new("component", "Component", "main", 110) { Aliases = ["c"] },
+                new("site", "Site", "deb.debian.org", 150),
+            ];
+
+            public override IReadOnlyList<SettingField> Fields => Columns;
+
+            public override bool TryParse(string entry, out IReadOnlyList<string> cells)
+            {
+                var found = new string[Columns.Length];
+                Array.Fill(found, string.Empty);
+                cells = found;
+
+                foreach (var part in entry.Split(','))
+                {
+                    var at = part.IndexOf('=');
+                    if (at <= 0) return false;
+
+                    var name = part[..at].Trim();
+                    var index = Array.FindIndex(Columns, c => Named(c, name));
+
+                    // A matcher no column holds, or one stated twice: either way half the entry would
+                    // be lost, so the table says it cannot hold this one at all.
+                    if (index < 0 || found[index].Length > 0) return false;
+
+                    found[index] = part[(at + 1)..].Trim();
+                }
+
+                return found.Any(c => c.Length > 0);
+            }
+
+            public override string Compose(IReadOnlyList<string> cells) =>
+                string.Join(",", Columns
+                    .Select((column, i) => (Column: column, Value: Cell(cells, i)))
+                    .Where(pair => pair.Value.Length > 0)
+                    .Select(pair => $"{pair.Column.Key}={pair.Value}"));
+
+            public override string? Refuse(IReadOnlyList<string> cells)
+            {
+                for (var i = 0; i < Columns.Length; i++)
+                {
+                    var value = Cell(cells, i);
+                    if (value.Contains(','))
+                        return $"{Columns[i].Label} holds a comma, which is what separates one field " +
+                               "from the next, so no single field can contain one.";
+                    if (value.Contains('='))
+                        return $"{Columns[i].Label} holds an =, which is what separates a field from " +
+                               "its value. The field is the column, so only the value goes here.";
+                }
+
+                return null;
+            }
+
+            private static bool Named(SettingField column, string name) =>
+                column.Key.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                column.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// An <c>Allowed-Origins</c> entry: <c>${distro_id}:${distro_codename}-security</c>, which
+        /// unattended-upgrades splits at the colon into an origin and an archive. Both halves are
+        /// required, because it splits before it matches and half an entry matches nothing.
+        /// </summary>
+        private sealed class OriginArchiveShape : ListEntryShape
+        {
+            private static readonly SettingField[] Columns =
+            [
+                new("origin", "Origin", "${distro_id}", 260),
+                new("archive", "Archive", "${distro_codename}-security", 320),
+            ];
+
+            public override IReadOnlyList<SettingField> Fields => Columns;
+
+            public override bool TryParse(string entry, out IReadOnlyList<string> cells)
+            {
+                var parts = entry.Split(':');
+                if (parts.Length != 2)
+                {
+                    cells = Array.Empty<string>();
+                    return false;
+                }
+
+                cells = new[] { parts[0].Trim(), parts[1].Trim() };
+                return true;
+            }
+
+            public override string Compose(IReadOnlyList<string> cells) =>
+                $"{Cell(cells, 0)}:{Cell(cells, 1)}";
+
+            public override string? Refuse(IReadOnlyList<string> cells)
+            {
+                if (Cell(cells, 0).Contains(':') || Cell(cells, 1).Contains(':'))
+                    return "An entry is an origin and an archive with a colon between them, so " +
+                           "neither half can hold one of its own.";
+
+                if (Cell(cells, 0).Length == 0 || Cell(cells, 1).Length == 0)
+                    return "An entry needs both an origin and an archive: unattended-upgrades splits " +
+                           "it at the colon, and half of one matches nothing.";
+
+                return null;
+            }
         }
 
         // /etc/apt/apt.conf is read after the whole drop-in directory, so a key named there beats the

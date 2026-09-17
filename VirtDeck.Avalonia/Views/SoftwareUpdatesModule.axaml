@@ -106,21 +106,16 @@
       </Border>
     </DataTemplate>
 
-    <!-- The one row whose control is not the value. The entries are stated beside the button rather
-         than behind it, because a page about automatic updates with no visible answer to which
-         updates would be the biggest hole in it; the button is what opens the window that edits
-         them. Trimmed rather than wrapped, so a long list cannot push the rows below it apart. -->
+    <!-- The one row whose control is not the value: a list has no shape a row of this page can
+         hold, so the row is the way in to the window that edits it and nothing else. The entries
+         are not restated in front of the button, where a trimmed comma-joined line was the box this
+         replaced in all but name. -->
     <DataTemplate DataType="vm:ListSettingRow">
       <Border Background="Transparent" ToolTip.Tip="{Binding Hint}">
-        <Grid ColumnDefinitions="220,Auto,*" Margin="0,0,0,2">
+        <Grid ColumnDefinitions="220,*" Margin="0,0,0,2">
           <TextBlock Grid.Column="0" Text="{Binding Label}" TextWrapping="Wrap"
                      VerticalAlignment="Center" />
-          <!-- The button sits against the value and not out at the page's edge: it is what edits
-               that text, and a Grid star between them would put half the window in between. -->
-          <TextBlock Grid.Column="1" Text="{Binding Summary}" MinWidth="280" MaxWidth="440"
-                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                     Classes.stated="{Binding IsEmpty}" ToolTip.Tip="{Binding Summary}" />
-          <Button Grid.Column="2" Content="Edit" Click="EditListClicked" Margin="8,0,0,0"
+          <Button Grid.Column="1" Content="Edit" Click="EditListClicked"
                   IsEnabled="{Binding IsEditable}" HorizontalAlignment="Left" />
         </Grid>
       </Border>

@@ -200,7 +200,13 @@ namespace VirtDeck.Avalonia.Views
     /// spinner, a dropdown and a box, and each is the value; this one is a button, and what it opens
     /// hands an answer back or does not. So the row owns the entries and the window edits a copy,
     /// which is also what makes Cancel mean something without the page having to remember a
-    /// before.</para>
+    /// before. The entries are not drawn on the page either: a list has no shape one row of a form
+    /// can hold, and a comma-joined line of them was the box the button replaced in all but
+    /// name.</para>
+    ///
+    /// <para>The window is a table rather than a column of lines, because an entry has fields: what
+    /// they are called and how they are joined back up is <see cref="Shape"/>, which the manager
+    /// declared, so nothing here or in the window knows one tool's commas from another's colons.</para>
     ///
     /// <para>The wire spelling is the entries joined by a newline, as
     /// <see cref="SettingKind.List"/> defines it, so <see cref="PackageSettingRow.IsDirty"/> and the
@@ -219,19 +225,8 @@ namespace VirtDeck.Avalonia.Views
         /// <summary>What the editor window puts at the top of itself.</summary>
         public string EditorNote => Setting.EditorNote;
 
-        /// <summary>The greyed example in an empty row of the editor.</summary>
-        public string ItemPlaceholder => Setting.ItemPlaceholder;
-
-        /// <summary>
-        /// What the page shows beside the button: the entries, comma joined and trimmed by the
-        /// control. An empty list says so in words rather than leaving the cell blank, because a blank
-        /// there reads as "not read yet" and this one is a real and consequential answer.
-        /// </summary>
-        public string Summary =>
-            _items.Count > 0 ? string.Join(", ", _items) :
-            Setting.EmptySummary.Length > 0 ? Setting.EmptySummary : "Nothing configured";
-
-        public bool IsEmpty => _items.Count == 0;
+        /// <summary>The editor's columns, and how one entry is cut into them.</summary>
+        public ListEntryShape? Shape => Setting.Shape;
 
         /// <summary>What the editor window accepted. Raises the same three as every other setter.</summary>
         public void Replace(IEnumerable<string> items)
@@ -241,8 +236,6 @@ namespace VirtDeck.Avalonia.Views
 
             _items = next;
             Raise(nameof(Items));
-            Raise(nameof(Summary));
-            Raise(nameof(IsEmpty));
             Raise(nameof(Value));
             Raise(nameof(IsDirty));
         }

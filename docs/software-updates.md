@@ -197,16 +197,33 @@ path on stderr. That case is not hypothetical, because this app has a Terminal m
   suffix of `s`, `m`, `h` or `d` and the word `always`, which apt's own script documents and acts on.
   A dropdown cannot hold either, and rounding `4h` to a day would change what the host does without
   saying so, so such a value is shown as the host's own words and refused an edit.
-- **Two things are stated rather than offered, and both are the same refusal.** apt's
-  `Unattended-Upgrade::Allowed-Origins` is the answer to "which updates", the counterpart of dnf's
-  `upgrade_type`, and it is a list option whose patterns differ between Debian and Ubuntu where both
-  ways of being wrong are silent: too narrow and nothing is ever installed, too wide and everything
-  is. So it is drawn, and drawn as a value rather than a box, because a page about automatic updates
-  with no visible answer to which updates would be the biggest hole in it. paccache's keep count is
-  the other, and it is simply in a third file: `PACCACHE_ARGS` in `/etc/conf.d/pacman-contrib`, which
-  the service reads through `EnvironmentFile`, so it is neither a unit property nor a `pacman.conf`
-  key and paccache's own default of three versions is a reasonable answer nobody has to be asked
-  about.
+- **The allowed origins are a table in a window of their own, over whichever key the host names.**
+  This is apt's answer to "which updates", the counterpart of dnf's `upgrade_type`, and it is a list:
+  a comma-joined box was unreadable at the page's width and could not say which part of it was one
+  entry, and neither could the same line with the box taken off it, so the row is a label and an
+  Edit button and the entries are only ever seen in the window. **The key follows the host.**
+  unattended-upgrades reads `Unattended-Upgrade::Allowed-Origins` and
+  `Unattended-Upgrade::Origins-Pattern` and installs from **either**, Ubuntu ships the first and
+  Debian the second, so writing the one the host does not use would have widened what it installs
+  instead of changing it. A host naming both gets a row each, since neither is the whole answer.
+  Saving writes the list to `99virtdeck` behind a `#clear`, **without which apt appends to what
+  `50unattended-upgrades` says** and removing a pattern here would do nothing at all; an emptied list
+  writes no key at all, which hands the answer back to that file rather than declaring that nothing
+  may be installed.
+- **The editor is a table with a column per field, and that is what makes an entry hard to get
+  wrong.** Both ways of being wrong here are silent: too narrow and nothing is ever installed, too
+  wide and everything is. A pattern's six columns are exactly the matchers unattended-upgrades knows
+  (origin, codename, archive, label, component, site), so a field name it would raise on cannot be
+  typed; an `Allowed-Origins` entry is two, because it splits that one at the colon. The short
+  spellings (`o=`, `n=`, `a=`) are read and the long ones written. **How an entry is cut into cells
+  and joined back up belongs to the manager**, as a `ListEntryShape` on the setting, so the window
+  names no package manager any more than the page does: it draws a column per field, and one entry
+  no column can hold is the `Choice` helper's refusal one key over, a whole list stated in the host's
+  own words and left alone rather than half of it written back.
+- **paccache's keep count is stated rather than offered**, and it is simply in a third file:
+  `PACCACHE_ARGS` in `/etc/conf.d/pacman-contrib`, which the service reads through `EnvironmentFile`,
+  so it is neither a unit property nor a `pacman.conf` key and paccache's own default of three
+  versions is a reasonable answer nobody has to be asked about.
 - **The save redraws from the host's answer and not from the controls that asked for it.** A key apt
   normalises, a timer systemd refused to enable and a value another file outranks all look like a
   successful save from here and like nothing at all on the host. It re-reads whether the save worked

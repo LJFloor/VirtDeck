@@ -1,10 +1,11 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        xmlns:m="clr-namespace:VirtDeck.Models;assembly=VirtDeck.Core"
         xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
         x:Class="VirtDeck.Avalonia.Views.ListSettingWindow"
         Title="Edit list"
-        Width="720" Height="460"
+        Width="1020" Height="460"
         WindowStartupLocation="CenterOwner">
 
   <DockPanel Margin="16">
@@ -27,6 +28,30 @@
       <DockPanel>
         <c:RowToolbar DockPanel.Dock="Top" Name="EntryTools" Margin="8,6,8,6" />
 
+        <!-- The same table the container editor draws: a heading strip in JbGroupBoxHeader's grey
+             over a rule, and rows on the window's own background. Its 12px matches JbTableRow's
+             padding, which is what puts a heading over its cells rather than beside them.
+
+             Both strips are an ItemsControl and not a Grid, because the columns are the manager's:
+             the count is not known in markup, so the heading and the cells are drawn from the same
+             field list and each takes its width off the field it belongs to. That is the one way
+             they cannot drift apart. -->
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <ItemsControl Name="ColumnHeads">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="6" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="m:SettingField">
+                <TextBlock Classes="columnheader" Text="{Binding Label}" Width="{Binding Width}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+
         <!-- A ListBox and not an ItemsControl, for RowList's own reason: a row here is both typed
              into and pointed at, and the minus button has to mean the row the caret is in. -->
         <ListBox Name="EntryList" Background="Transparent" Padding="0" BorderThickness="0"
@@ -37,8 +62,20 @@
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
             <DataTemplate DataType="vm:ListEntryRow">
-              <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                       PlaceholderText="{Binding Placeholder}" />
+              <ItemsControl ItemsSource="{Binding Cells}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:ListCell">
+                    <TextBox Width="{Binding Field.Width}"
+                             PlaceholderText="{Binding Field.Placeholder}"
+                             Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>

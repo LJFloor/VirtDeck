@@ -23,7 +23,8 @@ namespace VirtDeck.Models
         Text,
 
         /// <summary>
-        /// A list of values, edited in a window of its own behind an Edit button.
+        /// A list of values, edited behind an Edit button in a window of its own: a table with a
+        /// column per field of one entry, as <see cref="PackageSetting.Shape"/> declares them.
         ///
         /// <para><b><see cref="PackageSetting.Value"/> holds the entries joined by a newline</b>, and
         /// that is still the wire spelling the class remarks insist on: every line of it is one value
@@ -42,6 +43,61 @@ namespace VirtDeck.Models
     /// something needs it" is what the row should say.
     /// </summary>
     public sealed record SettingChoice(string Value, string Label);
+
+    /// <summary>
+    /// One column of a <see cref="SettingKind.List"/>'s editor, which is one field of one entry.
+    ///
+    /// <para><paramref name="Key"/> is the spelling the host's file uses and <paramref name="Label"/>
+    /// is the heading a person reads, the same split <see cref="SettingChoice"/> makes.
+    /// <paramref name="Width"/> is what lines the heading strip up with the cells under it: the
+    /// column count is not known in markup, so both are built from this list and neither can be
+    /// given a width the other does not have.</para>
+    /// </summary>
+    public sealed record SettingField(string Key, string Label, string Placeholder, double Width)
+    {
+        /// <summary>Other spellings the host's own file may use ("o" for "origin").</summary>
+        public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// How one entry of a <see cref="SettingKind.List"/> is cut into cells and put back together.
+    ///
+    /// <para>The manager that declares the list implements this, which is what keeps one tool's
+    /// commas and colons out of the window that edits them: the editor draws a column per
+    /// <see cref="Fields"/> entry, fills it with <see cref="TryParse"/> and hands back what
+    /// <see cref="Compose"/> makes of it. Same rule as the rest of the page, one level down.</para>
+    ///
+    /// <para><b><see cref="TryParse"/> answering false is an answer and not a failure.</b> An entry
+    /// this table cannot hold is what makes the whole row read-only and stated in the host's own
+    /// words, which is the refusal a value no dropdown can spell already gets: a table that quietly
+    /// dropped the half of an entry it did not understand would write that loss back to the
+    /// host.</para>
+    /// </summary>
+    public abstract class ListEntryShape
+    {
+        /// <summary>The columns, left to right.</summary>
+        public abstract IReadOnlyList<SettingField> Fields { get; }
+
+        /// <summary>
+        /// One entry in the host's own spelling, into one cell per field. False where this table
+        /// cannot hold it.
+        /// </summary>
+        public abstract bool TryParse(string entry, out IReadOnlyList<string> cells);
+
+        /// <summary>The cells back into the host's own spelling.</summary>
+        public abstract string Compose(IReadOnlyList<string> cells);
+
+        /// <summary>
+        /// Why these cells cannot be written, as a sentence for the editor's error line, or null.
+        /// It is the shape's own refusal; a quote and a backslash are the window's, because every
+        /// list this app writes goes into a quoted string whichever manager declared it.
+        /// </summary>
+        public virtual string? Refuse(IReadOnlyList<string> cells) => null;
+
+        /// <summary>One cell, trimmed, from a row that may be shorter than the column list.</summary>
+        protected static string Cell(IReadOnlyList<string> cells, int index) =>
+            index >= 0 && index < cells.Count ? cells[index].Trim() : string.Empty;
+    }
 
     /// <summary>
     /// One editable setting of the host's package manager.
@@ -84,15 +140,12 @@ namespace VirtDeck.Models
         /// </summary>
         public string EditorNote { get; set; } = string.Empty;
 
-        /// <summary>The greyed example in an empty row of a <see cref="SettingKind.List"/>'s editor.</summary>
-        public string ItemPlaceholder { get; set; } = string.Empty;
-
         /// <summary>
-        /// What the page shows beside the Edit button when a <see cref="SettingKind.List"/> holds
-        /// nothing. It says what an empty list does rather than nothing at all, and it is the
-        /// manager's sentence because only the manager knows what reads the list.
+        /// How one entry of a <see cref="SettingKind.List"/> is cut into the editor's columns, and
+        /// null for every other kind. The greyed example in an empty cell is a property of the
+        /// column, which is why there is no placeholder here.
         /// </summary>
-        public string EmptySummary { get; set; } = string.Empty;
+        public ListEntryShape? Shape { get; set; }
 
         public int Min { get; set; }
         public int Max { get; set; } = int.MaxValue;
@@ -109,9 +162,9 @@ namespace VirtDeck.Models
 
         /// <summary>
         /// Drawn, and its value stated, but never written. Three things reach it, and they are all the
-        /// same refusal: a value that explains what the host will do and that this app has no business
-        /// editing from here (apt's allowed origins); a value in a spelling the control cannot hold
-        /// without rounding it (an apt interval already set to <c>always</c> or <c>4h</c>); and a unit
+        /// same refusal: a value in a spelling the control cannot hold without rounding it (an apt
+        /// interval already set to <c>always</c> or <c>4h</c>); a list holding an entry no column of
+        /// its <see cref="Shape"/> can hold, which the editor would have to drop half of; and a unit
         /// systemd will not let anybody enable (<c>static</c>, <c>masked</c>).
         ///
         /// <para>Different from <see cref="UnavailableReason"/> on purpose: that is a row the host

@@ -1190,7 +1190,11 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         if (sender is not Control { DataContext: ListSettingRow row }) return;
         if (_busy || _savingSettings) return;
 
-        var window = new ListSettingWindow(row.Label, row.EditorNote, row.ItemPlaceholder, row.Items);
+        // A list row without a shape has no columns to draw, which no manager builds: the kind and the
+        // shape are set together. Answering nothing beats opening an empty table.
+        if (row.Shape is not { } shape) return;
+
+        var window = new ListSettingWindow(row.Label, row.EditorNote, shape, row.Items);
         await window.ShowDialog(Owner);
 
         if (window.Result is { } entries) row.Replace(entries);
