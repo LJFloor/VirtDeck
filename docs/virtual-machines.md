@@ -61,7 +61,7 @@ Text and images are mirrored both ways through the guest agent. **Files are not 
 
 ## Cursor rule (the key requirement)
 
-Exactly ONE cursor must be visible over the display: never zero, never two. `SpiceDisplay.ApplyCursor()` is the single chokepoint and just sets `Control.Cursor` (the OS never stacks cursors):
+Exactly ONE cursor must be visible over the display: never zero, never two. `FramebufferView.ApplyCursor()` (the base `SpiceDisplay` shares with the Remote Control module's display) is the single chokepoint and just sets `Control.Cursor` (the OS never stacks cursors):
 - ShowHostCursor policy -> the default arrow;
 - before any cursor message -> the default arrow (no missing cursor at startup);
 - guest hid the cursor -> `StandardCursorType.None`;

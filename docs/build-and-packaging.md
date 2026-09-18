@@ -27,5 +27,25 @@ publish.bat                         # Windows -> installer\output\VirtDeckSetup-
 
 `.github/workflows/publish.yml` builds both on every push to `main`, and that is the whole of CI: it **uploads nothing**, so it is the no-regression gate and not a source of downloads. The repo being private is why: build artifacts count against the account's Actions storage allowance, one push to `main` stored about 107 MB for the pair, and once the allowance is full *every* upload in the repo fails, so a green build reports as a failed run. Both halves are still built, because ISCC and appimagetool are part of what can regress. There is no tag-triggered release workflow any more; a release is built locally with the two commands above.
 
+## The Remote Control host agent
+
+`native/x11vnc/build.sh` builds the static x11vnc and `vdrelay` the Remote Control module uploads
+to hosts (see "Remote control"), one tarball per host architecture, in Alpine containers:
+
+```bash
+native/x11vnc/build.sh              # docker or podman; arm64 on x86_64 needs qemu-user-binfmt
+ARCHS=amd64 native/x11vnc/build.sh  # one architecture
+```
+
+It runs when a version changes, never as part of a build: the results (`agent-x86_64.tar.gz`,
+`agent-aarch64.tar.gz`, with `SHA256SUMS` and the `packages-<arch>.txt` it records) are committed
+beside their sources, like the Windows DLLs in `native/win-x64`, and `VirtDeck.Core.csproj` embeds
+them on every platform. **A missing tarball is not a build error**: the module then says it has no
+agent for that host's architecture. Every source it builds from is committed in
+`native/x11vnc/src/` with its hash in `SOURCES.sha256`, so a rebuild needs the network only for
+Alpine's packages. Both release artifacts ship that directory (minus the built agents) as
+`x11vnc-src`, the GPL corresponding source, next to `SpiceClient-src`, and CI zips it for the
+installer the same way.
+
 `packaging/icons/make-icons.py` is the single source for the app icon: it rasterises the hicolor PNGs, the scalable SVG and the Windows `.ico` from one set of numbers, so no build machine needs an SVG renderer.
 

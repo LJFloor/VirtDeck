@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.RemoteControlModule">
+
+  <DockPanel>
+
+    <!-- Terminal's strip. Nothing is accented, since nothing here creates anything, and no button
+         is IsDefault or IsCancel: Enter and Escape belong to the remote desktop. -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <CheckBox DockPanel.Dock="Right" Name="FitBox" Content="Fit to window" Margin="10,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Scale the desktop to the space it has. Off shows it one pixel per screen pixel, with scroll bars." />
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <ComboBox Name="SessionBox" Width="240" VerticalAlignment="Center"
+                    ToolTip.Tip="The X displays on the host: somebody's desktop, or the login screen." />
+          <Button Name="RefreshButton" Content="Refresh" MinWidth="72"
+                  ToolTip.Tip="Look for X sessions on the host again" />
+          <Button Name="ConnectButton" Content="Connect" MinWidth="72"
+                  ToolTip.Tip="Control the chosen session" />
+          <Button Name="DisconnectButton" Content="Disconnect" MinWidth="72"
+                  ToolTip.Tip="Stop controlling the session. Nothing on the host changes." />
+          <!-- The combinations the local desktop would keep for itself, and typing the clipboard
+               for where a paste cannot reach (the login screen's password box). -->
+          <Button Name="KeysButton" Content="Keys" MinWidth="72"
+                  ToolTip.Tip="Send a key combination this computer would otherwise keep, or type the clipboard">
+            <Button.Flyout>
+              <MenuFlyout>
+                <MenuItem Name="CtrlAltDelItem" Header="Ctrl+Alt+Del" />
+                <MenuItem Name="AltTabItem" Header="Alt+Tab" />
+                <MenuItem Name="AltF4Item" Header="Alt+F4" />
+                <MenuItem Name="SuperItem" Header="Super" />
+                <Separator />
+                <MenuItem Name="TypeClipboardItem" Header="Type clipboard" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <!-- Fit disables the scroll bars, which is what hands the display the viewport's size to
+           scale into; 1:1 turns them on and the display measures itself at the picture's size. -->
+      <ScrollViewer Name="Scroller" IsVisible="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled">
+        <c:RemoteDisplay Name="Display" />
+      </ScrollViewer>
+
+      <!-- Why there is no picture: no session, a Wayland one, connecting, or how the last one ended. -->
+      <TextBlock Name="Overlay" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="480"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+
+  </DockPanel>
+</UserControl>

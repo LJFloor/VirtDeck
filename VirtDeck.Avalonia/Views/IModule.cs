@@ -86,6 +86,21 @@ public interface IModule
     /// </summary>
     bool IsRelevant(HostToolset host) => RequiredTools.All(host.Has);
 
+    /// <summary>
+    /// Whether the shell should keep re-probing the host while this module's tab is hidden, so the
+    /// tab appears within seconds of its tooling being installed. The shell's poll exists for
+    /// exactly that and stops once every hidden tab has said no here.
+    ///
+    /// True for all but one. Remote Control answers false, because what hides it is the host having
+    /// no X server at all, which is what a headless server is: waiting for one to be installed
+    /// would keep a fully equipped server polled every four seconds for the life of the session, to
+    /// catch something that practically never happens. Such a tab still appears on the next
+    /// connect, when the first probe runs.
+    ///
+    /// Defaulted, so adding a module stays a TabItem plus a UserControl.
+    /// </summary>
+    bool ReprobeWhileHidden => true;
+
     /// <summary>Raised when either status string changed. The shell repaints only if this module is active.</summary>
     event Action? StatusChanged;
 

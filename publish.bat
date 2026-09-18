@@ -56,6 +56,17 @@ if not "%ZIP_RC%"=="0" (
     goto :fail
 )
 
+rem GPL corresponding source for the Remote Control module's host agent (x11vnc), shipped the
+rem same way: the upstream tarballs, the build scripts and vdrelay, without the built agents.
+set "AGENT_SRC_ZIP=publish\x11vnc-src.zip"
+if exist "%AGENT_SRC_ZIP%" del /q "%AGENT_SRC_ZIP%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem 'native\x11vnc' -Exclude 'agent-*.tar.gz','licenses-found' | Compress-Archive -DestinationPath '%AGENT_SRC_ZIP%' -Force"
+if errorlevel 1 (
+    echo.
+    echo ERROR: failed to create %AGENT_SRC_ZIP%.
+    goto :fail
+)
+
 rem Locate the Inno Setup compiler (ISCC). Prefer PATH, then the usual installs.
 set "ISCC="
 where iscc >nul 2>nul && set "ISCC=iscc"

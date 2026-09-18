@@ -35,6 +35,17 @@ namespace VirtDeck.Updates
         /// </summary>
         public string OsName { get; init; } = string.Empty;
 
+        /// <summary>
+        /// Whether an X server is installed: Xorg, or one of the virtual ones (Xvfb, Xvnc). Asked by
+        /// presence alone, never by running it, which is why it is not one of <see cref="Tools"/>:
+        /// see <c>HostTools</c>. Installed rather than running, like every other tool here; whether a
+        /// session is up right now is the Remote Control module's own question, asked each time it
+        /// is looked at.
+        ///
+        /// Init-only for the reason <see cref="OsName"/> is.
+        /// </summary>
+        public bool HasXServer { get; init; }
+
         public bool Has(string tool) => Tools.ContainsKey(tool);
 
         public string Version(string tool) => Tools.TryGetValue(tool, out var v) ? v : string.Empty;

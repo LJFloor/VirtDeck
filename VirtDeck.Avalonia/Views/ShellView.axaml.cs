@@ -340,10 +340,21 @@ public partial class ShellView : UserControl
             // The poll runs while the strip is not yet known to be right: something is still
             // missing, or the last probe could not say which. A failed one is showing every tab
             // because it could not tell rather than because it knows, so it has to be asked again.
-            if (_probeFailed || Modules.Items.OfType<TabItem>().Any(t => !t.IsVisible)) _probeTimer.Start();
-            else _probeTimer.Stop();
+            // A hidden tab whose module says it is not worth waiting for does not count: see
+            // IModule.ReprobeWhileHidden.
+            if (_probeFailed || ModuleTabs().Any(m => !m.Tab.IsVisible && ReprobesWhileHidden(m.Module)))
+                _probeTimer.Start();
+            else
+                _probeTimer.Stop();
         }
         finally { _syncing = false; }
+    }
+
+    /// <summary>Guarded for the reason every module call in a sync is.</summary>
+    private static bool ReprobesWhileHidden(IModule module)
+    {
+        try { return module.ReprobeWhileHidden; }
+        catch { return true; }
     }
 
     /// <summary>

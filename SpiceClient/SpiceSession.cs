@@ -13,7 +13,7 @@ namespace SpiceClient;
 /// All events fire from background channel threads; subscribers must marshal to
 /// the UI thread.
 /// </summary>
-public sealed class SpiceSession : IDisposable
+public sealed class SpiceSession : IDisposable, IFramebufferSource
 {
     public string Host { get; }
     public int Port { get; }

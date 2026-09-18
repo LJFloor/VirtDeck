@@ -326,30 +326,7 @@ namespace VirtDeck.Services
                 throw new InvalidOperationException("SSH is not connected.");
 
             var info = _client.ConnectionInfo;
-            var password = _sudoPassword;
-            var sentinel = "__VD_" + Guid.NewGuid().ToString("N") + "__";
-
-            string full;
-            if (elevated)
-            {
-                var inner = ShellScript.Prologue
-                            + $"while IFS= read -r __l; do [ \"$__l\" = \"{sentinel}\" ] && break; done\n"
-                            + script;
-                var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(inner));
-                full = $"sudo -S -p '' bash -c \"$(echo {b64} | base64 -d)\"";
-            }
-            else
-            {
-                // bash -c "$(...)" and NOT the "echo | base64 -d | bash" that RemoteFileService.Wrap
-                // uses: piping a script INTO bash makes that pipe bash's stdin, so the payload
-                // command would inherit the exhausted script pipe instead of this channel and read
-                // nothing. (tar answers "This does not look like a tar archive".) Every other script
-                // in the app can be piped in because none of them reads stdin; these are the ones
-                // that do, so the script has to arrive as an argument and leave stdin alone.
-                var b64 = Convert.ToBase64String(
-                    System.Text.Encoding.UTF8.GetBytes(ShellScript.Prologue + script));
-                full = $"bash -c \"$(echo {b64} | base64 -d)\"";
-            }
+            var (full, preamble) = StdinScript(script, elevated);
 
             await Task.Run(async () =>
             {
@@ -371,10 +348,8 @@ namespace VirtDeck.Services
                     {
                         using (var stdin = cmd.CreateInputStream())
                         {
-                            if (elevated)
+                            if (preamble is not null)
                             {
-                                var preamble = System.Text.Encoding.UTF8.GetBytes(
-                                    password + "\n" + sentinel + "\n");
                                 stdin.Write(preamble, 0, preamble.Length);
                                 stdin.Flush();
                             }
@@ -397,6 +372,82 @@ namespace VirtDeck.Services
                 finally
                 {
                     try { ssh.Disconnect(); } catch { }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// The command line for a script that reads its own stdin, and what has to go down that stdin
+        /// before the script's payload: the sudo password and the sentinel line when elevated, nothing
+        /// otherwise. <see cref="RunPipeInAsync"/> explains the sentinel; <see cref="OpenPipeAsync"/>
+        /// is the other caller, and the reason this is one method is that the NOPASSWD reasoning
+        /// belongs in one place.
+        /// </summary>
+        private (string Command, byte[]? Preamble) StdinScript(string script, bool elevated)
+        {
+            if (elevated)
+            {
+                var sentinel = "__VD_" + Guid.NewGuid().ToString("N") + "__";
+                var inner = ShellScript.Prologue
+                            + $"while IFS= read -r __l; do [ \"$__l\" = \"{sentinel}\" ] && break; done\n"
+                            + script;
+                var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(inner));
+                return ($"sudo -S -p '' bash -c \"$(echo {b64} | base64 -d)\"",
+                        System.Text.Encoding.UTF8.GetBytes(_sudoPassword + "\n" + sentinel + "\n"));
+            }
+
+            // bash -c "$(...)" and NOT the "echo | base64 -d | bash" that RemoteFileService.Wrap
+            // uses: piping a script INTO bash makes that pipe bash's stdin, so the payload command
+            // would inherit the exhausted script pipe instead of this channel and read nothing.
+            // (tar answers "This does not look like a tar archive".) Every other script in the app
+            // can be piped in because none of them reads stdin; these are the ones that do, so the
+            // script has to arrive as an argument and leave stdin alone.
+            var plain = Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(ShellScript.Prologue + script));
+            return ($"bash -c \"$(echo {plain} | base64 -d)\"", null);
+        }
+
+        /// <summary>
+        /// Runs a script on a dedicated connection and hands back both ends of it: its stdout to read
+        /// and its stdin to write, as binary streams, for as long as it runs. The one place in the app
+        /// where a command is a conversation rather than a download or an upload, which is what the
+        /// Remote Control module's x11vnc is: RFB travels on this channel's stdin and stdout.
+        ///
+        /// <para>No terminal is involved, so nothing rewrites a byte on the way; <see cref="SshPtySession"/>
+        /// is the bidirectional channel for people, this is the one for protocols. Its own connection,
+        /// by the long-call rule, with the keepalive the shared one has, since a session can sit idle
+        /// behind a NAT for as long as nobody touches the remote desktop.</para>
+        ///
+        /// <para>Elevation works exactly as in <see cref="RunPipeInAsync"/>: the password and the
+        /// sentinel go down stdin first, so by the time the script's payload runs, its stdin is this
+        /// end's and nothing else. What is read and written is counted into
+        /// <see cref="BytesReceived"/> and <see cref="BytesSent"/>, which is what puts a remote desktop
+        /// in the shell's throughput readout.</para>
+        /// </summary>
+        public async Task<SshPipe> OpenPipeAsync(string script, bool elevated, CancellationToken ct)
+        {
+            if (_client is not { IsConnected: true })
+                throw new InvalidOperationException("SSH is not connected.");
+
+            var info = _client.ConnectionInfo;
+            var (full, preamble) = StdinScript(script, elevated);
+
+            return await Task.Run(() =>
+            {
+                var ssh = new SshClient(info) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+                try
+                {
+                    ssh.Connect();
+                    ct.ThrowIfCancellationRequested();
+                    return SshPipe.Start(ssh, full, preamble,
+                                         n => Interlocked.Add(ref _bytesReceived, n),
+                                         n => Interlocked.Add(ref _bytesSent, n));
+                }
+                catch
+                {
+                    try { ssh.Disconnect(); } catch { }
+                    ssh.Dispose();
+                    throw;
                 }
             }, ct);
         }

@@ -79,3 +79,4 @@ in this index.
 | [storage-zfs-datasets.md](docs/storage-zfs-datasets.md) | What is inside a pool, as a tree under it: filesystems and volumes, their properties, and create, edit, rename and destroy. |
 | [file-explorer.md](docs/file-explorer.md) | Browsing as the login user, the one-shot root retry, cut/copy/paste, deleting, transfers in both directions, and dragging. |
 | [terminal.md](docs/terminal.md) | One shell on the host as the logged-in user, and how the keyboard is handled across the three terminal surfaces. |
+| [remote-control.md](docs/remote-control.md) | The host's own X11 desktop inline and scaled: the static x11vnc agent VirtDeck uploads, vdrelay, finding the displays, RFB over an SSH channel's stdin and stdout, the shared framebuffer view, and keysyms. |

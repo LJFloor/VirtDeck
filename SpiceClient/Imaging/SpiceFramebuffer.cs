@@ -91,6 +91,35 @@ public sealed class SpiceFramebuffer : IDisposable
         AddDirty(destX, destY, w, h);
     }
 
+    /// <summary>
+    /// Copies BGRA rows from a caller's buffer onto the surface at (x, y), clamped to the surface.
+    /// For decoders that already hold pixels in the surface's layout (an RFB Raw rect, a decoded
+    /// Tight rect), so they need not wrap them in a <see cref="DecodedImage"/> first.
+    /// </summary>
+    public void BlitBgra(ReadOnlySpan<byte> src, int srcStride, int x, int y, int w, int h)
+    {
+        int srcX = 0, srcY = 0;
+        if (!ClampDest(ref x, ref y, ref w, ref h, ref srcX, ref srcY)) return;
+
+        int rowBytes = w * 4;
+        for (int row = 0; row < h; row++)
+        {
+            int sOff = (srcY + row) * srcStride + srcX * 4;
+            if (sOff + rowBytes > src.Length) break;
+            src.Slice(sOff, rowBytes).CopyTo(_pixels.AsSpan((y + row) * Stride + x * 4, rowBytes));
+        }
+        AddDirty(x, y, w, h);
+    }
+
+    /// <summary>
+    /// Records a region as changed for a caller that wrote <see cref="Pixels"/> directly.
+    /// Clamped to the surface. Call under <see cref="SyncRoot"/>, like every write.
+    /// </summary>
+    public void MarkDirty(int x, int y, int w, int h)
+    {
+        if (ClampDest(ref x, ref y, ref w, ref h)) AddDirty(x, y, w, h);
+    }
+
     /// <summary>Intra-surface block copy (DISPLAY_COPY_BITS).</summary>
     public void CopyBits(int srcX, int srcY, int destX, int destY, int w, int h)
     {

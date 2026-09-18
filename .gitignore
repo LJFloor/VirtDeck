@@ -38,3 +38,6 @@ Thumbs.db
 
 # NOTE: the third-party redistributables (native\win-x64\*.dll, installer\redist\*.msi) are
 # committed on purpose so the build inputs aren't lost; they are intentionally NOT ignored.
+
+# Scratch output of native/x11vnc/build.sh, reviewed into native/x11vnc/licenses/
+/native/x11vnc/licenses-found/

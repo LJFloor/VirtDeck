@@ -49,6 +49,10 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 ; produced by publish.bat. Installed beside the app so the binary is "accompanied by source"
 ; (LGPL/GPL §3(a)), so no separate written offer or hosted URL is required.
 Source: "..\publish\SpiceClient-src.zip"; DestDir: "{app}"; Flags: ignoreversion
+; GPL corresponding source for the Remote Control module's host agent (a static x11vnc, embedded in
+; the app and uploaded to Linux hosts), also produced by publish.bat, and the agent's license texts.
+Source: "..\publish\x11vnc-src.zip"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\native\x11vnc\licenses\*"; DestDir: "{app}\licenses\x11vnc"; Flags: ignoreversion
 ; The app's freeware EULA, plus third-party notices + license texts. We redistribute the
 ; LGPL/MIT native DLLs and the Apache-licensed UsbDk MSI, so their licenses ship beside them.
 Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion

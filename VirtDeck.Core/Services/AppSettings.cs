@@ -134,6 +134,13 @@ namespace VirtDeck.Services
         public double TerminalFontSize { get; set; } = 13;
 
         /// <summary>
+        /// Whether the Remote Control module scales the host's desktop to fit (true) or shows it one
+        /// pixel per screen pixel with scroll bars (false). One answer for every host, like the
+        /// terminal's font size: it is about this screen, not about the one being looked at.
+        /// </summary>
+        public bool RemoteControlFit { get; set; } = true;
+
+        /// <summary>
         /// Height in pixels of the VM module's details pane, the one layout value in this file.
         /// Read back through <see cref="VmDetailsHeightOrDefault"/>, which clamps it: a hand-edited
         /// or corrupted number must never be able to push the VM list off the screen, which is the

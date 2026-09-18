@@ -28,6 +28,13 @@ namespace VirtDeck.Services
         // `. /etc/os-release` is fenced: a host without the file is an ordinary case (it is not
         // universal), and the tool search below still answers on its own.
         //
+        // The `x` record says an X server is installed, and it is a record of its own rather than a
+        // tool in the loop above because that loop runs every binary it finds with --version, and
+        // running an X server's wrapper to ask its version is starting an X server: it may be
+        // setuid, it may write a log, it may refuse because nobody is at the console. So this one
+        // asks `command -v` and nothing else. What it answers is the Remote Control module's test
+        // for whether the host has a desktop to control at all.
+        //
         // The `i` record is what the host says it is running, which the shell's host cell names in
         // its menu. It is a record of its own rather than a third field on `o` because that one is
         // the machine-readable half of the same question, which PackageManagers.Detect weighs; this
@@ -41,6 +48,9 @@ namespace VirtDeck.Services
             for m in TOOLS; do
               p=$(command -v "$m" 2>/dev/null) || continue
               printf 'v\t%s\t%s\n' "$m" "$("$p" --version 2>/dev/null | head -n 1)"
+            done
+            for b in Xorg Xvfb Xvnc Xtigervnc; do
+              command -v "$b" >/dev/null 2>&1 && { printf 'x\t%s\n' "$b"; break; }
             done
             exit 0
             """;
@@ -69,6 +79,7 @@ namespace VirtDeck.Services
             var id = string.Empty;
             var idLike = string.Empty;
             var osName = string.Empty;
+            var xServer = false;
             var tools = new Dictionary<string, string>(StringComparer.Ordinal);
 
             foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
@@ -87,6 +98,10 @@ namespace VirtDeck.Services
                         osName = text.Trim();
                         break;
 
+                    case "x":
+                        xServer = true;
+                        break;
+
                     case "v":
                     {
                         // A tool that answered nothing to --version is still installed, so the name is
@@ -100,7 +115,7 @@ namespace VirtDeck.Services
                 }
             }
 
-            return new HostToolset(id, idLike, tools) { OsName = osName };
+            return new HostToolset(id, idLike, tools) { OsName = osName, HasXServer = xServer };
         }
     }
 }
