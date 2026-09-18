@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.ReconnectDialog"
+        Title="Connection lost"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False" ShowInTaskbar="False">
+
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Name="InfoText" TextWrapping="Wrap" />
+    <ProgressBar Name="Progress" Height="6" IsIndeterminate="True" />
+    <DockPanel>
+      <Button Name="CancelButton" DockPanel.Dock="Right" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <TextBlock Name="DetailText" VerticalAlignment="Center" Opacity="0.75"
+                 TextTrimming="CharacterEllipsis" Margin="0,0,12,0" />
+    </DockPanel>
+  </StackPanel>
+</Window>

@@ -665,6 +665,50 @@ namespace VirtDeck.Services
                 n => Interlocked.Add(ref _bytesReceived, n)), ct);
         }
 
+        /// <summary>
+        /// A new connection to the same host as the same account, for when this one has dropped.
+        /// It is made with what this one was opened with, so it needs nothing from the user or the
+        /// OS store: a host that restarted is reached again with the password typed at login.
+        ///
+        /// <para>On success the credentials <b>move</b> to the new connection, and this one no
+        /// longer disposes them. The shell this one belonged to is torn down after the new one is up,
+        /// and that teardown disposes this connection; had the key and auth method stayed here, it
+        /// would take them away from the connection replacing it.</para>
+        /// </summary>
+        public async Task<SshConnectionManager> ReconnectAsync(CancellationToken ct)
+        {
+            if (_client is null || _authMethod is null)
+                throw new InvalidOperationException("Not connected.");
+
+            var client = new SshClient(_client.ConnectionInfo) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+            try
+            {
+                await client.ConnectAsync(ct);
+            }
+            catch
+            {
+                client.Dispose();
+                throw;
+            }
+
+            var next = new SshConnectionManager
+            {
+                _client = client,
+                _authMethod = _authMethod,
+                _keyFile = _keyFile,
+                _sudoPassword = _sudoPassword,
+                Host = Host,
+                Port = Port,
+                Username = Username,
+            };
+            _authMethod = null;
+            _keyFile = null;
+            return next;
+        }
+
+        /// <summary>The host answered but turned the login down, as opposed to not answering.</summary>
+        public static bool IsLoginRefused(Exception ex) => ex is SshAuthenticationException;
+
         public void Disconnect() => _client?.Disconnect();
 
         public void Dispose()

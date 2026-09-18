@@ -777,19 +777,16 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         if (!await MessageDialog.Confirm(Owner, "Restart host",
                 "Restart this host now?\n\n" +
-                "Everything running on it stops, and VirtDeck loses its SSH connection with it: this " +
-                "window will not reconnect on its own, and any console or file transfer open in " +
-                "another module ends here.\n\n" +
                 "The host restarts about a second after you confirm."))
             return;
 
+        // Nothing is said once it is under way: the connection drops a second later, and the
+        // shell's reconnect box takes over from there.
         try
         {
             SetStatus("Restarting the host…");
             await Packages.RebootHostAsync();
             RebootPanel.IsVisible = false;
-            await MessageDialog.Info(Owner, "Restart host",
-                "The host is restarting. Log in again once it is back.");
         }
         catch (Exception ex)
         {

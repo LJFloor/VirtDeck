@@ -83,6 +83,18 @@ public partial class ShellView : UserControl
     /// </summary>
     private readonly DispatcherTimer _probeTimer;
 
+    /// <summary>Watches the shared connection. See <see cref="CheckLink"/>.</summary>
+    private readonly DispatcherTimer _linkTimer;
+
+    /// <summary>The connection has dropped. Set once: a shell is never put back on its feet, only replaced.</summary>
+    private bool _lost;
+
+    /// <summary>The reconnect box while it is up, so a teardown can take it down with the shell.</summary>
+    private ReconnectDialog? _reconnect;
+
+    /// <summary><see cref="Shutdown"/> has run.</summary>
+    private bool _shutDown;
+
     /// <summary>A sync is in flight. It moves the selection, and it must not overlap its own tick.</summary>
     private bool _syncing;
 
@@ -134,6 +146,9 @@ public partial class ShellView : UserControl
 
     /// <summary>Which host this shell is on. The window titles itself from it.</summary>
     public HostProfile Profile => _profile;
+
+    /// <summary>The connection has dropped and was not got back, so this shell is on no host at all.</summary>
+    public bool IsLost => _lost;
 
     /// <summary>
     /// The module on screen, as a type, which is what a shell replacing this one lands on. A type
@@ -203,6 +218,9 @@ public partial class ShellView : UserControl
         // again the moment nothing is.
         _probeTimer = new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Background,
             async (_, _) => await SyncModuleVisibilityAsync());
+
+        _linkTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background,
+            (_, _) => CheckLink());
     }
 
     /// <summary>
@@ -220,6 +238,7 @@ public partial class ShellView : UserControl
         _lastBytes = TotalTunnelBytes();
         _lastSampleTs = Stopwatch.GetTimestamp();
         _tickTimer.Start();
+        _linkTimer.Start();
 
         // Read once directly, so a window opened onto a host that is already going down says so
         // now rather than a second connection and a round trip later, and then the watch takes over.
@@ -474,11 +493,13 @@ public partial class ShellView : UserControl
             await ReadScheduledAsync();
             PaintStatus();
 
-            await MessageDialog.Info(Owner, title, delay == TimeSpan.Zero
-                ? $"The host is {(restart ? "restarting" : "shutting down")}. " +
-                  "This window loses its connection in a moment."
-                : $"{_scheduled?.Summary() ?? $"The {noun} is scheduled"}. " +
-                  $"Call it off from the host cell if you change your mind.");
+            // Nothing to say about an immediate one: the connection drops a second from now, and the
+            // reconnect box that puts up says what is happening better than a dialog about to be
+            // buried under it.
+            if (delay != TimeSpan.Zero)
+                await MessageDialog.Info(Owner, title,
+                    $"{_scheduled?.Summary() ?? $"The {noun} is scheduled"}. " +
+                    $"Call it off from the host cell if you change your mind.");
         }
         catch (Exception ex)
         {
@@ -563,6 +584,55 @@ public partial class ShellView : UserControl
         await MessageDialog.Info(Owner, "The host is going down",
             $"{found.Summary()} on {_profile.DisplayName}." +
             (found.Message.Length > 0 ? $"\n\nMessage to logged in users: {found.Message}" : ""));
+    }
+
+    // ---- Losing the connection -----------------------------------------------
+
+    /// <summary>
+    /// Puts up the reconnect box once the shared connection has dropped.
+    ///
+    /// <para>A poll, but of this PC's own socket rather than of the host, so it costs no round
+    /// trip, and it sees the session end however it ended. A host that restarts closes the socket
+    /// and is seen within a second; a link that just goes quiet is seen only when TCP gives up on
+    /// it, which is the honest limit.</para>
+    /// </summary>
+    private void CheckLink()
+    {
+        if (_lost || _ssh.IsConnected) return;
+        _ = OnConnectionLostAsync();
+    }
+
+    /// <summary>
+    /// Waits for the host to come back, and then hands the window a new connection to it, exactly as
+    /// a host switch does: <b>the shell is replaced, never repaired</b>. Every module's latches,
+    /// tails and sessions were about a connection that is gone, and after a restart about a host
+    /// whose state has moved, which is the argument this class's own summary makes for a switch.
+    /// The module on screen is carried over, so it reads as the same page coming back.
+    ///
+    /// <para>Cancel is giving up on the session, and like Remote Desktop's it goes back to the way
+    /// in: the host manager, on this host, where Login works again because this shell is no longer
+    /// connected to it.</para>
+    /// </summary>
+    private async Task OnConnectionLostAsync()
+    {
+        _lost = true;
+        _linkTimer.Stop();
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        VirtDeck.Diagnostics.SpiceLog.Log($"[shell] connection to {_ssh.Host} lost");
+
+        _reconnect = new ReconnectDialog(_ssh, _profile.DisplayName);
+        var ssh = await _reconnect.ShowDialog<SshConnectionManager?>(owner);
+        _reconnect = null;
+
+        if (_shutDown)
+        {
+            ssh?.Dispose();
+            return;
+        }
+
+        if (ssh != null) ConnectionReplaced?.Invoke(ssh);
+        else ManageHostsRequested?.Invoke(_profile);
     }
 
     // ---- Switching host -------------------------------------------------
@@ -739,13 +809,16 @@ public partial class ShellView : UserControl
 
     /// <summary>
     /// This shell is finished: the window is closing, or it has swapped in a shell on another host.
-    /// Stops both timers, runs every module's own teardown (closing the consoles, log windows and
+    /// Stops its timers and any reconnect box, runs every module's own teardown (closing the consoles, log windows and
     /// container shells it opened, and stopping its event tails), then disposes the connection.
     /// </summary>
     public void Shutdown()
     {
+        _shutDown = true;
         _tickTimer.Stop();
         _probeTimer.Stop();
+        _linkTimer.Stop();
+        _reconnect?.Close();
         _power.StopWatching();
 
         // Every module, not just the visible one: a hidden module still owns consoles and media

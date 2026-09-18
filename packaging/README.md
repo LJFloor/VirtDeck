@@ -53,16 +53,16 @@ drivers and sound daemon, and each one degrades gracefully when missing:
 | USB redirection | `libusb-1.0-0`, `libusbredirhost1t64` (`libusbredirhost1` before the t64 transition) | `libusb1`, `usbredir` | The usbredir channels are **not connected at all** and the picker says what to install |
 | USB mass-storage hand-over | `udisks2` | `udisks2` | Falls back to `umount`, which needs the mount to be user-unmountable |
 | Guest audio | `libpulse0` (PipeWire's Pulse layer counts) | `pulseaudio-libs` | Silence: the session drops to a null sink |
-| Remembering passwords | `libsecret-1-0`, plus a keyring serving `org.freedesktop.secrets` (`gnome-keyring`, `kwalletd`/`kwallet-secrets`, KeePassXC) | `libsecret` + ditto | "Remember passwords" is disabled in the connect window with the reason under it; passwords are typed each time, exactly as before |
+| Remembering passwords | a keyring serving `org.freedesktop.secrets` (`gnome-keyring`, `kwalletd`/`kwallet-secrets`, KeePassXC). No client library: VirtDeck speaks the protocol itself | ditto | "Remember passwords" is disabled in the connect window with the reason under it; passwords are typed each time, exactly as before |
 
 Everything on the *host* side (libvirt, QEMU/KVM, `virsh`) is reached over SSH, so a Linux client
 needs none of it locally.
 
-**The AppImage bundling nothing is what makes the keyring work.** libsecret is loaded from the
-distro by soname, and it links the distro's glib. If the image ever bundled glib, the two would
-disagree at load time and the result would be a crash rather than the graceful "not installed" this
-table promises. The same reasoning already applies to libusb and libpulse; it just bites harder here,
-because glib is the kind of library it is tempting to bundle.
+**The keyring needs nothing installed.** It used to need libsecret, which links the distro's glib,
+and the AppImage bundling nothing was what kept the two from disagreeing at load time. The Secret
+Service is now spoken directly on the session bus (see `docs/saved-hosts.md`), so the only thing that
+has to be there is a keyring serving it. The bundle-nothing rule still holds for libusb and libpulse,
+which are loaded from the distro by soname for exactly that reason.
 
 ## What the keyring does and does not protect
 

@@ -48,6 +48,7 @@ Both artifacts are published self-contained, so these ship inside them:
 | ExCSS (a dependency of Svg.Skia, above) | 4.3.1 | MIT | https://github.com/TylerBrinks/ExCSS |
 | Concentus (Opus decoder) | 2.2.2 | BSD-3-Clause (the Opus license) | https://github.com/lostromb/concentus |
 | SSH.NET | 2026.0.0 | MIT | https://github.com/sshnet/SSH.NET |
+| Tmds.DBus.Protocol (session bus, for the Linux keyring) | 0.94.1 | MIT | https://github.com/tmds/Tmds.DBus |
 
 ## UnattendGenerator (vendored source, compiled into the app)
 

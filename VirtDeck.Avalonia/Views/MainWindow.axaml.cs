@@ -111,7 +111,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        _manager = new HostManagerWindow(prefill, _shell.Profile, Replace);
+        // A shell whose connection dropped is on no host, and Login has to work for the one it was on.
+        _manager = new HostManagerWindow(prefill, _shell.IsLost ? null : _shell.Profile, Replace);
         _manager.Closed += (_, _) =>
         {
             _manager = null;

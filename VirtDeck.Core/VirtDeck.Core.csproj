@@ -13,6 +13,11 @@
     <!-- System.IO.Pipelines and Microsoft.Win32.Registry (used by LegacyRegistryImport) are both
          in the net10.0 shared framework, no PackageReference needed. -->
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <!-- The session bus, for the freedesktop Secret Service that remembers saved hosts' passwords
+         (Secrets/SecretService). It replaced a libsecret P/Invoke, which was LGPL, dragged glib in
+         behind it and had to come from the distro because the AppImage bundles nothing. This costs
+         no bytes either: Avalonia.FreeDesktop already publishes the same 0.94.1 with the app. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
   <ItemGroup>
