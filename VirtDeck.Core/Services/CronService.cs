@@ -76,6 +76,11 @@ namespace VirtDeck.Services
             [ -n "$z" ] || z=$(readlink -f /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')
             [ -n "$z" ] && printf 'z\t%s\n' "$z"
 
+            # The same question the guards in /etc/cron.d ask, asked once and for the same reason:
+            # a job fronted by `test -e /run/systemd/system ||` runs and does nothing while this
+            # directory is there. Not inferred from the daemon record below, which is about cron.
+            [ -d /run/systemd/system ] && printf 's\t1\n'
+
             if command -v systemctl >/dev/null 2>&1; then
               for u in cron crond cronie; do
                 [ "$(systemctl show -p LoadState --value "$u".service 2>/dev/null)" = loaded ] || continue
@@ -178,6 +183,10 @@ namespace VirtDeck.Services
 
                     case "z":
                         catalog.TimeZone = rest.Trim();
+                        break;
+
+                    case "s":
+                        catalog.SystemdRunning = true;
                         break;
 
                     case "d":
@@ -296,7 +305,7 @@ namespace VirtDeck.Services
                 return verdict switch
                 {
                     "missing" => new CronFileRead(string.Empty, $"There is no file at {path}."),
-                    "toobig" => new CronFileRead(string.Empty, $"{path} is larger than {ReadCap / 1024} KiB, which is not a schedule file."),
+                    "toobig" => new CronFileRead(string.Empty, $"{path} is larger than {ReadCap / 1024} KiB."),
                     "ok" => new CronFileRead(ShellScript.Decode(split < 0 ? string.Empty : raw[(split + 1)..].Trim()), string.Empty),
                     _ => new CronFileRead(string.Empty, $"{path} could not be read."),
                 };
@@ -357,7 +366,10 @@ namespace VirtDeck.Services
                 ? UserCrontabScript(file)
                 : DropInScript(file.Path, file.Digest);
 
-            await PipeAsync(file.Path, script, text, ct);
+            // What came off the top of a user crontab goes back on it here, once, rather than in
+            // each of the callers that builds a body: the editor and the table both hand over the
+            // part somebody can actually see. Empty for every other kind of file.
+            await PipeAsync(file.Path, script, file.Preamble + text, ct);
 
             Diagnostics.SpiceLog.Log($"[cron] wrote {file.Label} ({text.Length} bytes)");
         }
@@ -372,11 +384,10 @@ namespace VirtDeck.Services
             if (!CronFile.DropInName.IsMatch(name))
                 throw new ArgumentException(
                     $"'{name}' is not a name cron will read. A file in /etc/cron.d may hold only " +
-                    "letters, digits, underscores and hyphens, and a dot anywhere in it means cron " +
-                    "ignores the file entirely.");
+                    "letters, digits, underscores and hyphens.");
 
             if (Malformed(text, hasUserField: true) is { } bad)
-                throw new ArgumentException($"cron would silently skip this line, so it is not written: {bad}");
+                throw new ArgumentException($"cron would skip this line, so it is not written: {bad}");
 
             var path = "/etc/cron.d/" + name;
             await PipeAsync(path, DropInScript(path, string.Empty), text, ct);

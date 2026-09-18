@@ -244,24 +244,20 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         // Read before the busy check and not after it: a request is spent by being looked at, and
         // one left on the service while an upgrade was already running would fire the next time
         // somebody opened this page, long after the button was pressed.
-        var install = Packages.TakeInstallRequest();
+        var sentHere = Packages.TakeUpdatesPageRequest();
 
         // A command owns the screen while it runs, and re-listing underneath it would replace the
         // table it is reporting on. The command re-lists when it finishes.
         if (_busy) return;
 
-        // Whoever asked for this asked about the updates, not about the history.
-        if (install) Tabs.SelectedIndex = (int)Tab.Updates;
+        // Whoever asked for this asked about the updates, not about the history. That is the whole
+        // of what arriving from the Overview module's Update now does: nothing is ever installed
+        // because somebody arrived on this page, and Upgrade here is theirs to press.
+        if (sentHere) Tabs.SelectedIndex = (int)Tab.Updates;
 
         await LoadAsync(force: false);
         if (_active && Current == Tab.History) await LoadHistoryAsync(force: false);
         if (_active && Current == Tab.Settings) await LoadSettingsAsync(force: false);
-
-        // Asked for from the Overview module's Update now, which is the count on that page made
-        // actionable and nothing more: the install happens here, where the progress strip and the
-        // Cancel button are, and it asks first exactly as the button on this page does. Nothing is
-        // installed merely because somebody arrived on this page.
-        if (install && _active && _rows.Count > 0) await UpgradeAsync(securityOnly: false);
     }
 
     /// <summary>

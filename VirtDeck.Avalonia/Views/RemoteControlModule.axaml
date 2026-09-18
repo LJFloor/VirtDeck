@@ -9,14 +9,27 @@
          is IsDefault or IsCancel: Enter and Escape belong to the remote desktop. -->
     <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
       <DockPanel>
+        <!-- Hidden while a virtual desktop is on screen: that one is made the size of this
+             space, so there is nothing left to scale and nothing to choose. -->
         <CheckBox DockPanel.Dock="Right" Name="FitBox" Content="Fit to window" Margin="10,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="Scale the desktop to the space it has. Off shows it one pixel per screen pixel, with scroll bars." />
         <StackPanel Orientation="Horizontal" Spacing="6">
           <ComboBox Name="SessionBox" Width="240" VerticalAlignment="Center"
-                    ToolTip.Tip="The X displays on the host: somebody's desktop, or the login screen." />
+                    ToolTip.Tip="The X displays on the host: somebody's desktop, the login screen, or a virtual desktop VirtDeck started." />
           <Button Name="RefreshButton" Content="Refresh" MinWidth="72"
                   ToolTip.Tip="Look for X sessions on the host again" />
+          <!-- New sits in a Border because a disabled control is not hit-testable in Avalonia, and
+               a host that cannot be given a desktop has to be able to say why on hover. -->
+          <Border Name="NewDesktopHost">
+            <Button Name="NewDesktopButton" Content="New desktop" MinWidth="92">
+              <Button.Flyout>
+                <MenuFlyout />
+              </Button.Flyout>
+            </Button>
+          </Border>
+          <Button Name="EndDesktopButton" Content="End desktop" MinWidth="92"
+                  ToolTip.Tip="Shut down the chosen virtual desktop on the host" />
           <Button Name="ConnectButton" Content="Connect" MinWidth="72"
                   ToolTip.Tip="Control the chosen session" />
           <Button Name="DisconnectButton" Content="Disconnect" MinWidth="72"
@@ -40,7 +53,9 @@
       </DockPanel>
     </Border>
 
-    <Panel>
+    <!-- Named, because it is the room the picture has, and a virtual desktop is made that size
+         before there is a picture to measure. -->
+    <Panel Name="Stage">
       <!-- Fit disables the scroll bars, which is what hands the display the viewport's size to
            scale into; 1:1 turns them on and the display measures itself at the picture's size. -->
       <ScrollViewer Name="Scroller" IsVisible="False"
@@ -48,9 +63,29 @@
         <c:RemoteDisplay Name="Display" />
       </ScrollViewer>
 
-      <!-- Why there is no picture: no session, a Wayland one, connecting, or how the last one ended. -->
-      <TextBlock Name="Overlay" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="480"
-                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+      <!-- Why there is no picture: no session, a Wayland one, connecting, or how the last one ended.
+           The way out of it sits under the words rather than only in the strip at the top: the
+           picker and Connect for a host that has a session, New desktop for one that has none. -->
+      <StackPanel Name="Idle" Spacing="14" MaxWidth="480"
+                  HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Name="Overlay" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" />
+        <StackPanel Name="IdleActions" Orientation="Horizontal" Spacing="6"
+                    HorizontalAlignment="Center" IsVisible="False">
+          <ComboBox Name="IdleSessionBox" Width="240" VerticalAlignment="Center"
+                    ToolTip.Tip="The X displays on the host: somebody's desktop, the login screen, or a virtual desktop VirtDeck started." />
+          <Button Name="IdleConnectButton" Content="Connect" MinWidth="72"
+                  ToolTip.Tip="Control the chosen session" />
+          <!-- A Border for the same reason as the one in the strip: a disabled button is not
+               hit-testable, and a host that cannot be given a desktop has to say why on hover. -->
+          <Border Name="IdleNewDesktopHost">
+            <Button Name="IdleNewDesktopButton" Content="New desktop" MinWidth="92">
+              <Button.Flyout>
+                <MenuFlyout />
+              </Button.Flyout>
+            </Button>
+          </Border>
+        </StackPanel>
+      </StackPanel>
     </Panel>
 
   </DockPanel>

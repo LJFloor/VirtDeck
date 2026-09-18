@@ -1,0 +1,25 @@
+Remote Control host agent (virtdeck-agent)
+==========================================
+
+Built by build.sh in an Alpine .NET SDK container, one tarball per host architecture:
+
+  agent-x86_64.tar.gz     linux-musl-x64
+  agent-aarch64.tar.gz    linux-musl-arm64 (cross-compiled on x86_64, no emulation)
+
+Each holds two files: virtdeck-agent (NativeAOT, static-pie, stripped, musl) and `version`, the
+line the module shows in its status bar. The tarballs are embedded in VirtDeck.Core (see
+VirtDeck.Core.csproj) and their hashes are in SHA256SUMS. They ARE committed: a normal build of
+VirtDeck never runs build.sh.
+
+Sources: all of it is ours, in VirtDeck.Agent/, plus VirtDeck.Core/RemoteDesktop/RfbProtocol.cs,
+which the project links so the agent's RFB server and the app's RFB client cannot drift.
+
+Third-party content: none of its own. The agent speaks the X11 protocol on the wire, so it links no
+X client libraries; it P/Invokes nothing, not even libc. What it carries is the .NET runtime that
+NativeAOT links in (MIT, https://github.com/dotnet/runtime), whose own notices are the app's, and
+musl libc (MIT, https://musl.libc.org) from the Alpine image. There is no GPL here and no
+corresponding-source archive to ship, which is the point: the x11vnc this replaced was GPL-2.0 and
+its source had to travel with every release.
+
+Rebuilding: run native/agent/build.sh and commit the new tarballs and SHA256SUMS. The build is
+reproducible; the same source gives the same bytes and so the same cache directory on the host.

@@ -85,30 +85,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Remote Control host agent (x11vnc, uploaded to Linux hosts)
-
-The Remote Control module carries a small program it uploads to the Linux host it controls and
-runs there: a fully static x11vnc plus `vdrelay`, one build per host architecture (x86_64,
-aarch64). Both builds are embedded in `VirtDeck.Core.dll` on every platform, because they run on
-the host and not on this computer. x11vnc is a separate program that VirtDeck starts on another
-machine and talks to over its stdin and stdout; nothing of it is linked into VirtDeck.
-
-| Component | Version | License | Upstream |
-|---|---|---|---|
-| x11vnc | 0.9.17 | GPL-2.0-or-later | https://github.com/LibVNC/x11vnc |
-| LibVNCServer (linked into x11vnc) | 0.9.15 | GPL-2.0-or-later | https://github.com/LibVNC/libvncserver |
-| libX11, libxcb, libXau, libXdmcp, libXext, libXtst, libXfixes, libXdamage, libXrandr, libXrender, libXinerama, libXi | as built, see `VERSIONS.txt` | MIT / X11 | https://gitlab.freedesktop.org/xorg/lib |
-| zlib | as built | Zlib | https://zlib.net |
-| libjpeg-turbo | as built | IJG + BSD-3-Clause | https://libjpeg-turbo.org |
-| musl libc | as built | MIT | https://musl.libc.org |
-| vdrelay | part of VirtDeck | as VirtDeck | `native/x11vnc/vdrelay.c` |
-
-The complete corresponding source (the upstream tarballs these builds are made from, the build
-scripts and `vdrelay.c`) ships alongside the app: `x11vnc-src.zip` next to `virtdeck.exe` on
-Windows, and `usr/share/virtdeck/x11vnc-src.tar.gz` inside the AppImage. The license texts are in
-`licenses/x11vnc/` (Windows) and inside that archive (`licenses/`); the exact versions and hashes
-of everything linked in are in its `VERSIONS.txt`.
-
 ## SpiceClient (SPICE protocol client, component of this product)
 
 The `SpiceClient` library's protocol code was ported from **spice-html5** (LGPL), making it

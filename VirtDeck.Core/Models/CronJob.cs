@@ -70,6 +70,18 @@ namespace VirtDeck.Models
 
         public string Command { get; private init; } = string.Empty;
 
+        /// <summary>
+        /// The job's own note, which rides at the end of its line and not on a comment line above it.
+        /// Empty where there is none.
+        ///
+        /// <para>cron has no comment syntax of its own here, but it does not need one: it hands the
+        /// whole command to <c>/bin/sh</c>, and <b>the shell's comment rule is what makes this
+        /// work</b>. So the note is not a convention this app invented and nothing has to recognise
+        /// it: what is stripped here is exactly what the shell was already going to throw away, which
+        /// is why a note can never change what a job runs.</para>
+        /// </summary>
+        public string Note { get; private init; } = string.Empty;
+
         public static CronLine Verbatim(string raw) => new()
         {
             Kind = raw.Trim().Length == 0 ? CronLineKind.Blank
@@ -79,25 +91,35 @@ namespace VirtDeck.Models
             Raw = raw,
         };
 
-        /// <summary>A comment line, from the text a person typed into the dialog's Comment box.</summary>
-        public static CronLine Comment(string text) => new()
-        {
-            Kind = CronLineKind.Comment,
-            Raw = "# " + text.Trim(),
-        };
-
         /// <summary>
         /// A job line, rendered. The separator is a single space rather than the tab Debian's own
         /// <c>/etc/crontab</c> uses, because a tab buys alignment only while every schedule is the
         /// same width and costs it the moment one is not.
+        ///
+        /// <para><b>The note goes before the input, not at the end of the line.</b> cron cuts the
+        /// command at the first bare <c>%</c> and feeds the rest to the job on stdin, so a note
+        /// written past that point would be typed at the job rather than read by anybody.</para>
         /// </summary>
-        public static CronLine Job(string schedule, string user, string command, bool disabled)
+        public static CronLine Job(string schedule, string user, string command, string note, bool disabled)
         {
+            command = command.Trim();
+            note = OneLine(note);
+
             var body = new StringBuilder();
             if (disabled) body.Append('#');
             body.Append(schedule.Trim());
             if (user.Length > 0) body.Append(' ').Append(user);
-            body.Append(' ').Append(command.Trim());
+            body.Append(' ');
+
+            if (note.Length == 0)
+            {
+                body.Append(command);
+            }
+            else
+            {
+                var cut = InputAt(command);
+                body.Append(command[..cut].TrimEnd()).Append("  # ").Append(note).Append(command[cut..]);
+            }
 
             return new CronLine
             {
@@ -106,23 +128,40 @@ namespace VirtDeck.Models
                 Disabled = disabled,
                 Schedule = schedule.Trim(),
                 User = user,
-                Command = command.Trim(),
+                Command = command,
+                Note = note,
             };
         }
 
         /// <summary>The same job, switched on or off. Rendered afresh, so enabling a line somebody
         /// commented out by hand normalises its spacing and nothing else.</summary>
-        public CronLine WithDisabled(bool disabled) => Job(Schedule, User, Command, disabled);
+        public CronLine WithDisabled(bool disabled) => Job(Schedule, User, Command, Note, disabled);
 
-        private static CronLine Parsed(string raw, string schedule, string user, string command, bool disabled) => new()
+        /// <summary>
+        /// A note as it can be written into a command. One line, because the line it rides on is one,
+        /// and <b>with every bare percent escaped</b>: an unescaped one in a note would end the
+        /// command early and feed what follows to the job on standard input, which is the same trap
+        /// <c>date +\%w</c> exists to avoid. Already-escaped ones are left as they are, so a note
+        /// written once and read back writes the same bytes the second time.
+        /// </summary>
+        private static string OneLine(string note) =>
+            note.ReplaceLineEndings(" ").Trim().Replace("\\%", "%").Replace("%", "\\%");
+
+        private static CronLine Parsed(string raw, string schedule, string user, string command, bool disabled)
         {
-            Kind = CronLineKind.Job,
-            Raw = raw,
-            Disabled = disabled,
-            Schedule = schedule,
-            User = user,
-            Command = command,
-        };
+            var (bare, note) = SplitNote(command);
+
+            return new CronLine
+            {
+                Kind = CronLineKind.Job,
+                Raw = raw,
+                Disabled = disabled,
+                Schedule = schedule,
+                User = user,
+                Command = bare,
+                Note = note,
+            };
+        }
 
         /// <summary><c>NAME=value</c>, with the name cron's own rule allows. Anchored at the start of
         /// the line because an assignment cron honours cannot be indented behind anything.</summary>
@@ -245,6 +284,83 @@ namespace VirtDeck.Models
             return (command.ToString(), input.ToString());
         }
 
+        /// <summary>
+        /// Cuts a command field into what runs and the note somebody wrote after it. <b>The rule is
+        /// the shell's own</b>, because the shell is what actually reads this: a <c>#</c> starts a
+        /// comment when it is unquoted and starts a word, and nowhere else. That is what keeps a
+        /// <c>curl http://host/#top</c>, an <c>echo "#1"</c> and a <c>${#list}</c> whole: none of
+        /// those is a comment to <c>sh</c> either, so none of them is a note here.
+        ///
+        /// <para>Only the part cron gives the shell is searched. Past the first bare <c>%</c> the
+        /// field is the job's standard input, where a <c>#</c> is a character like any other, so the
+        /// input rides along on the command untouched.</para>
+        ///
+        /// <para>A field that is <i>nothing but</i> a comment keeps it as the command instead. A line
+        /// whose command is empty is not a job, and calling it one would draw a row with a blank
+        /// Command cell out of somebody's commented-out documentation.</para>
+        /// </summary>
+        public static (string Command, string Note) SplitNote(string field)
+        {
+            var end = InputAt(field);
+            var at = CommentAt(field, end);
+            if (at < 0) return (field, string.Empty);
+
+            var command = field[..at].TrimEnd();
+            if (command.Length == 0) return (field, string.Empty);
+
+            // The note comes back as it was typed rather than as it is stored: the escape below is
+            // this app's own doing and putting it on screen would ask somebody to explain a backslash
+            // they never wrote. A note read out and written back is the same bytes either way.
+            return (command + field[end..], field[(at + 1)..end].Trim().Replace("\\%", "%"));
+        }
+
+        /// <summary>Where cron stops reading a command: the first <c>%</c> that is not <c>\%</c>, and
+        /// the length of the field where there is none. Only a backslash before a percent escapes
+        /// anything, which is <see cref="SplitPercent"/>'s rule and has to stay <b>exactly</b> its
+        /// rule: the two disagreeing would put a note somewhere cron does not cut.</summary>
+        private static int InputAt(string field)
+        {
+            for (var i = 0; i < field.Length; i++)
+            {
+                if (field[i] == '\\' && i + 1 < field.Length && field[i + 1] == '%') { i++; continue; }
+                if (field[i] == '%') return i;
+            }
+
+            return field.Length;
+        }
+
+        /// <summary>Where the shell would stop reading, or -1. Quoting is tracked because a <c>#</c>
+        /// inside quotes is a character, and the word-start test is what the shell itself applies.</summary>
+        private static int CommentAt(string text, int end)
+        {
+            var quote = '\0';
+
+            for (var i = 0; i < end; i++)
+            {
+                var c = text[i];
+
+                if (quote == '\'')
+                {
+                    // Nothing escapes inside single quotes, a backslash included.
+                    if (c == '\'') quote = '\0';
+                    continue;
+                }
+
+                if (quote == '"')
+                {
+                    if (c == '\\' && i + 1 < end) i++;
+                    else if (c == '"') quote = '\0';
+                    continue;
+                }
+
+                if (c == '\\') { i++; continue; }
+                if (c is '\'' or '"') { quote = c; continue; }
+                if (c == '#' && (i == 0 || char.IsWhiteSpace(text[i - 1]))) return i;
+            }
+
+            return -1;
+        }
+
         private static string Token(string text, ref int i)
         {
             while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
@@ -275,9 +391,32 @@ namespace VirtDeck.Models
         /// but never written: see <c>CronService</c>.</summary>
         public string Path { get; init; } = string.Empty;
 
-        /// <summary>Exactly what was read, so an untouched file writes back byte for byte.</summary>
+        /// <summary>The file as anybody here edits it: exactly what was read, less the
+        /// <see cref="Preamble"/> a user crontab opens with. An untouched file still writes back byte
+        /// for byte, because what came off the top goes back on.</summary>
         public string Text { get; init; } = string.Empty;
 
+        /// <summary>
+        /// The block at the top of a user crontab that <c>crontab</c> put there rather than anybody
+        /// scheduling anything: on Debian, the eighteen lines of example text <c>crontab -e</c> seeds
+        /// a new crontab with, down to and including its <c>m h dom mon dow command</c> diagram.
+        ///
+        /// <para>Held apart rather than shown, because it is the same text on every account of every
+        /// Debian host and it is the whole of the file until somebody's first job. It is put back
+        /// unchanged on the way out, so hiding it is a fact about this window and not about the
+        /// file.</para>
+        ///
+        /// <para><b>crontab's own signature is not in here and is not written back at all.</b> The
+        /// three <c>DO NOT EDIT THIS FILE</c> lines are stale the moment they are read: they name the
+        /// temporary file and the minute of the <i>previous</i> install. Vixie's <c>crontab</c>
+        /// writes a fresh one when it installs and does not skip an existing one, so keeping it would
+        /// add a copy per save; on an implementation that writes none, what goes is three lines that
+        /// were describing an install that is no longer the current one.</para>
+        /// </summary>
+        public string Preamble { get; init; } = string.Empty;
+
+        /// <summary>Over the whole file as it is on the host, <see cref="Preamble"/> and signature
+        /// included, because that is what the host compares it against.</summary>
         public string Digest { get; init; } = string.Empty;
 
         public List<CronLine> Lines { get; init; } = new();
@@ -303,27 +442,80 @@ namespace VirtDeck.Models
             var trailing = text.EndsWith('\n');
             var body = trailing ? text[..^1] : text;
 
-            var lines = body.Length == 0 && trailing
-                ? new List<CronLine>()
-                : [.. body.Split('\n').Select(l => CronLine.Read(l.TrimEnd('\r'), hasUserField, userExists))];
+            var raw = body.Length == 0 && trailing
+                ? new List<string>()
+                : [.. body.Split('\n').Select(l => l.TrimEnd('\r'))];
+
+            // Only a user crontab: /etc/crontab and a cron.d drop-in are files somebody wrote, and
+            // every line in one is theirs.
+            var (preamble, from) = kind == CronSourceKind.UserCrontab ? Preface(raw) : (string.Empty, 0);
 
             return new CronFile
             {
                 Kind = kind,
                 Path = path,
                 Owner = owner,
-                Text = text,
+                Text = string.Join('\n', raw.Skip(from)) + (trailing && raw.Count > from ? "\n" : string.Empty),
+                Preamble = preamble,
                 Digest = Sha256(text),
-                Lines = lines,
+                Lines = [.. raw.Skip(from).Select(l => CronLine.Read(l, hasUserField, userExists))],
                 TrailingNewline = trailing || text.Length == 0,
             };
         }
 
-        /// <summary>The file as it would be written now, from the lines it holds.</summary>
+        /// <summary>
+        /// Splits what <c>crontab</c> wrote at the top of a spool file off what the account's owner
+        /// did: how much to hide, and how much of that to put back when writing. <b>Both blocks have
+        /// to be recognised exactly</b>, or the first comment of somebody's own goes missing, so
+        /// each line is matched for what it is rather than counted.
+        /// </summary>
+        private static (string Preamble, int From) Preface(IReadOnlyList<string> lines)
+        {
+            var at = 0;
+
+            // The signature: three lines by Vixie's own count, the first naming itself and the other
+            // two parenthesised. Matched rather than counted, because an implementation that writes
+            // fewer would otherwise cost the file two real lines.
+            if (at < lines.Count && lines[at].StartsWith("# DO NOT EDIT THIS FILE", StringComparison.Ordinal))
+            {
+                at++;
+                for (var n = 0; n < 2 && at < lines.Count && lines[at].StartsWith("# (", StringComparison.Ordinal); n++)
+                    at++;
+            }
+
+            var seed = at;
+
+            // The example block, which is only ever the example block if it ends in the field
+            // diagram. The run has to be unbroken comment and blank: a diagram line below somebody's
+            // first job describes that job and is not a preface to the file.
+            for (var i = at; i < lines.Count; i++)
+            {
+                var line = lines[i].Trim();
+                if (line.Length > 0 && !line.StartsWith('#')) break;
+
+                if (!Diagram.IsMatch(line)) continue;
+
+                seed = i + 1;
+                break;
+            }
+
+            var preamble = seed > at ? string.Join('\n', lines.Skip(at).Take(seed - at)) + "\n" : string.Empty;
+            return (preamble, seed);
+        }
+
+        /// <summary>The last line of Debian's seeded crontab, and the only part of that block worth
+        /// recognising: everything above it is prose that has been reworded between releases, and
+        /// this line has not.</summary>
+        private static readonly Regex Diagram =
+            new(@"^#\s*m\s+h\s+dom\s+mon\s+dow\s+command\s*$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        /// <summary>The file as it would be written now, from the lines it holds. The preamble goes
+        /// back on here, so nothing downstream has to remember it exists.</summary>
         public string Compose()
         {
             var body = string.Join('\n', Lines.Select(l => l.Raw));
-            return TrailingNewline || body.Length > 0 ? body + "\n" : body;
+            return Preamble + (TrailingNewline || body.Length > 0 ? body + "\n" : body);
         }
 
         public static string Sha256(string text) =>
@@ -351,9 +543,20 @@ namespace VirtDeck.Models
 
         public required CronLine Line { get; init; }
 
-        /// <summary>The note directly above this job. cron has no end-of-line comment, so this is
-        /// the only place a job's own note can be.</summary>
-        public string Comment { get; init; } = string.Empty;
+        /// <summary>
+        /// What this job is for, from whichever of the two places it is written.
+        ///
+        /// <para><b>A note this app writes rides on the job's own line</b>, after the command, where
+        /// the shell drops it and where it cannot come adrift from the job it describes. A crontab
+        /// this app did not write conventionally puts one on the line above instead, so that is read
+        /// too and is what <see cref="CommentAbove"/> holds.</para>
+        /// </summary>
+        public string Comment => Line.Note.Length > 0 ? Line.Note : CommentAbove;
+
+        /// <summary>The comment run directly above this job, as read. Kept apart from
+        /// <see cref="Comment"/> because a write has to know <i>where</i> the note it is replacing
+        /// lives, and only these lines are ever this app's to remove.</summary>
+        public string CommentAbove { get; init; } = string.Empty;
 
         /// <summary>Which account this runs as: the line's user field, or the crontab's owner.</summary>
         public string Owner => File.HasUserField ? Line.User : File.Owner;
@@ -369,7 +572,9 @@ namespace VirtDeck.Models
         /// How many comment lines above a job are read as a note about it. Beyond this the run is
         /// documentation and belongs to the file rather than to the job below it: Debian's
         /// <c>/etc/crontab</c> puts nine lines of field diagram directly above its first entry, and
-        /// taking the run whole put the whole diagram in that row's Comment cell.
+        /// taking the run whole put the whole diagram in that row's Comment cell. It caps only what
+        /// is <i>read</i> from somebody else's file; a note written here needs no cap, being one line
+        /// by construction.
         /// </summary>
         private const int CommentLines = 3;
 
@@ -391,7 +596,7 @@ namespace VirtDeck.Models
                     File = file,
                     Index = i,
                     Line = file.Lines[i],
-                    Comment = comment.Count <= CommentLines ? string.Join(' ', comment) : string.Empty,
+                    CommentAbove = comment.Count <= CommentLines ? string.Join(' ', comment) : string.Empty,
                     Key = $"{file.Path}\n{ordinal++}",
                 };
             }
@@ -456,6 +661,11 @@ namespace VirtDeck.Models
         /// acting on, and no other column would ever show it.</summary>
         public string DaemonState { get; set; } = string.Empty;
 
+        /// <summary>Whether <c>/run/systemd/system</c> is there, which is the test the guarded lines
+        /// in <c>/etc/cron.d</c> make themselves. Asked of the host rather than worked out from
+        /// <see cref="DaemonUnit"/>: that record is about cron, and this is about the job.</summary>
+        public bool SystemdRunning { get; set; }
+
         /// <summary>The zone cron schedules in, which is the host's and not this PC's. Empty when the
         /// host would not say, in which case no next-run time is drawn at all.</summary>
         public string TimeZone { get; set; } = string.Empty;
@@ -478,5 +688,73 @@ namespace VirtDeck.Models
         public IEnumerable<CronJob> Jobs => Files.SelectMany(CronJob.In);
 
         public bool Knows(string account) => Accounts.Contains(account, StringComparer.Ordinal);
+
+        /// <summary>
+        /// Whether this job is one of the lines whose whole purpose is to run a periodic directory:
+        /// <c>cd / &amp;&amp; run-parts --report /etc/cron.hourly</c> and the three anacron-guarded ones
+        /// beside it in Debian's <c>/etc/crontab</c>. They are the host's plumbing for the Periodic
+        /// scripts tab rather than schedules anybody chose, which is what makes them worth leaving
+        /// out of the Jobs table.
+        ///
+        /// <para>Judged by the command and against <see cref="ScriptDirectories"/> as the listing
+        /// actually found them, not by which file the line sits in and not against a fixed list of
+        /// period names: a host that keeps its drivers in a <c>cron.d</c> drop-in has the same four
+        /// lines, and a host with no such directories has none of them to hide. The character after
+        /// a directory has to end the path, so <c>/etc/cron.daily</c> never matches a
+        /// <c>/etc/cron.dailyfoo</c> somebody made.</para>
+        /// </summary>
+        /// <summary>Whether this job is the host's own wiring rather than a schedule somebody set:
+        /// either it drives a periodic directory, or systemd has taken it over. One question, because
+        /// one control asks it.</summary>
+        public bool IsPlumbing(CronJob job) => RunsPeriodicDirectory(job) || SupersededBySystemd(job);
+
+        public bool RunsPeriodicDirectory(CronJob job)
+        {
+            var command = job.Line.Command;
+            return command.Contains("run-parts", StringComparison.Ordinal)
+                && ScriptDirectories.Any(dir => NamesPath(command, dir));
+        }
+
+        /// <summary>
+        /// Whether systemd has taken this job over: a package line fronted by a test on
+        /// <c>/run/systemd/system</c> that has to <b>fail</b> before anything runs. Debian ships
+        /// several, and on a host running systemd every one of them is started by cron at its
+        /// appointed minute and exits having done nothing, the work being a timer's:
+        /// <c>e2scrub_all</c> and <c>anacron</c> are both this.
+        ///
+        /// <para>Only the two shapes that mean "not under systemd" count, and the sense matters:
+        /// <c>test -e /run/systemd/system ||</c> and <c>[ ! -d /run/systemd/system ]</c> are the
+        /// guard, while the same test with <c>&amp;&amp;</c> is a job that runs <i>because</i>
+        /// systemd is there. Anything else mentioning the path is left alone, because reading shell
+        /// text any further than this is guessing at what a command does.</para>
+        /// </summary>
+        public bool SupersededBySystemd(CronJob job) =>
+            SystemdRunning &&
+            (SystemdOrElse.IsMatch(job.Line.Command) || SystemdUnless.IsMatch(job.Line.Command));
+
+        /// <summary><c>test -e /run/systemd/system ||</c>, and the bracket spelling of it.</summary>
+        private static readonly Regex SystemdOrElse =
+            new(@"(?:\btest|\[)\s+-[a-z]\s+/run/systemd/system\s*\]?\s*\|\|",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary><c>[ ! -d /run/systemd/system ]</c>, which anacron's drop-in puts inside an
+        /// <c>if</c> rather than in front of the command.</summary>
+        private static readonly Regex SystemdUnless =
+            new(@"(?:\btest|\[)\s+!\s+-[a-z]\s+/run/systemd/system\b",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static bool NamesPath(string command, string dir)
+        {
+            for (var at = command.IndexOf(dir, StringComparison.Ordinal);
+                 at >= 0;
+                 at = command.IndexOf(dir, at + 1, StringComparison.Ordinal))
+            {
+                var after = at + dir.Length;
+                if (after == command.Length || !(char.IsLetterOrDigit(command[after]) || command[after] is '.' or '-' or '_'))
+                    return true;
+            }
+
+            return false;
+        }
     }
 }

@@ -64,13 +64,13 @@ free to disagree about the same sentence.
   So the two commands that last bracket themselves with it, the Overview module refuses to list while it is
   set, and the Software updates module ignores its own `Changed` while its `_busy` is set, since the
   table under a transaction belongs to the transaction and the command re-lists when it finishes.
-- **The install request travels on the service, not through the shell.** `RequestInstallAll` leaves
-  it, `TakeInstallRequest` spends it, and **looking at it is what clears it**: a request that
-  arrived while an upgrade was already running has been answered by the upgrade already running, and
-  one left behind would fire the next time somebody opened the page. The updates module takes it
-  inside its own `ActivateAsync`, where it is already ordered against its own listing, rather than at
-  a selection change, and then goes through the same confirmation its own button does. Nothing is
-  ever installed because somebody arrived on a page.
+- **The page request travels on the service, not through the shell.** `RequestUpdatesPage` leaves
+  it, `TakeUpdatesPageRequest` spends it, and **looking at it is what clears it**: one left behind
+  would fire the next time somebody opened the page. The updates module takes it inside its own
+  `ActivateAsync`, rather than at a selection change, and all it does is select the Updates tab, so
+  somebody sent here from the Overview module lands on what they asked about rather than on wherever
+  the page was left. **It asks for a page and never for an install**: nothing is ever installed
+  because somebody arrived on a page, and Upgrade here is theirs to press.
 - **`IModuleNavigator` is a second interface rather than another defaulted `IModule` member**, because
   an event is the one thing that cannot be defaulted on an interface (it has nowhere to keep its
   handlers), and eight of the ten modules never hand the user anywhere. The shell subscribes to

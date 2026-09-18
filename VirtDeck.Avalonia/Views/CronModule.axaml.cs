@@ -36,6 +36,12 @@ public partial class CronModule : UserControl, IModule
     private CronCatalog _catalog = new();
     private TimeZoneInfo? _zone;
 
+    /// <summary>How many jobs the plumbing toggle is keeping off the table, so both the status slot
+    /// and the empty-table text can say so. A row that vanished because of a control above it has to
+    /// be accounted for somewhere, or a table that promises every crontab on the host quietly stops
+    /// keeping that promise.</summary>
+    private int _plumbingHidden;
+
     private readonly ObservableCollection<CronJobRow> _jobRows = [];
     private readonly Dictionary<string, CronJobRow> _jobByKey = new(StringComparer.Ordinal);
     private readonly TableSort _jobSort;
@@ -72,6 +78,17 @@ public partial class CronModule : UserControl, IModule
         // Both only re-render what is already in hand, so neither costs a round trip. The debounce
         // that makes typing cheap lives in FilterBox.
         JobSearch.Changed += () => { PopulateJobs(); UpdateStatus(); };
+        // A filter like the search box beside it and not a read, so it costs no round trip. Kept in
+        // the settings file rather than in this instance, because it is an answer about how much of
+        // a cron table is worth reading and that does not change from one host to the next.
+        PlumbingBox.IsChecked = AppSettings.Current.CronShowPlumbing;
+        PlumbingBox.IsCheckedChanged += (_, _) =>
+        {
+            AppSettings.Current.CronShowPlumbing = PlumbingBox.IsChecked == true;
+            AppSettings.Current.Save();
+            PopulateJobs();
+            UpdateStatus();
+        };
         _jobSort.Changed += PopulateJobs;
         ScriptSearch.Changed += () => { PopulateScripts(); UpdateStatus(); };
         _scriptSort.Changed += PopulateScripts;
@@ -214,8 +231,8 @@ public partial class CronModule : UserControl, IModule
         // "Next run" over a bare time would be a claim nobody could check.
         NextHeader.Text = _zone is null ? "Next run" : $"Next run ({_zone.Id})";
         NextHeader.Tip = _zone is null
-            ? "The host did not say which time zone it keeps, so no next run can be worked out."
-            : $"When each job next runs, on the host's own clock ({_zone.Id}), not this PC's.";
+            ? "The host did not say which time zone it keeps."
+            : $"When each job next runs, on the host's clock ({_zone.Id}).";
 
         BuildRawFlyout();
         PopulateJobs();
@@ -253,7 +270,11 @@ public partial class CronModule : UserControl, IModule
         var needle = JobSearch.Needle;
         var now = DateTimeOffset.Now;
 
-        var jobs = _catalog.Jobs.Where(j => Matches(j, needle)).ToList();
+        var all = _catalog.Jobs.ToList();
+        var shown = all.Where(Wanted).ToList();
+        _plumbingHidden = all.Count - shown.Count;
+
+        var jobs = shown.Where(j => Matches(j, needle)).ToList();
 
         TableRows.Merge(_jobRows, _jobByKey, jobs,
             j => j.Key,
@@ -264,8 +285,13 @@ public partial class CronModule : UserControl, IModule
         var listed = _jobRows.Count > 0;
         JobList.IsVisible = listed;
         JobEmpty.IsVisible = !listed;
-        JobEmpty.Text = EmptyJobText(needle);
+        JobEmpty.Text = EmptyJobText(needle, shown.Count);
     }
+
+    /// <summary>Whether the toggle lets this job onto the table at all, which is a question about the
+    /// job and not about the needle: what the search box narrows is what this leaves.</summary>
+    private bool Wanted(CronJob job) =>
+        PlumbingBox.IsChecked == true || !_catalog.IsPlumbing(job);
 
     private static bool Matches(CronJob job, string needle) =>
         needle.Length == 0 ||
@@ -290,7 +316,7 @@ public partial class CronModule : UserControl, IModule
         _ => rows.OrderBy(r => r.Job.File.Kind).ThenBy(r => r.Where, StringComparer.Ordinal).ThenBy(r => r.Job.Index),
     };
 
-    private string EmptyJobText(string needle)
+    private string EmptyJobText(string needle, int shown)
     {
         if (!_catalog.Installed) return "cron was not found on this host.";
 
@@ -298,11 +324,19 @@ public partial class CronModule : UserControl, IModule
         // never replace the reason a table is empty with an empty table.
         if (_catalog.ListFailure.Length > 0) return _catalog.ListFailure;
 
-        // A needle matching nothing is a different and narrower claim than an empty host.
-        if (needle.Length > 0 && _catalog.Jobs.Any()) return $"No job matches “{needle}”.";
+        // What the toggle hid is said here too, because an empty table is exactly where "every
+        // crontab on the host" and a control that quietly removes rows would otherwise contradict
+        // each other. The needle's own message keeps it as a second sentence rather than losing it.
+        var hidden = _plumbingHidden == 0 ? string.Empty
+            : $" {_plumbingHidden} plumbing line{(_plumbingHidden == 1 ? " is" : "s are")} hidden.";
 
-        return "Nothing is scheduled on this host. New job adds one, either to an account's own "
-             + "crontab or to a file of its own under /etc/cron.d.";
+        // A needle matching nothing is a different and narrower claim than an empty host.
+        if (needle.Length > 0 && shown > 0) return $"No job matches “{needle}”." + hidden;
+
+        if (_plumbingHidden > 0)
+            return "Nothing is scheduled on this host beyond its own wiring." + hidden;
+
+        return "Nothing is scheduled on this host.";
     }
 
     private void PopulateScripts()
@@ -351,10 +385,8 @@ public partial class CronModule : UserControl, IModule
         if (needle.Length > 0 && _catalog.Scripts.Count > 0) return $"No script matches “{needle}”.";
 
         return _catalog.ScriptDirectories.Count == 0
-            ? "This host has no /etc/cron.hourly, /etc/cron.daily or similar directories, so nothing "
-              + "runs from one. Everything it has scheduled is on the Jobs tab."
-            : "The directories are there and empty. A script put in one runs at that interval with no "
-              + "schedule of its own to write.";
+            ? "This host has no /etc/cron.<period> directories."
+            : "The /etc/cron.<period> directories are empty.";
     }
 
     // ---- Status and menus ----------------------------------------------
@@ -365,6 +397,7 @@ public partial class CronModule : UserControl, IModule
         {
             var text = $"{_jobRows.Count} job{(_jobRows.Count == 1 ? "" : "s")}";
             if (JobSearch.HasNeedle) text += " · filtered";
+            if (_plumbingHidden > 0) text += $" · {_plumbingHidden} plumbing hidden";
             if (_zone is not null) text += $" · times in {_zone.Id}";
             SetStatus(text);
         }
@@ -393,11 +426,20 @@ public partial class CronModule : UserControl, IModule
             ? "Add a job to an account's crontab, or to a new file under /etc/cron.d"
             : "cron was not found on this host.";
 
+        // Disabled rather than hidden when the host has no such line, with the reason in the tooltip:
+        // a control that comes and goes with the listing is harder to read than one that says why it
+        // is doing nothing. A host with no periodic directories and no systemd is both.
+        var plumbing = usable && _catalog.Jobs.Any(_catalog.IsPlumbing);
+        PlumbingBox.IsEnabled = plumbing;
+        PlumbingBox.Tag = !usable ? "cron was not found on this host."
+            : !plumbing ? "This host has no plumbing lines to hide."
+            : "Show the lines that run the /etc/cron.<period> directories and the package lines "
+            + "systemd handles instead.";
+
         EditRawButton.IsEnabled = usable && _catalog.Files.Count > 0;
         EditRawButton.Tag = !usable ? "cron was not found on this host."
             : _catalog.Files.Count == 0 ? "This host has no crontab to open."
-            : "Open a whole crontab as text, for the order of its lines, its settings and anything "
-              + "this window does not parse";
+            : "Open a whole crontab as text";
 
         var jobs = SelectedJobs;
         MenuJobEdit.IsEnabled = usable && jobs.Count == 1;
@@ -485,8 +527,8 @@ public partial class CronModule : UserControl, IModule
                 // A blank line before an appended job, so it does not run up against whatever was
                 // there. Not before the first line of an empty file, where it would be a stray one.
                 if (lines.Count > 0 && lines[^1].Kind != CronLineKind.Blank) lines.Add(CronLine.Verbatim(string.Empty));
-                if (edit.Comment.Length > 0) lines.Add(CronLine.Comment(edit.Comment));
-                lines.Add(CronLine.Job(edit.Schedule, file.HasUserField ? edit.Owner : string.Empty, edit.Command, disabled: false));
+                lines.Add(CronLine.Job(edit.Schedule, file.HasUserField ? edit.Owner : string.Empty,
+                                       edit.Command, edit.Comment, disabled: false));
 
                 await WriteAsync(file, Compose(file, lines));
             });
@@ -506,18 +548,24 @@ public partial class CronModule : UserControl, IModule
         {
             var lines = new List<CronLine>(file.Lines);
 
-            // The note the table attributed to this job goes with it, so editing the note does not
-            // leave the old one above the new line.
+            // A note this app writes goes on the job's own line. A note it only read, from the
+            // comment above, is moved down there when it changed and left exactly where it was when
+            // it did not: somebody else put those lines in this file, and changing the schedule is
+            // not permission to restyle them. Moving a changed one is not optional, though, or the
+            // old text would stay above a line that now contradicts it.
             var at = job.Index;
-            if (job.Comment.Length > 0)
+            var moved = job.CommentAbove.Length > 0 && edit.Comment != job.Comment;
+            if (moved)
             {
                 while (at > 0 && lines[at - 1].Kind == CronLineKind.Comment) { lines.RemoveAt(at - 1); at--; }
             }
 
-            lines[at] = CronLine.Job(edit.Schedule, file.HasUserField ? edit.Owner : string.Empty,
-                                     edit.Command, job.Line.Disabled);
+            // Left above and untouched, the note is already in the file and must not be written
+            // twice; the row goes on showing it, because reading it from up there never stopped.
+            var note = job.CommentAbove.Length > 0 && !moved ? string.Empty : edit.Comment;
 
-            if (edit.Comment.Length > 0) lines.Insert(at, CronLine.Comment(edit.Comment));
+            lines[at] = CronLine.Job(edit.Schedule, file.HasUserField ? edit.Owner : string.Empty,
+                                     edit.Command, note, job.Line.Disabled);
 
             await WriteAsync(file, Compose(file, lines));
         });
@@ -563,9 +611,7 @@ public partial class CronModule : UserControl, IModule
         if (rows.Count == 0) return;
 
         if (!await MessageDialog.Confirm(Owner, "Delete jobs",
-                $"Delete {Subject([.. rows.Select(r => r.Command)], "job")}\n\n" +
-                "The line goes out of the crontab and there is no undo. To stop a job running "
-                + "without losing it, use Disable, which comments the line out and leaves it there."))
+                $"Delete {Subject([.. rows.Select(r => r.Command)], "job")}"))
             return;
 
         await RunOneAsync("Deleting", async () =>
@@ -581,9 +627,10 @@ public partial class CronModule : UserControl, IModule
                     var at = row.Job.Index;
                     lines.RemoveAt(at);
 
-                    // The note the table showed as this job's goes with it. A longer run above was
-                    // never attributed to the job and is left alone, because it belongs to the file.
-                    if (row.Job.Comment.Length > 0)
+                    // A note on the line went out with it. One written above this job goes too; a
+                    // longer run there was never attributed to the job and is left alone, because it
+                    // belongs to the file.
+                    if (row.Job.CommentAbove.Length > 0)
                         while (at > 0 && lines[at - 1].Kind == CronLineKind.Comment) lines.RemoveAt(--at);
                 }
 
@@ -645,9 +692,7 @@ public partial class CronModule : UserControl, IModule
         if (rows.Any(r => r.IsSymlink) &&
             !await MessageDialog.Confirm(Owner, enable ? "Enable scripts" : "Disable scripts",
                 $"{Subject([.. rows.Where(r => r.IsSymlink).Select(r => r.Name)], "script")} " +
-                "is a symbolic link, and changing what run-parts does with it means changing the "
-                + "mode of the file it points at, which is somewhere else on the host and probably "
-                + "belongs to a package."))
+                "is a symbolic link. This changes the file it points at."))
             return;
 
         await RunOneAsync(enable ? "Enabling" : "Disabling", async () =>
@@ -665,9 +710,7 @@ public partial class CronModule : UserControl, IModule
         if (rows.Count == 0) return;
 
         if (!await MessageDialog.Confirm(Owner, "Delete scripts",
-                $"Delete {Subject([.. rows.Select(r => r.Name)], "script")}\n\n" +
-                "The file is removed from the host and there is no undo. To stop one running without "
-                + "losing it, use Disable, which only takes its executable bit off."))
+                $"Delete {Subject([.. rows.Select(r => r.Name)], "script")}"))
             return;
 
         await RunOneAsync("Deleting", async () =>
@@ -727,10 +770,12 @@ public partial class CronModule : UserControl, IModule
             }
             catch (CronConflictException clash)
             {
-                var answer = await CronConflictDialog.Show(Owner, clash.Path, text, clash.HostText);
-                if (answer == CronConflictDialog.Answer.Cancel) return null;
-
+                // Read first, so the diff is body against body: the host's text arrives whole, and
+                // what is on screen here never had the preamble on it in the first place.
                 var current = CronFile.Read(target.Kind, target.Path, target.Owner, clash.HostText, _catalog.Knows);
+
+                var answer = await CronConflictDialog.Show(Owner, clash.Path, text, current.Text);
+                if (answer == CronConflictDialog.Answer.Cancel) return null;
 
                 if (answer == CronConflictDialog.Answer.Reload)
                 {
@@ -781,12 +826,10 @@ public partial class CronModule : UserControl, IModule
 
     private static string Render(CronJobEdit edit, bool hasUserField)
     {
-        var lines = new List<string>();
-        if (edit.Comment.Length > 0) lines.Add("# " + edit.Comment);
+        var job = CronLine.Job(edit.Schedule, hasUserField ? edit.Owner : string.Empty,
+                               edit.Command, edit.Comment, false);
 
-        lines.Add(CronLine.Job(edit.Schedule, hasUserField ? edit.Owner : string.Empty, edit.Command, false).Raw);
-
-        return string.Join('\n', lines) + "\n";
+        return job.Raw + "\n";
     }
 
     /// <summary>

@@ -16,7 +16,7 @@ namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
 /// The Remote Control module: the host's own X11 desktop, inline, scaled to fit, driven with this
-/// computer's mouse and keyboard. VirtDeck brings the x11vnc it runs there; see
+/// computer's mouse and keyboard. VirtDeck brings the agent it runs there; see
 /// <see cref="RemoteDesktopService"/> for the host side and <see cref="RfbSession"/> for the wire.
 ///
 /// <para><b>Terminal's lifecycle.</b> The first look at the module connects to the login user's
@@ -31,8 +31,23 @@ namespace VirtDeck.Avalonia.Views;
 /// key up releasing exactly the keysym its key down pressed, and everything still held is let go
 /// when the display loses focus, the window loses activation or the module is switched away.</para>
 ///
-/// <para><b>The clipboard is shared both ways as text</b>, the VM console's policy on RFB's terms:
-/// the base protocol carries Latin-1, so text outside it arrives as '?'.</para>
+/// <para><b>A host with nothing to attach to can be given something.</b> <b>New desktop</b> starts
+/// an Xvfb on the host and runs one of the host's own desktop sessions in it, as the login user,
+/// unelevated. It outlives the connection and VirtDeck itself, so it is picked up by the next probe
+/// like any other X server and reattached to; <b>End desktop</b> is the only way it goes away, and
+/// it is offered only for a display this app started. See
+/// <see cref="RemoteDesktopService.StartVirtualDesktopAsync"/>.</para>
+///
+/// <para><b>A desktop of our own follows this window.</b> It is asked for the size of the space it
+/// is drawn in, in this screen's real pixels, before the session starts and again whenever a resize
+/// of the window has settled; somebody's real monitor is never asked for anything. So a virtual
+/// desktop is always shown one host pixel to one of ours, which leaves <b>Fit to window</b> nothing
+/// to do, and the box is taken away while one is on screen.</para>
+///
+/// <para><b>There is no shared clipboard.</b> The agent does not own an X selection, so nothing is
+/// copied either way. <b>Type clipboard</b> in the Keys menu stays, and is the answer where a paste
+/// could not reach anyway: it types this computer's clipboard as keystrokes, into a login screen's
+/// password box or anywhere else.</para>
 /// </summary>
 public partial class RemoteControlModule : UserControl, IModule
 {
@@ -52,6 +67,22 @@ public partial class RemoteControlModule : UserControl, IModule
     /// <summary>Why the last session ended, shown until something else has to be said.</summary>
     private string? _endReason;
 
+    /// <summary>Set while one session picker is being put on the other's selection.</summary>
+    private bool _mirroring;
+
+    /// <summary>
+    /// Set while the live session is a desktop of VirtDeck's own, which is the one screen that
+    /// follows this window rather than the other way round. See "A desktop of our own".
+    /// </summary>
+    private bool _autoSize;
+
+    /// <summary>
+    /// Waits for a drag of the window's edge to settle before the host is asked for a new screen.
+    /// Every size in between would be a mode created, a CRTC turned off and on, and a full frame.
+    /// </summary>
+    private readonly DispatcherTimer _resizeDebounce =
+        new() { Interval = TimeSpan.FromMilliseconds(400) };
+
     // Keyboard
     private TopLevel? _root;
     private readonly Dictionary<PhysicalKey, uint> _pressed = new();
@@ -62,11 +93,6 @@ public partial class RemoteControlModule : UserControl, IModule
     private bool _windowActive = true;
     private long _lastGrabAttempt;
 
-    // Clipboard
-    private readonly DispatcherTimer _clipboardTimer;
-    private string _lastFormatSignature = "";
-    private string? _lastClipboardText;
-    private bool _clipboardReadPending;
 
     public RemoteControlModule()
     {
@@ -93,7 +119,16 @@ public partial class RemoteControlModule : UserControl, IModule
             _endReason = "Disconnected. Nothing on the host was changed.";
             ShowIdle();
         };
-        SessionBox.SelectionChanged += (_, _) => UpdateButtons();
+        SessionBox.SelectionChanged += (_, _) => { MirrorSession(SessionBox, IdleSessionBox); UpdateButtons(); };
+        EndDesktopButton.Click += async (_, _) => await EndDesktopAsync();
+
+        // The empty page's own way out. One selection, shown in two places: the strip's picker is
+        // the one that is read, and the two are kept on the same session.
+        IdleSessionBox.SelectionChanged += (_, _) => MirrorSession(IdleSessionBox, SessionBox);
+        IdleConnectButton.Click += async (_, _) =>
+        {
+            if (SessionBox.SelectedItem is X11Session target) await ConnectAsync(target);
+        };
 
         CtrlAltDelItem.Click += (_, _) => SendCombo(X11Keysyms.ControlL, X11Keysyms.AltL, X11Keysyms.Delete);
         AltTabItem.Click += (_, _) => SendCombo(X11Keysyms.AltL, X11Keysyms.Tab);
@@ -108,8 +143,15 @@ public partial class RemoteControlModule : UserControl, IModule
         Display.ResolutionChanged += (_, _) => UpdateConnectedStatus();
         Display.SizeChanged += (_, _) => UpdateConnectedStatus();
 
-        _clipboardTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background,
-                                              async (_, _) => await PollClipboardAsync());
+        // The stage rather than the display: it has a size before there is a picture in it, which is
+        // what the first desktop is made from.
+        Stage.SizeChanged += (_, _) => ScheduleDesktopSize();
+        _resizeDebounce.Tick += (_, _) =>
+        {
+            _resizeDebounce.Stop();
+            SendDesktopSize();
+        };
+
 
         ShowIdle();
         UpdateButtons();
@@ -129,6 +171,8 @@ public partial class RemoteControlModule : UserControl, IModule
     /// <see cref="IModule.ReprobeWhileHidden"/>.
     /// </summary>
     public bool ReprobeWhileHidden => false;
+
+    private Window Owner => (Window)TopLevel.GetTopLevel(this)!;
 
     private void SetStatus(string text)
     {
@@ -155,9 +199,11 @@ public partial class RemoteControlModule : UserControl, IModule
         if (_connection is { } live)
         {
             live.Session.Paused = false;
-            StartClipboard();
             UpdateConnectedStatus();
             UpdateGrab();
+            // The window may have been resized while this tab was not the one on screen, where the
+            // stage has no size to report and nothing was scheduled.
+            ScheduleDesktopSize();
             return;
         }
 
@@ -181,7 +227,6 @@ public partial class RemoteControlModule : UserControl, IModule
         ReleaseKeys();
         Display.ReleaseButtons();
         _grab.Release();
-        _clipboardTimer.Stop();
         if (_connection is { } live) live.Session.Paused = true;
     }
 
@@ -208,6 +253,7 @@ public partial class RemoteControlModule : UserControl, IModule
             if (_shutdown) return;
             _probe = probe;
             FillSessions(probe);
+            FillDesktopMenu(probe);
             HostCapabilities = CapabilityText(probe);
             if (_connection is null)
             {
@@ -237,6 +283,7 @@ public partial class RemoteControlModule : UserControl, IModule
     private void FillSessions(RemoteDesktopProbe probe)
     {
         var previous = SessionBox.SelectedItem as X11Session;
+        IdleSessionBox.ItemsSource = probe.Sessions;
         SessionBox.ItemsSource = probe.Sessions;
         SessionBox.SelectedItem =
             probe.Sessions.FirstOrDefault(s => previous is not null && s.Display == previous.Display && s.User == previous.User)
@@ -244,13 +291,137 @@ public partial class RemoteControlModule : UserControl, IModule
             ?? probe.Sessions.FirstOrDefault();
     }
 
+    /// <summary>
+    /// The New desktop menu: the sessions the host itself offers, as a display manager would list
+    /// them, and a bare server for a host that offers none (or for running one thing in).
+    /// </summary>
+    private void FillDesktopMenu(RemoteDesktopProbe probe)
+    {
+        // The flyout is reached through the button rather than by name: a MenuFlyout is not a
+        // control and the XAML compiler makes no field for one. Two buttons offer this, and a
+        // flyout has one placement target, so each gets its own menu built from the same list.
+        FillDesktopMenu(probe, (MenuFlyout)NewDesktopButton.Flyout!);
+        FillDesktopMenu(probe, (MenuFlyout)IdleNewDesktopButton.Flyout!);
+    }
+
+    private void FillDesktopMenu(RemoteDesktopProbe probe, MenuFlyout menu)
+    {
+        menu.Items.Clear();
+        foreach (var desktop in probe.Desktops)
+        {
+            // Underscores in a header are access keys, and a session name is not a mnemonic.
+            var item = new MenuItem { Header = desktop.Name.Replace("_", "__") };
+            item.Click += async (_, _) => await StartDesktopAsync(desktop);
+            menu.Items.Add(item);
+        }
+        if (probe.Desktops.Count > 0) menu.Items.Add(new Separator());
+        var bare = new MenuItem { Header = "Bare X server, no desktop" };
+        bare.Click += async (_, _) => await StartDesktopAsync(null);
+        menu.Items.Add(bare);
+    }
+
+    /// <summary>Keeps the strip's picker and the empty page's on the same session.</summary>
+    private void MirrorSession(ComboBox from, ComboBox to)
+    {
+        if (_mirroring) return;
+        _mirroring = true;
+        to.SelectedItem = from.SelectedItem;
+        _mirroring = false;
+    }
+
+    // ---- A desktop of our own -----------------------------------------
+
+    /// <summary>
+    /// Starts a virtual desktop on the host and connects to it: starting one and then being asked
+    /// to pick it out of the list would be a gesture with no outcome.
+    /// </summary>
+    private async Task StartDesktopAsync(DesktopSession? desktop)
+    {
+        if (_service is null || _probe is not { Failure: null } probe || _busy || _shutdown) return;
+
+        _busy = true;
+        _endReason = null;
+        UpdateButtons();
+
+        X11Session started;
+        try
+        {
+            var what = desktop is null ? "a bare X server" : desktop.Name;
+            ShowMessage($"Starting {what} on the host...");
+            SetStatus("Starting a virtual desktop...");
+            started = await _service.StartVirtualDesktopAsync(probe, desktop);
+            if (_shutdown) return;
+        }
+        catch (Exception ex)
+        {
+            if (_shutdown) return;
+            _endReason = $"Could not start a desktop on the host: {ex.Message}";
+            SetStatus("Not connected");
+            ShowIdle();
+            return;
+        }
+        finally
+        {
+            _busy = false;
+            UpdateButtons();
+        }
+
+        // The listing is a different one now, and the new display is in it with everything the
+        // probe knows about it; connect to that rather than to what the start script answered.
+        await RefreshAsync();
+        if (_shutdown || !_active) return;
+        var target = _probe?.Sessions.FirstOrDefault(s => s.Display == started.Display) ?? started;
+        SessionBox.SelectedItem = target;
+        await ConnectAsync(target);
+    }
+
+    /// <summary>
+    /// Shuts a virtual desktop down. Confirmed, because what is running in it goes with it, and
+    /// offered only for a display this app started (see <see cref="X11SessionKind.Virtual"/>).
+    /// </summary>
+    private async Task EndDesktopAsync()
+    {
+        if (_service is null || _busy || _shutdown) return;
+        if (SessionBox.SelectedItem is not X11Session { Kind: X11SessionKind.Virtual } target) return;
+
+        if (!await MessageDialog.Confirm(Owner, "End virtual desktop",
+                $"Shut down the virtual desktop on {target.Display}? Everything running in it is closed, " +
+                "and anything not saved in it is lost."))
+            return;
+
+        // Ours is the one connection that cannot survive this, so it goes first and deliberately:
+        // the alternative is the session ending underneath us and being reported as a failure.
+        if (_connection is { } live && live.Target.Display == target.Display) EndConnection();
+
+        _busy = true;
+        UpdateButtons();
+        try
+        {
+            ShowMessage($"Ending the virtual desktop on {target.Display}...");
+            SetStatus($"Ending {target.Display}...");
+            await _service.EndVirtualDesktopAsync(target);
+            _endReason = $"The virtual desktop on {target.Display} was shut down.";
+        }
+        catch (Exception ex)
+        {
+            _endReason = $"Could not end the virtual desktop on {target.Display}: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+            UpdateButtons();
+        }
+
+        if (!_shutdown) await RefreshAsync();
+    }
+
     private static string CapabilityText(RemoteDesktopProbe probe)
     {
         if (probe.Failure is not null || probe.Arch.Length == 0) return "";
         if (!RemoteDesktopService.HasAgentFor(probe.Arch)) return $"No remote control agent for {probe.Arch}";
-        // "x11vnc: 0.9.17 lastmod: 2025-04-24" -> "x11vnc 0.9.17"
-        var parts = RemoteDesktopService.AgentVersion(probe.Arch).Replace(":", "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length >= 2 ? $"{parts[0]} {parts[1]} (bundled)" : "x11vnc (bundled)";
+        // "virtdeck-agent 1.0" -> "agent 1.0"
+        var parts = RemoteDesktopService.AgentVersion(probe.Arch).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"agent {parts[1]}" : "agent";
     }
 
     // ---- Connecting ---------------------------------------------------
@@ -287,14 +458,19 @@ public partial class RemoteControlModule : UserControl, IModule
             ShowMessage($"Connecting to {target.Label}...");
             SetStatus($"Connecting to {target.Display}...");
 
+            // A desktop of our own is asked for at this window's size before the session starts,
+            // so the first frame is already the right one: it was made at the Xvfb's full screen,
+            // and a 4K frame of it over the link would be paid for nothing.
+            var wanted = target.Kind == X11SessionKind.Virtual ? WantedDesktopSize() : null;
+
             RemoteDesktopConnection connection;
             try
             {
-                connection = await _service.OpenAsync(probe, dir, target, elevated, cts.Token);
+                connection = await _service.OpenAsync(probe, dir, target, elevated, wanted, cts.Token);
             }
             catch (RemoteDesktopException ex) when (!elevated && ex.DisplayRefused)
             {
-                connection = await _service.OpenAsync(probe, dir, target, elevated: true, cts.Token);
+                connection = await _service.OpenAsync(probe, dir, target, elevated: true, wanted, cts.Token);
             }
 
             if (_shutdown || !ReferenceEquals(_connectCts, cts))
@@ -326,22 +502,23 @@ public partial class RemoteControlModule : UserControl, IModule
         _connection = connection;
         var session = connection.Session;
         session.Disconnected += reason => Dispatcher.UIThread.Post(() => OnEnded(connection, reason));
-        session.ClipboardText += text => Dispatcher.UIThread.Post(() => OnRemoteClipboard(connection, text));
         session.Paused = !_active;
+
+        _autoSize = connection.Target.Kind == X11SessionKind.Virtual;
+        ApplyFit();
 
         Display.Attach(session);
         Scroller.IsVisible = true;
-        Overlay.IsVisible = false;
+        Idle.IsVisible = false;
         UpdateConnectedStatus();
 
-        // The local clipboard goes over at once, so what was copied before connecting pastes there.
-        _lastFormatSignature = "";
-        _lastClipboardText = null;
-        _clipboardReadPending = true;
-        if (_active) StartClipboard();
 
         FocusDisplay();
         UpdateGrab();
+
+        // Belt and braces for the size sent before the session started: on the very first activation
+        // the stage may not have been laid out yet, and then there was nothing to send.
+        ScheduleDesktopSize();
     }
 
     private void OnEnded(RemoteDesktopConnection connection, string reason)
@@ -370,7 +547,13 @@ public partial class RemoteControlModule : UserControl, IModule
 
         ReleaseKeys();
         Display.ReleaseButtons();
-        _clipboardTimer.Stop();
+
+        _resizeDebounce.Stop();
+        if (_autoSize)
+        {
+            _autoSize = false;
+            ApplyFit();
+        }
 
         var connection = _connection;
         _connection = null;
@@ -385,10 +568,12 @@ public partial class RemoteControlModule : UserControl, IModule
 
     // ---- What the page says -------------------------------------------
 
+    /// <summary>Words alone, for a moment that is passing: starting, connecting, going away.</summary>
     private void ShowMessage(string text)
     {
         Overlay.Text = text;
-        Overlay.IsVisible = true;
+        IdleActions.IsVisible = false;
+        Idle.IsVisible = true;
     }
 
     /// <summary>The overlay for a module with no session on screen, most specific reason first.</summary>
@@ -408,21 +593,44 @@ public partial class RemoteControlModule : UserControl, IModule
             text = $"This VirtDeck has no remote control agent for {_probe.Arch} hosts.";
         else if (_probe.Sessions.Count == 0 && _probe.WaylandUser.Length > 0)
             text = $"{_probe.WaylandUser}'s desktop is a Wayland session, which remote control cannot attach to. " +
-                   "Choose an Xorg session at the login screen (\"GNOME on Xorg\", for example) to control it from here.";
+                   "Choose an Xorg session at the login screen to control it from here.";
         else if (_probe.Sessions.Count == 0)
-            text = "No X session is running on this host. Remote control attaches to a desktop somebody is logged in to, " +
-                   "or to an X11 login screen.";
+            text = "No X session is running on this host.";
         else
             text = "Choose a session and Connect.";
 
         ShowMessage(text);
+        ShowIdleActions();
+    }
+
+    /// <summary>
+    /// The way out of an empty page, under the words rather than only in the strip: the picker and
+    /// Connect while the host has a session to attach to, New desktop while it has none. Nothing at
+    /// all while there is nothing to act on, which is a probe still running or one that failed.
+    /// </summary>
+    private void ShowIdleActions()
+    {
+        var ready = _probe is { Failure: null } probe
+                    && (probe.Arch.Length == 0 || RemoteDesktopService.HasAgentFor(probe.Arch));
+        var sessions = ready && _probe!.Sessions.Count > 0;
+
+        IdleSessionBox.IsVisible = sessions;
+        IdleConnectButton.IsVisible = sessions;
+        IdleNewDesktopHost.IsVisible = ready && !sessions;
+        IdleActions.IsVisible = ready;
     }
 
     private void UpdateConnectedStatus()
     {
         if (_connection is not { } c) return;
         var target = c.Target;
-        var who = target.Kind == X11SessionKind.LoginScreen ? "the login screen" : target.User.Length > 0 ? target.User : "X server";
+        var who = target.Kind switch
+        {
+            X11SessionKind.LoginScreen => "the login screen",
+            X11SessionKind.Virtual => "virtual desktop",
+            _ when target.User.Length > 0 => target.User,
+            _ => "X server",
+        };
         var text = $"Connected to {target.Display} ({who})";
         if (Display.Resolution is { } size)
         {
@@ -445,16 +653,65 @@ public partial class RemoteControlModule : UserControl, IModule
         ConnectButton.Content = connected ? "Reconnect" : "Connect";
         DisconnectButton.IsEnabled = connected || _busy;
         KeysButton.IsEnabled = connected;
+
+        // A host that cannot be given a desktop keeps the button and says why, rather than losing it.
+        var blocked = _probe is null ? "Looking at the host..." : _probe.StartBlockedReason;
+        var tip = blocked.Length == 0
+            ? "Start a desktop of VirtDeck's own on the host and control it. It is made the size of this window."
+            : blocked;
+        NewDesktopButton.IsEnabled = !_busy && blocked.Length == 0;
+        ToolTip.SetTip(NewDesktopHost, tip);
+        IdleNewDesktopButton.IsEnabled = NewDesktopButton.IsEnabled;
+        ToolTip.SetTip(IdleNewDesktopHost, tip);
+        IdleConnectButton.IsEnabled = ConnectButton.IsEnabled;
+        EndDesktopButton.IsEnabled = !_busy && SessionBox.SelectedItem is X11Session { Kind: X11SessionKind.Virtual };
     }
 
+    /// <summary>
+    /// Where the picture goes. A desktop of our own is made the size of the space it has, so Fit and
+    /// 1:1 draw exactly the same thing and the choice is not one: the box goes away and Fit is used,
+    /// which is the one that needs no scroll bars. The saved setting is left alone, so it is back as
+    /// it was on the next real display.
+    /// </summary>
     private void ApplyFit()
     {
-        bool fit = FitBox.IsChecked == true;
+        FitBox.IsVisible = !_autoSize;
+        bool fit = _autoSize || FitBox.IsChecked == true;
         Display.Stretch = fit ? FramebufferStretch.Fit : FramebufferStretch.Actual;
         var bars = fit ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         Scroller.HorizontalScrollBarVisibility = bars;
         Scroller.VerticalScrollBarVisibility = bars;
         UpdateConnectedStatus();
+    }
+
+    // ---- A desktop the size of the window ------------------------------
+
+    /// <summary>
+    /// The room the picture has, in the host's own pixels: the stage's size times this screen's
+    /// scaling, so a 150% screen asks for that many real pixels and every one of them is then drawn
+    /// on one of ours. Even, because an odd-sided screen is a needless thing to hand a desktop.
+    /// Null when the module has not been laid out yet, or is too small to mean anything.
+    /// </summary>
+    private (int Width, int Height)? WantedDesktopSize()
+    {
+        double scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        int width = (int)Math.Round(Stage.Bounds.Width * scale) & ~1;
+        int height = (int)Math.Round(Stage.Bounds.Height * scale) & ~1;
+        return width >= 320 && height >= 240 ? (width, height) : null;
+    }
+
+    /// <summary>A resize of this window is a resize of the host's desktop, once it has settled.</summary>
+    private void ScheduleDesktopSize()
+    {
+        if (!_autoSize || _connection is null) return;
+        _resizeDebounce.Stop();
+        _resizeDebounce.Start();
+    }
+
+    private void SendDesktopSize()
+    {
+        if (!_autoSize || _connection is not { } live) return;
+        if (WantedDesktopSize() is { } size) live.Session.RequestDesktopSize(size.Width, size.Height);
     }
 
     /// <summary>
@@ -504,8 +761,6 @@ public partial class RemoteControlModule : UserControl, IModule
     private void OnWindowActivated(object? sender, EventArgs e)
     {
         _windowActive = true;
-        _clipboardReadPending = true; // copy over there, come back here, paste
-        if (_active && _connection is not null) StartClipboard();
         UpdateGrab();
     }
 
@@ -514,7 +769,6 @@ public partial class RemoteControlModule : UserControl, IModule
         _windowActive = false;
         ReleaseKeys();
         Display.ReleaseButtons();
-        _clipboardTimer.Stop();
         UpdateGrab();
     }
 
@@ -647,54 +901,7 @@ public partial class RemoteControlModule : UserControl, IModule
         UpdateGrab();
     }
 
-    // ---- Clipboard ----------------------------------------------------
-
     private IClipboard? Clipboard => TopLevel.GetTopLevel(this)?.Clipboard;
-
-    private void StartClipboard()
-    {
-        if (_windowActive && _connection is not null) _clipboardTimer.Start();
-    }
-
-    /// <summary>
-    /// The console's two-tier poll: the cheap format list every tick, the text only when that list
-    /// moved or something forced a read (a connect, the window coming back).
-    /// </summary>
-    private async Task PollClipboardAsync()
-    {
-        if (_connection is not { } c || Clipboard is not { } cb) return;
-        try
-        {
-            var signature = await HostClipboard.FormatSignatureAsync(cb);
-            if (!_clipboardReadPending && signature == _lastFormatSignature) return;
-            _clipboardReadPending = false;
-            _lastFormatSignature = signature;
-
-            var text = await cb.TryGetTextAsync();
-            if (string.IsNullOrEmpty(text) || text == _lastClipboardText) return;
-            if (!ReferenceEquals(_connection, c)) return;
-            _lastClipboardText = text;
-            c.Session.SendClipboardText(text);
-        }
-        catch { /* clipboard busy or owned by a dying app */ }
-    }
-
-    /// <summary>
-    /// The far end copied something. It goes on this computer's clipboard and becomes the baseline
-    /// the poll compares against, so it is not sent straight back.
-    /// </summary>
-    private async void OnRemoteClipboard(RemoteDesktopConnection connection, string text)
-    {
-        if (!ReferenceEquals(_connection, connection) || Clipboard is not { } cb) return;
-        try
-        {
-            _lastClipboardText = text;
-            await cb.SetTextAsync(text);
-            _lastFormatSignature = await HostClipboard.FormatSignatureAsync(cb);
-            _clipboardReadPending = false;
-        }
-        catch { /* clipboard busy */ }
-    }
 
     /// <summary>
     /// Types the clipboard as keystrokes, for where a paste cannot reach: the login screen, a

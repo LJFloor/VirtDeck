@@ -29,12 +29,11 @@ public partial class CronConflictDialog : Window
 
         PromptText.Text =
             $"{path} was changed on the host after it was read here, so nothing has been written. "
-            + "Below, a minus is a line only your version has and a plus is a line only the host's "
-            + "has.";
+            + "A minus is a line only your version has, a plus one only the host's has.";
 
         Diff.Text = Unified(mine, theirs);
 
-        ReloadButton.Tag = "Load the host's version into the editor, discarding the changes on screen";
+        ReloadButton.Tag = "Load the host's version, discarding the changes on screen";
         CancelButton.Click += (_, _) => Close(Answer.Cancel);
         OverwriteButton.Click += (_, _) => Close(Answer.Overwrite);
         ReloadButton.Click += (_, _) => Close(Answer.Reload);
@@ -76,7 +75,7 @@ public partial class CronConflictDialog : Window
         while (y < b.Length) text.Append("+ ").Append(b[y++]).Append('\n');
 
         return text.Length == 0
-            ? "The two versions have the same lines, so the difference is in whitespace alone."
+            ? "The two versions differ in whitespace alone."
             : text.ToString();
     }
 

@@ -35,17 +35,19 @@ public partial class CronRawEditWindow : Window
         WhatText.Text = file.Kind switch
         {
             CronSourceKind.UserCrontab =>
-                $"{file.Owner}'s own crontab ({file.Path}). Every line runs as {file.Owner}, so there "
-                + "is no user column. Saving installs it with crontab, which checks it first and "
-                + "refuses the whole file if any line is wrong.",
+                $"{file.Owner}'s own crontab ({file.Path}). Every line runs as {file.Owner}."
+                // Said rather than left to be noticed, because what is on screen is otherwise not
+                // the whole file and nothing else here would admit it.
+                + (file.Preamble.Length > 0
+                    ? " The example block crontab seeds a new crontab with is not shown and is "
+                      + "written back unchanged."
+                    : string.Empty),
             CronSourceKind.SystemCrontab =>
-                "The system crontab. Each job line carries the account it runs as between the "
-                + "schedule and the command. cron picks changes up on its own and never reports a "
-                + "line it could not read, so a bad line here is one that silently never runs.",
+                "The system crontab. Each job line names the account it runs as, between the "
+                + "schedule and the command.",
             _ =>
-                $"{file.Path}, read by cron directly. Each job line carries the account it runs as "
-                + "between the schedule and the command. cron picks changes up on its own and never "
-                + "reports a line it could not read, so a bad line here is one that silently never runs.",
+                $"{file.Path}, read by cron directly. Each job line names the account it runs as, "
+                + "between the schedule and the command.",
         };
 
         CancelButton.Click += (_, _) => Close();
@@ -71,10 +73,10 @@ public partial class CronRawEditWindow : Window
         if (!ErrorText.IsVisible && FirstUnreadable(text) is { } line)
         {
             ErrorText.Text =
-                $"Line {line.Number} reads as neither a job, a setting nor a comment: \"{line.Text}\". "
+                $"Line {line.Number} is neither a job, a setting nor a comment: \"{line.Text}\". "
                 + (_file.Kind == CronSourceKind.UserCrontab
                     ? "crontab will refuse the file. Press Save again to try anyway."
-                    : "cron will skip it without saying so. Press Save again to write it anyway.");
+                    : "cron will skip it. Press Save again to write it anyway.");
             ErrorText.IsVisible = true;
             return;
         }

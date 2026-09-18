@@ -58,15 +58,18 @@
             <TextBox Grid.Row="0" Grid.Column="1" Name="CommandBox"
                      PlaceholderText="/usr/local/bin/backup.sh" />
 
-            <!-- cron has no end-of-line comment, so a note about a job can only be a comment line
-                 above it. That is where this is written and where it is read back from. -->
+            <!-- Written on the job's own line, just after the command, where the shell drops it as
+                 a comment and where it is read straight back off the same line. A comment line above
+                 the job is read as a note too, because that is the convention in a crontab this app
+                 did not write, but it is not where one is written. -->
             <TextBlock Grid.Row="1" Grid.Column="0" Text="Note" VerticalAlignment="Center" />
             <TextBox Grid.Row="1" Grid.Column="1" Name="CommentBox"
-                     PlaceholderText="what this job is for (optional)" />
+                     PlaceholderText="what this job is for (optional)"
+                     ToolTip.Tip="Goes on the end of the job's line, after a #." />
           </Grid>
 
           <TextBlock Name="PercentNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False"
-                     Text="A bare % does not reach the command: cron ends the command at the first one and feeds the rest to the job on standard input. Write \% for a literal percent, as date +\%Y does." />
+                     Text="A bare % ends the command. Write \% for a literal percent." />
         </StackPanel>
       </HeaderedContentControl>
 

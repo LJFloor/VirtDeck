@@ -8,16 +8,21 @@ namespace VirtDeck.Avalonia.Input;
 ///
 /// <para><b>RFB carries keysyms, so the local layout decides the character.</b> That is the
 /// opposite of the VM console, where <see cref="PhysicalKeyMap"/> sends the key's position and the
-/// guest applies its own layout: a remote X desktop takes "the user typed @" and x11vnc works out
+/// guest applies its own layout: a remote X desktop takes "the user typed @" and the agent works out
 /// which of its keys, with which modifiers, produce that. Standard VNC behaviour, and the only one
 /// that survives a local and a remote layout that differ.</para>
 ///
 /// <para>Three sources, in order. Keys that type nothing (Enter, the arrows, the function keys,
 /// the modifiers, the keypad) come from the physical key, since what they are does not depend on
 /// the layout; the two sides of a modifier stay apart. A key that types something sends the
-/// character Avalonia says it typed (<see cref="KeyEventArgs.KeySymbol"/>). With Ctrl held that
-/// character is a control code, so the key's own unshifted character is sent instead, and x11vnc
-/// combines it with the Ctrl it already has.</para>
+/// character Avalonia says it typed (<see cref="KeyEventArgs.KeySymbol"/>).</para>
+///
+/// <para><b>When Avalonia says nothing, the key and Shift do.</b> With Ctrl held the character is a
+/// control code, and X11 hands out no character at all for a keysym Avalonia has no <see cref="Key"/>
+/// of its own for, which is every shifted digit, "!" to ")". Shift is the half that must not be lost:
+/// the far end is holding it, and asking for a character that does not want Shift makes the agent let
+/// go of it, so "!" would arrive as "1". The agent combines what is sent with the Ctrl it already
+/// has.</para>
 ///
 /// <para><b>Right Alt is AltGr</b> (ISO_Level3_Shift), which is what it is on every layout that
 /// has one, US-International included; left Alt stays Alt for the shortcuts.</para>
@@ -43,13 +48,17 @@ internal static class X11Keysyms
         if (key is Key.DeadCharProcessed or Key.ImeProcessed) return null;
 
         bool chord = modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta);
+        bool shift = modifiers.HasFlag(KeyModifiers.Shift);
         if (!chord && Printable(symbol) is { } typed) return typed;
 
-        // Ctrl turns the character into a control code; what the key says without it is what goes.
-        if (key is >= Key.A and <= Key.Z) return (uint)('a' + (key - Key.A));
-        if (key is >= Key.D0 and <= Key.D9) return (uint)('0' + (key - Key.D0));
+        // No character to go on, so the key itself says what it types, and Shift says which of its
+        // two characters that is. Sending the unshifted one is worse than sending nothing: the far
+        // end is holding the user's Shift, and a character that does not want Shift makes the agent
+        // let go of it, so "!" arrives as "1".
         if (Printable(symbol) is { } any) return any;
-        if (Printable(physical.ToQwertyKeySymbol(false)) is { } qwerty) return qwerty;
+        if (key is >= Key.A and <= Key.Z) return (uint)((shift ? 'A' : 'a') + (key - Key.A));
+        if (Printable(physical.ToQwertyKeySymbol(shift)) is { } qwerty) return qwerty;
+        if (key is >= Key.D0 and <= Key.D9) return (uint)('0' + (key - Key.D0));
         return null;
     }
 

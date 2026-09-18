@@ -141,6 +141,18 @@ namespace VirtDeck.Services
         public bool RemoteControlFit { get; set; } = true;
 
         /// <summary>
+        /// Whether the cron module's Jobs table shows the lines that are a host's own wiring: the
+        /// ones that run the <c>/etc/cron.&lt;period&gt;</c> directories, and the package lines
+        /// guarded so they do nothing while systemd is running. Off by default, because on a stock
+        /// Debian they are most of what the table holds and none of them is a schedule anybody set.
+        /// A missing bool reads as false, which is the default wanted.
+        ///
+        /// One answer for every host, like the terminal's font size, because it is about how much of
+        /// the table is worth reading and not about any one machine.
+        /// </summary>
+        public bool CronShowPlumbing { get; set; }
+
+        /// <summary>
         /// Height in pixels of the VM module's details pane, the one layout value in this file.
         /// Read back through <see cref="VmDetailsHeightOrDefault"/>, which clamps it: a hand-edited
         /// or corrupted number must never be able to push the VM list off the screen, which is the

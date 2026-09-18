@@ -17,7 +17,7 @@ namespace VirtDeck.Services
     /// well-behaved far end exits on), gives the command a moment, and drops the connection, all on
     /// the pool, so a module switch or a window close is never held up by it.</para>
     /// </summary>
-    public sealed class SshPipe : IDisposable
+    public sealed class SshPipe : ICommandPipe
     {
         private const int TailChars = 8192;
 
@@ -116,7 +116,7 @@ namespace VirtDeck.Services
         /// the connection. On the pool, so nothing waits on it.
         ///
         /// <para><b>Never a signal.</b> <c>SshCommand.CancelAsync</c> asks sshd to signal the command,
-        /// and with it x11vnc was found wedged on a futex for good after the session closed, still
+        /// and with it the remote control agent was found wedged for good after the session closed, still
         /// holding its X connection; the EOF this sends instead is the viewer leaving, which it
         /// handles by exiting cleanly. Dropping the connection afterwards closes the pipes under
         /// anything that did not take the hint.</para>

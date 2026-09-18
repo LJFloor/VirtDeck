@@ -6,9 +6,9 @@ using System.Security.Cryptography;
 namespace VirtDeck.RemoteDesktop
 {
     /// <summary>
-    /// One architecture's host agent, as embedded in this assembly: a static x11vnc and vdrelay,
-    /// built by <c>native/x11vnc/build.sh</c>. See <see cref="RemoteDesktopService"/> for how it
-    /// reaches the host.
+    /// One architecture's host agent, as embedded in this assembly: a single fully static
+    /// <c>virtdeck-agent</c>, built by <c>native/agent/build.sh</c>. See
+    /// <see cref="RemoteDesktopService"/> for how it reaches the host.
     ///
     /// <para>Everything the host side checks is derived here from the embedded bytes rather than
     /// kept in a manifest beside them, so a rebuilt tarball cannot disagree with its own
@@ -17,6 +17,9 @@ namespace VirtDeck.RemoteDesktop
     /// </summary>
     internal sealed class AgentBundle
     {
+        /// <summary>The binary's name in the tarball, in the cache directory, and on the host.</summary>
+        public const string AgentName = "virtdeck-agent";
+
         private static readonly ConcurrentDictionary<string, AgentBundle?> Cache = new();
 
         /// <summary>"x86_64" or "aarch64".</summary>
@@ -28,10 +31,10 @@ namespace VirtDeck.RemoteDesktop
         /// <summary>The uncompressed tar, which is what goes down the wire (the host needs no gzip).</summary>
         public required byte[] Tar { get; init; }
 
-        public required string X11vncSha256 { get; init; }
-        public required string RelaySha256 { get; init; }
+        /// <summary>The binary's own hash, which the host re-checks before running it.</summary>
+        public required string Sha256 { get; init; }
 
-        /// <summary>x11vnc's own version line ("x11vnc: 0.9.17 lastmod: ..."), or empty.</summary>
+        /// <summary>The agent's version line ("virtdeck-agent 1.0"), or empty.</summary>
         public required string Version { get; init; }
 
         /// <summary>
@@ -64,7 +67,7 @@ namespace VirtDeck.RemoteDesktop
             using (var inflate = new GZipStream(gz, CompressionMode.Decompress, leaveOpen: true))
                 inflate.CopyTo(tar);
 
-            string x11vnc = "", relay = "", version = "";
+            string binary = "", version = "";
             tar.Position = 0;
             using (var reader = new TarReader(tar, leaveOpen: true))
             {
@@ -75,22 +78,20 @@ namespace VirtDeck.RemoteDesktop
                     entry.DataStream.CopyTo(data);
                     switch (entry.Name)
                     {
-                        case "x11vnc": x11vnc = Convert.ToHexStringLower(SHA256.HashData(data.ToArray())); break;
-                        case "vdrelay": relay = Convert.ToHexStringLower(SHA256.HashData(data.ToArray())); break;
+                        case AgentName: binary = Convert.ToHexStringLower(SHA256.HashData(data.ToArray())); break;
                         case "version": version = System.Text.Encoding.UTF8.GetString(data.ToArray()).Trim(); break;
                     }
                 }
             }
 
-            if (x11vnc.Length == 0 || relay.Length == 0) return null;
+            if (binary.Length == 0) return null;
 
             return new AgentBundle
             {
                 Arch = arch,
                 DirName = dir,
                 Tar = tar.ToArray(),
-                X11vncSha256 = x11vnc,
-                RelaySha256 = relay,
+                Sha256 = binary,
                 Version = version,
             };
         }

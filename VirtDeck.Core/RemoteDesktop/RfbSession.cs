@@ -7,16 +7,22 @@ namespace VirtDeck.RemoteDesktop
 {
     /// <summary>
     /// An RFB (VNC) client over any pair of streams: the Remote Control module runs it over the
-    /// stdin and stdout of an x11vnc on the host (see <c>RemoteDesktopService</c>). Written from RFC
-    /// 6143 and the community protocol description; noVNC is a behaviour cross-check only.
+    /// stdin and stdout of VirtDeck's own agent on the host (see <c>RemoteDesktopService</c>).
+    /// Written from RFC 6143 and the community protocol description; noVNC is a behaviour
+    /// cross-check only. The numbers on the wire are in <see cref="RfbProtocol"/>, which the agent's
+    /// RFB server links, so the two ends cannot drift.
     ///
     /// <para><b>What it asks for.</b> 32 bits per pixel, depth 24, little-endian, true colour with red
     /// at bit 16, green at 8 and blue at 0, which puts the bytes of every pixel in B, G, R order: the
     /// framebuffer's BGRA, so Raw rectangles are copied as they come. Encodings: Tight, CopyRect and
     /// Raw, plus DesktopSize (a new resolution), LastRect and RichCursor (the cursor drawn locally,
-    /// not into the picture). Deliberately not ExtendedDesktopSize: following the host's resolution
-    /// is all DesktopSize is needed for, and resizing somebody's real monitor is not this client's
-    /// business.</para>
+    /// not into the picture). Deliberately not the ExtendedDesktopSize <i>encoding</i>: DesktopSize
+    /// says everything about a new resolution that this client has to know, whoever caused it.</para>
+    ///
+    /// <para><b>Asking for a size</b> (<see cref="RequestDesktopSize"/>) borrows that extension's
+    /// SetDesktopSize message and nothing else, and goes only to a desktop VirtDeck started on the
+    /// host, which is the only screen that is ours to resize. The answer is the ordinary DesktopSize
+    /// rectangle; there is no status to read and nothing to negotiate.</para>
     ///
     /// <para><b>Threads.</b> One reader thread does the handshake and then decodes, raising every
     /// event on itself, like a SPICE channel. Everything the UI sends goes through
@@ -30,14 +36,14 @@ namespace VirtDeck.RemoteDesktop
     /// </summary>
     public sealed class RfbSession : IFramebufferSource, IDisposable
     {
-        private const int EncodingRaw = 0;
-        private const int EncodingCopyRect = 1;
-        private const int EncodingTight = 7;
-        private const int EncodingDesktopSize = -223;
-        private const int EncodingLastRect = -224;
-        private const int EncodingRichCursor = -239;
-        private const int CompressLevel6 = -256 + 6;
-        private const int QualityLevel6 = -32 + 6;
+        private const int EncodingRaw = RfbProtocol.EncodingRaw;
+        private const int EncodingCopyRect = RfbProtocol.EncodingCopyRect;
+        private const int EncodingTight = RfbProtocol.EncodingTight;
+        private const int EncodingDesktopSize = RfbProtocol.EncodingDesktopSize;
+        private const int EncodingLastRect = RfbProtocol.EncodingLastRect;
+        private const int EncodingRichCursor = RfbProtocol.EncodingRichCursor;
+        private const int CompressLevel6 = RfbProtocol.CompressLevel6;
+        private const int QualityLevel6 = RfbProtocol.QualityLevel6;
 
         /// <summary>A server cut text this long is not a clipboard, it is a broken stream.</summary>
         private const int MaxCutText = 16 * 1024 * 1024;
@@ -53,9 +59,13 @@ namespace VirtDeck.RemoteDesktop
         private bool _paused;
         private bool _fullUpdatePending;
 
+        /// <summary>The size the module last asked the desktop for, sent once the handshake is past.</summary>
+        private (int Width, int Height)? _wantedSize;
+        private bool _handshaken;
+
         public SpiceFramebuffer? Framebuffer { get; private set; }
 
-        /// <summary>What the server calls its desktop (x11vnc: host and display).</summary>
+        /// <summary>What the server calls its desktop (the agent: host and display).</summary>
         public string DesktopName { get; private set; } = string.Empty;
 
         public event Action<int, int>? ResolutionChanged;
@@ -73,7 +83,7 @@ namespace VirtDeck.RemoteDesktop
         /// <summary>
         /// Completes once the handshake is done and the first update has been asked for; faults with
         /// the reason if it fails. A caller puts its own time limit on it, since a far end that never
-        /// speaks (a sudo waiting for a password, an x11vnc that cannot open its display) says so
+        /// speaks (a sudo waiting for a password, an agent that cannot open its display) says so
         /// only on stderr.
         /// </summary>
         public Task Ready => _ready.Task;
@@ -155,6 +165,42 @@ namespace VirtDeck.RemoteDesktop
             _out.Enqueue(m);
         }
 
+        /// <summary>
+        /// Asks the far end to make its desktop this many pixels. <b>Only ever sent to a desktop
+        /// VirtDeck started</b>, which the agent enforces as well: the message is
+        /// ExtendedDesktopSize's SetDesktopSize, but the answer is the plain DesktopSize rectangle
+        /// this client already decodes, so there is no negotiation and a size that does not fit is
+        /// simply the nearest one that does.
+        ///
+        /// <para>Before <see cref="Start"/> it is remembered rather than sent, and goes out in the
+        /// handshake before the first update is asked for: a desktop that starts at the size its
+        /// server was given would otherwise send one whole frame of it before shrinking.</para>
+        /// </summary>
+        public void RequestDesktopSize(int width, int height)
+        {
+            if (width <= 0 || height <= 0 || width > ushort.MaxValue || height > ushort.MaxValue) return;
+
+            lock (_stateGate)
+            {
+                _wantedSize = (width, height);
+                if (!_handshaken) return;
+            }
+            _out.Enqueue(SetDesktopSize(width, height));
+        }
+
+        private static byte[] SetDesktopSize(int width, int height)
+        {
+            // One screen, numbered 0 at the origin, since the agent drives a single output.
+            var m = new byte[24];
+            m[0] = RfbProtocol.SetDesktopSize;
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(2), (ushort)width);
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(4), (ushort)height);
+            m[6] = 1; // screens
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(16), (ushort)width);
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(18), (ushort)height);
+            return m;
+        }
+
         private void RequestUpdate(bool incremental)
         {
             var fb = Framebuffer;
@@ -220,16 +266,16 @@ namespace VirtDeck.RemoteDesktop
             int version = major > 3 || minor >= 8 ? 8 : minor >= 7 ? 7 : 3;
             _out.Enqueue(Encoding.ASCII.GetBytes($"RFB 003.00{version}\n"));
 
-            // Security. x11vnc runs with -nopw over the SSH channel, which is the authentication, so
+            // Security. The agent offers None over the SSH channel, which is the authentication, so
             // None is the only type this client takes.
             if (version >= 7)
             {
                 int count = _in.ReadU8();
                 if (count == 0) throw new IOException(ReadReason());
                 var types = _in.ReadBytes(count);
-                if (Array.IndexOf(types, (byte)1) < 0)
+                if (Array.IndexOf(types, RfbProtocol.SecurityNone) < 0)
                     throw new IOException($"The remote desktop wants a password or encryption (security types {string.Join(", ", types)}); this client offers none.");
-                _out.Enqueue([1]);
+                _out.Enqueue([RfbProtocol.SecurityNone]);
                 if (version == 8 && _in.ReadU32() != 0) throw new IOException(ReadReason());
             }
             else
@@ -254,6 +300,16 @@ namespace VirtDeck.RemoteDesktop
                                       EncodingDesktopSize, EncodingLastRect, EncodingRichCursor,
                                       CompressLevel6, QualityLevel6));
 
+            // Before the first update is asked for, so that a desktop the module wants smaller than
+            // its server was started at never sends a whole frame of the larger one.
+            (int Width, int Height)? wanted;
+            lock (_stateGate)
+            {
+                _handshaken = true;
+                wanted = _wantedSize;
+            }
+            if (wanted is { } size) _out.Enqueue(SetDesktopSize(size.Width, size.Height));
+
             NewFramebuffer(width, height);
             RequestUpdate(incremental: false);
         }
@@ -269,17 +325,17 @@ namespace VirtDeck.RemoteDesktop
         private static byte[] SetPixelFormat()
         {
             var m = new byte[20];
-            m[0] = 0;       // SetPixelFormat
-            m[4] = 32;      // bits per pixel
-            m[5] = 24;      // depth
-            m[6] = 0;       // little-endian
-            m[7] = 1;       // true colour
-            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(8), 255);
-            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(10), 255);
-            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(12), 255);
-            m[14] = 16;     // red shift
-            m[15] = 8;      // green shift
-            m[16] = 0;      // blue shift
+            m[0] = RfbProtocol.SetPixelFormat;
+            m[4] = RfbProtocol.BitsPerPixel;
+            m[5] = RfbProtocol.Depth;
+            m[6] = RfbProtocol.BigEndian;
+            m[7] = RfbProtocol.TrueColour;
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(8), RfbProtocol.ColourMax);
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(10), RfbProtocol.ColourMax);
+            BinaryPrimitives.WriteUInt16BigEndian(m.AsSpan(12), RfbProtocol.ColourMax);
+            m[14] = RfbProtocol.RedShift;
+            m[15] = RfbProtocol.GreenShift;
+            m[16] = RfbProtocol.BlueShift;
             return m;
         }
 

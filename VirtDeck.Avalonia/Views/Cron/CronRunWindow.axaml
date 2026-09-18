@@ -7,15 +7,6 @@
 
   <DockPanel>
 
-    <Border DockPanel.Dock="Top" Padding="16,10" BorderThickness="0,0,0,1" BorderBrush="#33808080"
-            Background="#11808080">
-      <!-- Said before anything runs, not after it fails. The difference between this and 03:30 is
-           the single most common reason a cron job behaves differently from the same command typed
-           at a prompt, and a window that only showed output would let somebody draw exactly the
-           wrong conclusion from a success. -->
-      <TextBlock Name="CaveatText" TextWrapping="Wrap" Opacity="0.75" />
-    </Border>
-
     <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
             Background="#11808080">
       <DockPanel>

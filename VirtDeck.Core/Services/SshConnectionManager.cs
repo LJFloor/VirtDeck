@@ -411,7 +411,7 @@ namespace VirtDeck.Services
         /// Runs a script on a dedicated connection and hands back both ends of it: its stdout to read
         /// and its stdin to write, as binary streams, for as long as it runs. The one place in the app
         /// where a command is a conversation rather than a download or an upload, which is what the
-        /// Remote Control module's x11vnc is: RFB travels on this channel's stdin and stdout.
+        /// Remote Control module's agent is: RFB travels on this channel's stdin and stdout.
         ///
         /// <para>No terminal is involved, so nothing rewrites a byte on the way; <see cref="SshPtySession"/>
         /// is the bidirectional channel for people, this is the one for protocols. Its own connection,

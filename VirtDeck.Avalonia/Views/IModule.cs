@@ -122,7 +122,7 @@ public interface IModule
 
 /// <summary>
 /// A module that sometimes hands the user to another one: the Overview module's Update now button, which
-/// belongs on the page that says there are updates and is carried out by the page that installs
+/// belongs on the page that says there are updates and hands the user to the page that installs
 /// them, and the Containers module's Browse files on a volume, which the File explorer shows.
 ///
 /// <para>It is an interface of its own rather than another member of <see cref="IModule"/> because

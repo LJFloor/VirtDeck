@@ -114,27 +114,29 @@ namespace VirtDeck.Services
         public bool Running { get; private set; }
 
         /// <summary>
-        /// Everything pending should be installed, asked for from somewhere other than the page that
-        /// installs. It is held on the subject rather than passed between the two modules, because
-        /// they do not know one another: the Overview module's Update now button leaves the request here,
-        /// the shell puts the updates module on screen, and that module picks it up inside its own
-        /// activation, where it is already ordered against its own listing and its own confirmation.
+        /// Somebody arriving on the updates module asked to see what is pending, so the page opens on
+        /// the Updates tab rather than wherever it was left. It is held on the subject rather than
+        /// passed between the two modules, because they do not know one another: the Overview
+        /// module's Update now button leaves the request here, the shell puts the updates module on
+        /// screen, and that module picks it up inside its own activation.
+        ///
+        /// <para><b>It asks for a page and never for an install.</b> Nothing is installed because
+        /// somebody pressed a button on another page; the command is theirs to give where the
+        /// progress strip and the Cancel button are.</para>
         /// </summary>
-        public bool InstallAllRequested { get; private set; }
+        public bool UpdatesPageRequested { get; private set; }
 
-        /// <summary>Asks for it. Nothing happens here; whoever owns installing acts on it.</summary>
-        public void RequestInstallAll() => InstallAllRequested = true;
+        /// <summary>Asks for it. Nothing happens here; the updates module acts on it.</summary>
+        public void RequestUpdatesPage() => UpdatesPageRequested = true;
 
         /// <summary>
-        /// Reads the request and spends it. <b>Looking at it is what clears it</b>, whatever comes of
-        /// it: a request that arrived while an upgrade was already running has been answered by the
-        /// upgrade already running, and one left here would fire the next time somebody opened the
-        /// page, long after the button was pressed.
+        /// Reads the request and spends it. <b>Looking at it is what clears it</b>: one left here
+        /// would fire the next time somebody opened the page, long after the button was pressed.
         /// </summary>
-        public bool TakeInstallRequest()
+        public bool TakeUpdatesPageRequest()
         {
-            var requested = InstallAllRequested;
-            InstallAllRequested = false;
+            var requested = UpdatesPageRequested;
+            UpdatesPageRequested = false;
             return requested;
         }
 

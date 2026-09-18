@@ -65,12 +65,6 @@ install -Dm644 "$REPO_ROOT/THIRD-PARTY-NOTICES.md" "$APPDIR/usr/share/virtdeck/T
 tar -czf "$APPDIR/usr/share/virtdeck/SpiceClient-src.tar.gz" \
     -C "$REPO_ROOT" --exclude=bin --exclude=obj SpiceClient
 
-# GPL corresponding source for the Remote Control module's host agent: the upstream x11vnc and
-# LibVNCServer tarballs it is built from, the X libraries, the build scripts and vdrelay. The agent
-# binaries themselves are embedded in the app and uploaded to hosts, so they are left out here.
-tar -czf "$APPDIR/usr/share/virtdeck/x11vnc-src.tar.gz" \
-    -C "$REPO_ROOT/native" --exclude='agent-*.tar.gz' --exclude=licenses-found x11vnc
-
 echo "=== [3/5] Writing AppRun ==="
 # Deliberately minimal: no LD_LIBRARY_PATH. The self-contained publish resolves its own .NET
 # libraries relative to the apphost, and libusb/libpulse must come from the host; prepending a

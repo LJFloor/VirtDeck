@@ -194,14 +194,11 @@ public partial class CronJobDialog : Window
         OwnerBox.IsVisible = needsOwner;
 
         WhereNote.Text = isNewFile
-            ? "A file of its own under /etc/cron.d, which is where a package puts its own schedule. "
-              + "cron reads that directory directly and needs no install step, but it also ignores "
-              + "any name with a dot in it, so the name may hold only letters, digits, underscores "
-              + "and hyphens."
+            ? "A file of its own under /etc/cron.d. The name may hold only letters, digits, "
+              + "underscores and hyphens."
             : needsOwner
                 ? "A system crontab, so each line names the account it runs as."
-                : "This account's own crontab. Every line in it runs as that account, so there is "
-                  + "nothing to choose.";
+                : "This account's own crontab. Every line in it runs as that account.";
     }
 
     // ---- Validation ----------------------------------------------------
@@ -254,17 +251,17 @@ public partial class CronJobDialog : Window
 
         if (schedule.IsReboot)
         {
-            NextRunText.Text = "Runs once each time the host boots, and at no other time.";
+            NextRunText.Text = "Runs once each time the host boots.";
             return;
         }
 
         // The host's zone, named. Cron fires on the host's clock and this PC may be somewhere else,
         // so a bare time here would be a claim nobody could check.
         NextRunText.Text = _zone is null
-            ? "The host did not say which time zone it keeps, so there is no next run to work out."
+            ? "The host did not say which time zone it keeps."
             : schedule.Next(DateTimeOffset.Now, _zone) is { } next
                 ? $"Next run: {next:dddd d MMMM yyyy, HH:mm} ({_zone.Id})"
-                : "Nothing in the next five years matches this, which usually means a date that does not occur.";
+                : "Nothing in the next five years matches this.";
     }
 
     /// <summary>
@@ -280,7 +277,14 @@ public partial class CronJobDialog : Window
             return "Give the job a command to run.";
 
         if ((CommandBox.Text ?? string.Empty).Contains('\n'))
-            return "A cron job is one line, so its command cannot contain a line break.";
+            return "The command cannot contain a line break.";
+
+        // The Note box writes exactly this, so a second one typed here would be read back as part of
+        // the note and the two would swap places on the next save. Said rather than silently merged:
+        // the shell is about to throw this text away either way, and only the user knows which of the
+        // two they meant.
+        if (CronLine.SplitNote((CommandBox.Text ?? string.Empty).Trim()).Note.Length > 0)
+            return "A # here starts a comment. Put what it says in Note.";
 
         if (_existing is not null) return null;
 
@@ -293,7 +297,7 @@ public partial class CronJobDialog : Window
             if (name.Length == 0) return "Give the new file in /etc/cron.d a name.";
             if (!CronFile.DropInName.IsMatch(name))
                 return name.Contains('.')
-                    ? $"cron ignores any file in /etc/cron.d with a dot in its name, so '{name}' would never run."
+                    ? $"cron ignores a name with a dot in it, so '{name}' would never run."
                     : $"'{name}' may hold only letters, digits, underscores and hyphens.";
         }
 

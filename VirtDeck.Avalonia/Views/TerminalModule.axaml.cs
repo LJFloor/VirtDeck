@@ -58,10 +58,6 @@ public partial class TerminalModule : UserControl, IModule
         Terminal.BindScrollBar(Scroll);
 
         ReconnectButton.Click += async (_, _) => await ConnectAsync(reconnect: true);
-        CopyButton.Click += async (_, _) => await CopyAsync();
-        PasteButton.Click += async (_, _) => await PasteAsync();
-        SmallerButton.Click += (_, _) => StepFontSize(-1);
-        LargerButton.Click += (_, _) => StepFontSize(+1);
     }
 
     // ---- IModule ------------------------------------------------------
@@ -247,19 +243,15 @@ public partial class TerminalModule : UserControl, IModule
 
     // ---- Font size --------------------------------------------------------
 
+    // Ctrl+wheel and nothing else; there are no buttons. The gesture is TerminalControl's, which
+    // clamps it to the same bounds, so this end only reads the setting and writes it back.
     private static double ClampFontSize(double size) => Math.Clamp(size, MinFontSize, MaxFontSize);
 
-    private void StepFontSize(double delta)
-    {
-        Terminal.FontSize = ClampFontSize(Terminal.FontSize + delta);
-        SaveFontSize();
-        Terminal.Focus();
-    }
-
     /// <summary>
-    /// Writes the size back when it actually moved. A button click saves at once; the Ctrl+wheel
-    /// gesture rides on this being called from <see cref="Deactivate"/> too, which is why there is no
-    /// debounce timer, and the comparison is what stops every module switch rewriting settings.json.
+    /// Writes the size back when it actually moved. The Ctrl+wheel gesture is the only way it moves
+    /// and <see cref="TerminalControl"/> owns it, so this rides on <see cref="Deactivate"/> rather
+    /// than on a debounce timer, and the comparison is what stops every module switch rewriting
+    /// settings.json.
     /// </summary>
     private void SaveFontSize()
     {
@@ -270,6 +262,8 @@ public partial class TerminalModule : UserControl, IModule
     }
 
     // ---- Clipboard --------------------------------------------------------
+
+    // Ctrl+Shift+C and Ctrl+Shift+V are the whole of it; there are no buttons. See "Keyboard".
 
     /// <summary>A UserControl has no Clipboard of its own; the top level it is in does.</summary>
     private IClipboard? Clipboard => TopLevel.GetTopLevel(this)?.Clipboard;

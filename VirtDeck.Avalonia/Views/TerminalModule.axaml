@@ -11,19 +11,9 @@
          states: Enter and Escape belong to the shell, and a default button would swallow both. -->
     <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
       <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
-          <Button Name="SmallerButton" Content="A-" MinWidth="32"
-                  ToolTip.Tip="Smaller text (Ctrl+scroll)" />
-          <Button Name="LargerButton" Content="A+" MinWidth="32"
-                  ToolTip.Tip="Larger text (Ctrl+scroll)" />
-        </StackPanel>
         <StackPanel Orientation="Horizontal" Spacing="6">
           <Button Name="ReconnectButton" Content="Reconnect" MinWidth="72"
                   ToolTip.Tip="Start a new shell, replacing the one on screen" />
-          <Button Name="CopyButton" Content="Copy" MinWidth="72"
-                  ToolTip.Tip="Copy the selection (Ctrl+Shift+C)" />
-          <Button Name="PasteButton" Content="Paste" MinWidth="72"
-                  ToolTip.Tip="Paste into the shell (Ctrl+Shift+V)" />
         </StackPanel>
       </DockPanel>
     </Border>

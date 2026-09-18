@@ -15,9 +15,7 @@ namespace VirtDeck.Avalonia.Views.Cron;
 ///
 /// <para><b>A convenience and not a rehearsal.</b> cron runs a job with no controlling terminal, no
 /// login profile and a nearly empty environment; this reproduces the shell, cron's own PATH and the
-/// crontab's own assignments, and nothing else. That caveat is on screen before the first byte of
-/// output, because a job that succeeds here and fails at 03:30 is the case this window exists to
-/// help with and it is also the case it can most easily be misread as ruling out.</para>
+/// crontab's own assignments, and nothing else.</para>
 ///
 /// <para>The terminal takes input as well as showing output, which is deliberate: it is what makes
 /// Ctrl+C reach a job that is not going to finish, and what lets a command that asks something be
@@ -44,12 +42,6 @@ public partial class CronRunWindow : Window
         _argv = argv;
         _what = what;
         Title = "Run now: " + what;
-
-        CaveatText.Text =
-            "Running it once, now, as its owner, with cron's own PATH (/usr/bin:/bin) and any "
-            + "settings the crontab makes above it. cron itself runs a job with no terminal and no "
-            + "login profile, so this is close but not identical: a job that works here and fails on "
-            + "its schedule is nearly always a PATH or a HOME.";
 
         // One terminal font for the whole app: the Terminal module writes it and every surface
         // reads it.

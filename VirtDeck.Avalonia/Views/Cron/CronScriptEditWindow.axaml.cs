@@ -95,9 +95,8 @@ public partial class CronScriptEditWindow : Window
 
         WhatText.Text =
             $"run-parts runs every executable file in {(Directory.Length == 0 ? "this directory" : Directory)} "
-            + $"{period}, in name order, as root. It skips any file that is not executable, which is "
-            + "how a script here is switched off, and ignores any name with a dot in it, which is why "
-            + "each of these directories holds a .placeholder that never runs.";
+            + $"{period}, in name order, as root. The name may hold only letters, digits, underscores "
+            + "and hyphens.";
 
         SaveButton.Tag = Path.Length > 0 ? "Write this script to " + Path : "Give the script a name";
     }
@@ -140,7 +139,7 @@ public partial class CronScriptEditWindow : Window
         if (!CronFile.DropInName.IsMatch(name))
         {
             Fail(name.Contains('.')
-                ? $"run-parts ignores any name with a dot in it, so '{name}' would sit there and never run."
+                ? $"run-parts ignores a name with a dot in it, so '{name}' would never run."
                 : $"'{name}' may hold only letters, digits, underscores and hyphens.");
             return;
         }

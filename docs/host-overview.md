@@ -191,12 +191,12 @@ different landing page per host.
   pending reboot draws only on `Needed`, because telling somebody no reboot is needed after a kernel
   upgrade is the one wrong answer that check can give.
 - **Update now is the count made actionable, and it installs nothing.** It is drawn on exactly one
-  of those five answers, the one with something to act on, and what it does is leave the request on
-  the shared service and ask the shell for the page that installs
-  (`IModuleNavigator.ModuleRequested`, a `Type` off the module asking, so the shell still names
-  none). The install itself belongs to `SoftwareUpdatesModule`, which is where the progress strip,
-  the Cancel button, the phase parsing and the confirmation already live; running it from here would
-  be a second copy of all of that behind a button with nowhere to report. It is **not accented**:
+  of those five answers, the one with something to act on, and what it does is ask the shell for the
+  page that installs (`IModuleNavigator.ModuleRequested`, a `Type` off the module asking, so the
+  shell still names none), leaving a note on the shared service so that page opens on its Updates
+  tab. Nothing is started: installing belongs to `SoftwareUpdatesModule`, which is where the progress
+  strip, the Cancel button, the phase parsing and the confirmation already live, and the command is
+  given there. It is **not accented**:
   that class is for the one command on a page that creates something, and this one hands the user to
   a page that asks first. It is disabled with its reason on hover while a package command is already
   running on the host, which is the same `PackageService.Running` that stops this page listing

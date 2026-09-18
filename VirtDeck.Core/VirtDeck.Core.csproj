@@ -26,11 +26,11 @@
          it works from whichever assembly it is embedded in. -->
     <EmbeddedResource Include="Data\*.json" />
 
-    <!-- The Remote Control module's host agent (a static x11vnc plus vdrelay), one tarball per
-         host architecture, built by native/x11vnc/build.sh and uploaded to the host on first use.
+    <!-- The Remote Control module's host agent (one static virtdeck-agent), one tarball per
+         host architecture, built by native/agent/build.sh and uploaded to the host on first use.
          Every build carries both, Windows included: they go to a Linux host, whatever this one is.
          Named by architecture alone so RemoteDesktopService finds them without a manifest. -->
-    <EmbeddedResource Include="..\native\x11vnc\agent-*.tar.gz" LogicalName="VirtDeck.Agent.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\native\agent\agent-*.tar.gz" LogicalName="VirtDeck.Agent.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

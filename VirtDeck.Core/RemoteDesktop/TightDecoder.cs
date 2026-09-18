@@ -4,7 +4,7 @@ using SpiceClient.Imaging;
 namespace VirtDeck.RemoteDesktop
 {
     /// <summary>
-    /// The Tight encoding (RFB encoding 7), the one x11vnc is asked for: a solid fill, a JPEG, or
+    /// The Tight encoding (RFB encoding 7), the one the agent is asked for: a solid fill, a JPEG, or
     /// zlib-compressed pixels passed through one of three filters (copy, palette, gradient).
     ///
     /// <para><b>TPIXEL is three bytes, R then G then B</b>, because the session asks for 32 bpp,
@@ -18,7 +18,7 @@ namespace VirtDeck.RemoteDesktop
     internal sealed class TightDecoder : IDisposable
     {
         /// <summary>Below this many bytes the server sends a rectangle's data raw, with no length and no zlib.</summary>
-        private const int MinToCompress = 12;
+        private const int MinToCompress = RfbProtocol.TightMinToCompress;
 
         private readonly TightInflater[] _streams = [new(), new(), new(), new()];
 
@@ -31,10 +31,10 @@ namespace VirtDeck.RemoteDesktop
             int type = control >> 4;
             switch (type)
             {
-                case 0x08:
+                case RfbProtocol.TightTypeFill:
                     DecodeFill(input, fb, x, y, w, h);
                     return;
-                case 0x09:
+                case RfbProtocol.TightTypeJpeg:
                     DecodeJpeg(input, fb, x, y, w, h);
                     return;
                 case > 0x07:

@@ -112,15 +112,14 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
             graph.IntervalSeconds = HostMetricsService.IntervalSeconds;
         }
 
-        // The whole of what this button does. The request is left on the service the two pages
-        // share and the shell is asked for the page that installs; that page picks the request up
-        // in its own activation, where it is already ordered against its own listing and its own
-        // confirmation. Nothing is installed from here: this page says what the host needs, and the
-        // page that does it is the one with the progress strip and the Cancel button on it.
+        // The whole of what this button does: ask the shell for the page that installs, and leave a
+        // note on the service the two pages share so that page opens on its Updates tab. Nothing is
+        // started. This page says what the host needs; installing it is a command given on the page
+        // with the progress strip and the Cancel button on it.
         UpdateNowButton.Click += (_, _) =>
         {
             if (_packages is null) return;
-            Packages.RequestInstallAll();
+            Packages.RequestUpdatesPage();
             ModuleRequested?.Invoke(typeof(SoftwareUpdatesModule));
         };
 
@@ -659,7 +658,7 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
         UpdateNowButton.Tag = Packages.Running
             ? "A package command is already running on this host. The software updates module is " +
               "where it is reporting."
-            : "Opens the software updates module and installs everything pending.";
+            : "Opens the software updates module.";
 
         // Unknown draws nothing. Telling somebody no reboot is needed after a kernel upgrade is the
         // one wrong answer this check can give, so it does not guess.

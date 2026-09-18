@@ -66,7 +66,19 @@
             </StackPanel>
             <c:FilterBox DockPanel.Dock="Right" Name="JobSearch" Width="220" Margin="10,0,0,0"
                          PlaceholderText="Search command, owner or file"
-                         ToolTip.Tip="Narrows the table in hand (Ctrl+F). Matches the command, the schedule, the owner, the file and the job's own comment." />
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+            <!-- Two kinds of line that are how the host is wired rather than anybody's schedule:
+                 the /etc/crontab entries that run the periodic directories, and the package lines
+                 guarded so they do nothing while systemd is running. On a stock Debian that is six
+                 of the rows here. Off by default, and a toggle rather than a permanent omission
+                 because this table's whole promise is every crontab on the host.
+
+                 In a Border so the tooltip still answers while the box is disabled, which is the
+                 reason every toolbar control here is wrapped in one. -->
+            <Border DockPanel.Dock="Right" Background="Transparent" Margin="10,0,0,0"
+                    ToolTip.Tip="{Binding #PlumbingBox.Tag}">
+              <CheckBox Name="PlumbingBox" Content="Show plumbing" VerticalAlignment="Center" />
+            </Border>
             <Panel />
           </DockPanel>
         </Border>

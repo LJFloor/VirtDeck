@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Remote Control module's host agent: an X11 client on one side and an RFB server on the
+    other, run on the Linux host over an SSH channel's stdin and stdout. It is never referenced by
+    the app and never publishes with it; it ships as bytes, embedded in VirtDeck.Core (see
+    native/agent/build.sh and RemoteDesktop/AgentBundle.cs).
+
+    It IS in VirtDeck.sln, so an ordinary `dotnet build VirtDeck.sln` compiles it as IL and the
+    no-regression gate covers it. The NativeAOT properties are deliberately NOT here: only
+    build-in-alpine.sh passes them, so nobody needs the AOT toolchain to build the solution.
+    IsAotCompatible gives the AOT analysers without pulling ILCompiler into everybody's restore.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>virtdeck-agent</AssemblyName>
+    <RootNamespace>VirtDeck.Agent</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The wire numbers both ends must agree on, written once, in Core. -->
+    <Compile Include="..\..\..\VirtDeck.Core\RemoteDesktop\RfbProtocol.cs" Link="Rfb\RfbProtocol.cs" />
+  </ItemGroup>
+
+</Project>

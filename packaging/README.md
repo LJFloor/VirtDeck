@@ -24,9 +24,9 @@ PulseAudio/PipeWire daemon. A sandboxed format has to be punched open for both: 
 | `io.github.ljfloor.VirtDeck.metainfo.xml` | `/usr/share/metainfo/` | AppStream data for software centres |
 | `70-virtdeck-usb.rules` | `/etc/udev/rules.d/` | USB redirection needs rw access to `/dev/bus/usb/*` |
 
-The image also carries `usr/share/virtdeck/x11vnc-src.tar.gz`, the GPL corresponding source of
-the Remote Control module's host agent (see `native/x11vnc/VERSIONS.txt`). The agent itself is not
-a file here: it is embedded in `VirtDeck.Core` and uploaded to the host it runs on.
+The Remote Control module's host agent is not a file here: it is embedded in `VirtDeck.Core` and
+uploaded to the host it runs on (see `native/agent/`). It is ours, so unlike the x11vnc it replaced
+there is no corresponding-source archive to carry.
 
 `icons/make-icons.py` regenerates every icon (the PNG sizes, the scalable SVG and the Windows
 `.ico`) from one set of numbers. Run it after changing the icon; nothing else rasterises, so no

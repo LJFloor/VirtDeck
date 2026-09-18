@@ -4,26 +4,22 @@ namespace VirtDeck.RemoteDesktop
 {
     /// <summary>
     /// The host side of the Remote Control module: which X displays there are, putting VirtDeck's
-    /// own x11vnc on the host, and starting it with RFB on an SSH channel's stdin and stdout.
+    /// own agent on the host, and starting it with RFB on an SSH channel's stdin and stdout.
     ///
-    /// <para><b>Nothing is installed.</b> The agent (a static x11vnc and vdrelay, see
+    /// <para><b>Nothing is installed.</b> The agent (one static <c>virtdeck-agent</c>, see
     /// <see cref="AgentBundle"/>) is uploaded once per version into the login user's
     /// <c>~/.cache/virtdeck/agent-&lt;hash&gt;/</c>, VS Code server style, and reused by that name on
     /// every later connect. Bundles untouched for 30 days are pruned; the one in use is touched on
     /// every start, so two PCs on different VirtDeck versions never delete each other's.</para>
     ///
-    /// <para><b>Why vdrelay.</b> x11vnc's -inetd mode reads and writes one descriptor, fd 0, which
-    /// on sshd's side of a command without a terminal is a read-only pipe. vdrelay hands x11vnc a
-    /// socket as fd 0 and copies between it and the channel. See <c>native/x11vnc/vdrelay.c</c>.</para>
-    ///
-    /// <para><b>Whose display.</b> The login user's own session runs x11vnc unelevated, with one
+    /// <para><b>Whose display.</b> The login user's own session runs the agent unelevated, with one
     /// elevated retry if the display turns it away; anyone else's session and the login screen run
     /// it through sudo. Every value that reaches the host script (the display, the auth file, the
     /// user, the agent's directory) travels as a NUL-separated argv, never interpolated.</para>
     /// </summary>
     public sealed class RemoteDesktopService(SshConnectionManager ssh)
     {
-        /// <summary>How long a started x11vnc gets to say "RFB 003.008" before it is given up on.</summary>
+        /// <summary>How long a started agent gets to say "RFB 003.008" before it is given up on.</summary>
         private static readonly TimeSpan BannerTimeout = TimeSpan.FromSeconds(15);
 
         /// <summary>The start script's exit status for an agent that is missing or damaged on the host.</summary>
@@ -53,6 +49,13 @@ namespace VirtDeck.RemoteDesktop
         // it names whose session a display is, whether it is the one on screen, which one is the
         // login screen (Class=greeter), and which active session is Wayland, which is the answer
         // to "why is there nothing to connect to" on a modern desktop.
+        //
+        // `t` per tool a virtual desktop needs, and `d` per desktop session the host offers, which
+        // together are the answer to "can this host be given one, and what would run in it". The
+        // desktop entries are read the way a display manager reads them: the first `Name=` and
+        // `Exec=` of every `.desktop` in the two xsessions directories, minus the hidden ones and
+        // the ones whose program is gone. Both fields are unbounded and there are two of them, so
+        // each travels base64'd rather than raw (see ShellScript.Decode).
         private const string ProbeScript = """
             export LC_ALL=C
             printf 'a\t%s\n' "$(uname -m)"
@@ -79,6 +82,20 @@ namespace VirtDeck.RemoteDesktop
                 printf '\n'
               done
             fi
+            for m in Xvfb xauth dbus-run-session; do
+              command -v "$m" >/dev/null 2>&1 && printf 't\t%s\n' "$m"
+            done
+            for f in /usr/share/xsessions/*.desktop /usr/local/share/xsessions/*.desktop; do
+              [ -r "$f" ] || continue
+              grep -qi '^\(Hidden\|NoDisplay\)=true' "$f" && continue
+              e=$(sed -n 's/^Exec=//p' "$f" | head -n 1)
+              [ -n "$e" ] || continue
+              command -v "${e%% *}" >/dev/null 2>&1 || continue
+              n=$(sed -n 's/^Name=//p' "$f" | head -n 1)
+              printf 'd\t%s\t%s\n' \
+                "$(printf '%s' "${n:-${f##*/}}" | base64 | tr -d '\n')" \
+                "$(printf '%s' "$e" | base64 | tr -d '\n')"
+            done
             exit 0
             """;
 
@@ -109,6 +126,8 @@ namespace VirtDeck.RemoteDesktop
             var cached = new HashSet<string>(StringComparer.Ordinal);
             var servers = new List<(string Display, string Comm, string Owner, string Auth)>();
             var sessions = new List<Dictionary<string, string>>();
+            var tools = new HashSet<string>(StringComparer.Ordinal);
+            var desktops = new List<DesktopSession>();
 
             foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
             {
@@ -123,6 +142,18 @@ namespace VirtDeck.RemoteDesktop
                         var f = text.Split('\t', 4);
                         if (f.Length >= 3)
                             servers.Add((f[0], f[1], f[2], f.Length > 3 ? f[3] : ""));
+                        break;
+                    }
+                    case "t": tools.Add(text.Trim()); break;
+                    case "d":
+                    {
+                        var f = text.Split('\t');
+                        if (f.Length < 2) break;
+                        var exec = ShellScript.Decode(f[1]);
+                        var name = ShellScript.Decode(f[0]);
+                        // Two directories offer the same desktop on plenty of hosts.
+                        if (exec.Length > 0 && !desktops.Any(d => d.Exec == exec))
+                            desktops.Add(new DesktopSession(name.Length > 0 ? name : exec, exec));
                         break;
                     }
                     case "s":
@@ -167,8 +198,11 @@ namespace VirtDeck.RemoteDesktop
                 else
                 {
                     // Nothing in logind says whose it is; a server running as a user is theirs.
+                    // Its auth file says whether VirtDeck started it: that is what the module's End
+                    // keys on, so nothing can be told to shut down a display we did not put there.
                     item = new X11Session(server.Display, server.Owner == "root" ? "" : server.Owner,
-                                          X11SessionKind.Server, false, server.Auth);
+                                          IsOurs(home, server.Auth) ? X11SessionKind.Virtual : X11SessionKind.Server,
+                                          false, server.Auth);
                 }
                 found.Add(item);
             }
@@ -188,13 +222,129 @@ namespace VirtDeck.RemoteDesktop
                 .ToList();
 
             return new RemoteDesktopProbe(arch, user, home, ordered,
-                                          wayland is null ? "" : Prop(wayland, "Name"), cached);
+                                          wayland is null ? "" : Prop(wayland, "Name"), cached,
+                                          desktops, tools);
+        }
+
+        /// <summary>The host directory VirtDeck keeps a virtual desktop's credentials and log in.</summary>
+        private static string VirtualDir(string home) => home.TrimEnd('/') + "/.cache/virtdeck/x11";
+
+        /// <summary>Whether that X server's auth file is one this app wrote, so the display is ours.</summary>
+        private static bool IsOurs(string home, string auth) =>
+            home.Length > 0 && auth.StartsWith(VirtualDir(home) + "/", StringComparison.Ordinal);
+
+        /// <summary>
+        /// The screen a virtual desktop's Xvfb is given, which is its <b>maximum</b> and not a fixed
+        /// mode: RandR can set the screen to anything at or below it and nothing can push it above,
+        /// so this is the ceiling the module's auto-resize works under. 4K covers the screens people
+        /// actually put VirtDeck on, and costs the host about 33 MB of framebuffer whatever size the
+        /// desktop is really being shown at. The desktop starts at this size and is resized to the
+        /// window as soon as the agent is asked for a picture. See "A desktop of our own".
+        /// </summary>
+        private const string VirtualScreen = "3840x2160x24";
+
+        /// <summary>
+        /// Starts an Xvfb on the host, runs <paramref name="desktop"/> in it, and answers the
+        /// display it took. Unelevated: it is the login user's own desktop, on the login user's own
+        /// display, and SSH already said who they are, so there is nothing to log in to.
+        ///
+        /// <para><b>It outlives this call and this connection.</b> Server and desktop are both
+        /// <c>setsid</c>'d away from the channel with their output in a log beside the auth file, so
+        /// closing VirtDeck leaves the desktop where it was; the next probe finds it by its lock
+        /// file like any other X server and the module offers to end it. Xvfb gets
+        /// <c>-noreset</c> so the last client leaving does not take the display with it.</para>
+        ///
+        /// <para>The desktop's command line comes from the host's own <c>.desktop</c> files and
+        /// goes back as an argv member, never interpolated into the script.</para>
+        /// </summary>
+        public async Task<X11Session> StartVirtualDesktopAsync(RemoteDesktopProbe probe, DesktopSession? desktop,
+                                                               CancellationToken ct = default)
+        {
+            if (probe.StartBlockedReason is { Length: > 0 } blocked) throw new InvalidOperationException(blocked);
+
+            var script = ShellScript.ArrayFrom("v", [desktop?.Exec ?? "", VirtualScreen]) + """
+                d="$HOME/.cache/virtdeck/x11"
+                mkdir -p "$d" && chmod 700 "$d" || { printf 'e\t%s\n' "Could not create $d on the host."; exit 0; }
+                n=""
+                for c in 9 10 11 12 13 14 15 16 17 18 19 20; do
+                  [ -e "/tmp/.X$c-lock" ] || [ -e "/tmp/.X11-unix/X$c" ] || { n=$c; break; }
+                done
+                [ -n "$n" ] || { printf 'e\t%s\n' "Every display from :9 to :20 is in use on this host."; exit 0; }
+                auth="$d/display$n.auth"
+                log="$d/display$n.log"
+                : > "$log" || { printf 'e\t%s\n' "Could not write $log on the host."; exit 0; }
+                rm -f "$auth"
+                # Created empty and private first: xauth would make it 644 on the way to holding a
+                # cookie, and a cookie is a password for the display.
+                (umask 077; : > "$auth") || { printf 'e\t%s\n' "Could not write $auth on the host."; exit 0; }
+                cookie=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+                [ ${#cookie} -eq 32 ] || { printf 'e\t%s\n' "Could not make an X cookie on the host."; exit 0; }
+                xauth -q -f "$auth" add ":$n" MIT-MAGIC-COOKIE-1 "$cookie" >>"$log" 2>&1 ||
+                  { printf 'e\t%s\n' "xauth could not write $auth: $(tail -n 2 "$log" | tr '\n' ' ')"; exit 0; }
+                setsid Xvfb ":$n" -screen 0 "${v[1]}" -auth "$auth" -nolisten tcp -noreset </dev/null >>"$log" 2>&1 &
+                i=0
+                while [ "$i" -lt 60 ] && [ ! -e "/tmp/.X11-unix/X$n" ]; do sleep 0.25; i=$((i+1)); done
+                [ -e "/tmp/.X11-unix/X$n" ] ||
+                  { printf 'e\t%s\n' "Xvfb did not start: $(tail -n 3 "$log" | tr '\n' ' ')"; exit 0; }
+                if [ -n "${v[0]}" ]; then
+                  [ -n "$XDG_RUNTIME_DIR" ] || { r="/run/user/$(id -u)"; [ -d "$r" ] && export XDG_RUNTIME_DIR="$r"; }
+                  export DISPLAY=":$n" XAUTHORITY="$auth" XDG_SESSION_TYPE=x11 XDG_SESSION_CLASS=user
+                  if command -v dbus-run-session >/dev/null 2>&1; then
+                    setsid dbus-run-session -- sh -c "${v[0]}" </dev/null >>"$log" 2>&1 &
+                  else
+                    setsid sh -c "${v[0]}" </dev/null >>"$log" 2>&1 &
+                  fi
+                fi
+                printf 'n\t:%s\t%s\n' "$n" "$auth"
+                exit 0
+                """;
+
+            var raw = await Task.Run(() => ssh.RunCommand(ShellScript.Wrap(script)), ct);
+            foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
+            {
+                if (tag == "e") throw new InvalidOperationException(text.Trim());
+                if (tag != "n") continue;
+                var f = text.Split('\t', 2);
+                if (f.Length == 2)
+                    return new X11Session(f[0], probe.LoginUser, X11SessionKind.Virtual, false, f[1]);
+            }
+            throw new InvalidOperationException("The host said nothing about the desktop it was asked to start.");
+        }
+
+        /// <summary>
+        /// Shuts down a virtual desktop. The script re-checks that the display is really one of
+        /// ours before it signals anything, because "which display is this" is exactly the thing
+        /// that can have changed since the probe: a lock file is a number, and a number is reused.
+        /// Killing the X server is what ends the desktop, since its clients cannot outlive it.
+        /// </summary>
+        public async Task EndVirtualDesktopAsync(X11Session target, CancellationToken ct = default)
+        {
+            var script = ShellScript.ArrayFrom("v", [target.Display.TrimStart(':'), target.AuthFile]) + """
+                n=${v[0]}
+                pid=$(tr -d ' \n' < "/tmp/.X$n-lock" 2>/dev/null)
+                [ -n "$pid" ] && [ -d "/proc/$pid" ] ||
+                  { printf 'e\t%s\n' "Display :$n is not running any more."; exit 0; }
+                auth=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | sed -n '/^-auth$/{n;p;q;}')
+                case "$auth" in "$HOME/.cache/virtdeck/x11/"*) ;; *) auth="" ;; esac
+                [ -n "$auth" ] && [ "$auth" = "${v[1]}" ] ||
+                  { printf 'e\t%s\n' "Display :$n is not the virtual desktop VirtDeck started, so it was left alone."; exit 0; }
+                kill "$pid" 2>/dev/null
+                i=0
+                while [ "$i" -lt 20 ] && [ -d "/proc/$pid" ]; do sleep 0.25; i=$((i+1)); done
+                [ -d "/proc/$pid" ] && kill -9 "$pid" 2>/dev/null
+                rm -f "${v[1]}"
+                exit 0
+                """;
+
+            var raw = await Task.Run(() => ssh.RunCommand(ShellScript.Wrap(script)), ct);
+            foreach (var (tag, text) in Updates.PackageScripts.Records(raw))
+                if (tag == "e") throw new InvalidOperationException(text.Trim());
         }
 
         /// <summary>Whether this VirtDeck carries an agent for that architecture at all.</summary>
         public static bool HasAgentFor(string arch) => AgentBundle.For(arch) is not null;
 
-        /// <summary>The embedded agent's x11vnc version line for that architecture, or empty.</summary>
+        /// <summary>The embedded agent's version line for that architecture, or empty.</summary>
         public static string AgentVersion(string arch) => AgentBundle.For(arch)?.Version ?? "";
 
         /// <summary>
@@ -217,18 +367,17 @@ namespace VirtDeck.RemoteDesktop
                     return dir;
             }
 
-            var script = ShellScript.ArrayFrom("v", [bundle.DirName, bundle.X11vncSha256, bundle.RelaySha256]) + """
+            var script = ShellScript.ArrayFrom("v", [bundle.DirName, bundle.Sha256, AgentBundle.AgentName]) + """
                 d="$HOME/.cache/virtdeck"
                 mkdir -p "$d" && chmod 700 "$d" || exit 1
                 t=$(mktemp -d "$d/.upload.XXXXXX") || exit 1
                 trap 'rm -rf "$t"' EXIT
                 tar -xf - -C "$t" || exit 1
                 if command -v sha256sum >/dev/null 2>&1; then
-                  [ "$(sha256sum < "$t/x11vnc" | cut -d' ' -f1)" = "${v[1]}" ] &&
-                  [ "$(sha256sum < "$t/vdrelay" | cut -d' ' -f1)" = "${v[2]}" ] ||
+                  [ "$(sha256sum < "$t/${v[2]}" | cut -d' ' -f1)" = "${v[1]}" ] ||
                     { echo "The remote control agent arrived damaged." >&2; exit 1; }
                 fi
-                chmod 755 "$t/x11vnc" "$t/vdrelay" && chmod 700 "$t" || exit 1
+                chmod 755 "$t/${v[2]}" && chmod 700 "$t" || exit 1
                 rm -rf "$d/${v[0]}"
                 mv "$t" "$d/${v[0]}" || exit 1
                 trap - EXIT
@@ -256,11 +405,21 @@ namespace VirtDeck.RemoteDesktop
         }
 
         /// <summary>
-        /// Starts x11vnc on <paramref name="target"/> and returns the session once it has spoken.
-        /// Throws with the most telling thing x11vnc or sudo wrote to stderr when it does not.
+        /// Starts the agent on <paramref name="target"/> and returns the session once it has spoken.
+        /// Throws with the most telling thing the agent or sudo wrote to stderr when it does not.
+        ///
+        /// <para>With <c>VIRTDECK_LOCAL_AGENT</c> set the agent is run on this machine instead, over
+        /// an ordinary pipe, and the host is not touched at all. See <see cref="LocalAgentPipe"/>.</para>
         /// </summary>
+        /// <param name="desktopSize">
+        /// The size to ask a virtual desktop for, given to the session before it starts so that it
+        /// travels in the handshake: the desktop was made at its Xvfb's full screen, and a whole
+        /// frame of that before it shrinks is a frame paid for nothing. Ignored for any other
+        /// display, which the agent is not started able to resize anyway.
+        /// </param>
         public async Task<RemoteDesktopConnection> OpenAsync(RemoteDesktopProbe probe, string agentDir,
                                                              X11Session target, bool elevated,
+                                                             (int Width, int Height)? desktopSize,
                                                              CancellationToken ct)
         {
             var bundle = AgentBundle.For(probe.Arch)
@@ -268,18 +427,18 @@ namespace VirtDeck.RemoteDesktop
 
             // The auth file the server was started with when this account can read it; else the
             // session user's ~/.Xauthority (a user's own session under LightDM, whose server file is
-            // root's); else none at all. Not x11vnc's own `-auth guess`: its search shells out to
-            // tools a modern host lacks (netstat), and what it failed with read as nonsense, where a
-            // display that wants a cookie it was not given says so plainly, and that plain refusal
-            // is what the elevated retry keys on. -inetd serves this one viewer and exits with it.
+            // root's); else none at all. Nothing guesses: a display that wants a cookie it was not
+            // given says so plainly, and that plain refusal is what the elevated retry keys on.
+            // A desktop VirtDeck started is the one screen the agent may resize, and it is told so
+            // here rather than trusting the viewer to only ask where it should.
+            bool resizable = target.Kind == X11SessionKind.Virtual;
             var script = ShellScript.ArrayFrom("v",
                              [agentDir, target.Display, target.AuthFile, target.User,
-                              bundle.X11vncSha256, bundle.RelaySha256]) + """
-                d=${v[0]}; x="$d/x11vnc"; r="$d/vdrelay"
-                [ -x "$x" ] && [ -x "$r" ] || { echo "The remote control agent is missing from $d. Connect again to put it back." >&2; exit 97; }
+                              bundle.Sha256, AgentBundle.AgentName, resizable ? "1" : ""]) + """
+                d=${v[0]}; a="$d/${v[5]}"
+                [ -x "$a" ] || { echo "The remote control agent is missing from $d. Connect again to put it back." >&2; exit 97; }
                 if command -v sha256sum >/dev/null 2>&1; then
-                  [ "$(sha256sum < "$x" | cut -d' ' -f1)" = "${v[4]}" ] &&
-                  [ "$(sha256sum < "$r" | cut -d' ' -f1)" = "${v[5]}" ] ||
+                  [ "$(sha256sum < "$a" | cut -d' ' -f1)" = "${v[4]}" ] ||
                     { echo "The remote control agent in $d is damaged. Connect again to replace it." >&2; exit 97; }
                 fi
                 touch "$d" 2>/dev/null
@@ -290,19 +449,18 @@ namespace VirtDeck.RemoteDesktop
                   [ -n "${v[3]}" ] && home=$(getent passwd "${v[3]}" 2>/dev/null | cut -d: -f6)
                   [ -n "$home" ] && [ -r "$home/.Xauthority" ] && auth="$home/.Xauthority"
                 fi
-                set -- -inetd -display "${v[1]}" -nopw -norc -shared -noncache -noxrecord -nowf \
-                  -noprimary -xkb -add_keysyms -clear_mods -xrandr newfbsize -nonap
-                [ -n "$auth" ] && set -- "$@" -auth "$auth"
-                # x11vnc refuses to start when WAYLAND_DISPLAY is set, whatever -display says. An exec
-                # channel does not normally carry it; a host whose login environment does must not
-                # turn an X display away because of it.
-                unset WAYLAND_DISPLAY
-                exec "$r" "$x" "$@"
+                set -- --display "${v[1]}"
+                [ -n "$auth" ] && set -- "$@" --auth "$auth"
+                [ -n "${v[6]}" ] && set -- "$@" --resizable
+                exec "$a" "$@"
                 """;
 
-            var pipe = await ssh.OpenPipeAsync(script, elevated, ct);
+            ICommandPipe pipe = LocalAgentPipe.Path is { } local
+                ? new LocalAgentPipe(local, target.Display, target.AuthFile, resizable)
+                : await ssh.OpenPipeAsync(script, elevated, ct);
             var session = new RfbSession(pipe.Output, pipe.Input, pipe);
             var connection = new RemoteDesktopConnection(session, pipe, target, elevated);
+            if (resizable && desktopSize is { } size) session.RequestDesktopSize(size.Width, size.Height);
             session.Start();
 
             try
@@ -340,12 +498,13 @@ namespace VirtDeck.RemoteDesktop
         }
 
         /// <summary>
-        /// x11vnc could not open the display, as opposed to failing some other way. For the login
+        /// The agent could not open the display, as opposed to failing some other way. For the login
         /// user's own session that is what an elevated retry can fix (an auth file only root reads).
         /// </summary>
         internal static bool IsDisplayRefusal(string stderr) =>
             stderr.Contains("XOpenDisplay", StringComparison.Ordinal) ||
             stderr.Contains("Authorization required", StringComparison.OrdinalIgnoreCase) ||
+            stderr.Contains("refused the connection", StringComparison.OrdinalIgnoreCase) ||
             stderr.Contains("MIT-MAGIC-COOKIE", StringComparison.Ordinal);
     }
 
@@ -357,7 +516,7 @@ namespace VirtDeck.RemoteDesktop
     }
 
     /// <summary>A running remote desktop: the RFB session, and the channel under it for its stderr.</summary>
-    public sealed class RemoteDesktopConnection(RfbSession session, SshPipe pipe, X11Session target, bool elevated)
+    public sealed class RemoteDesktopConnection(RfbSession session, ICommandPipe pipe, X11Session target, bool elevated)
         : IDisposable
     {
         public RfbSession Session { get; } = session;
@@ -365,14 +524,14 @@ namespace VirtDeck.RemoteDesktop
         public bool Elevated { get; } = elevated;
 
         /// <summary>
-        /// The most telling lines x11vnc, vdrelay or sudo wrote to stderr: the last few that are not
-        /// x11vnc's routine chatter, with its timestamps taken off.
+        /// The most telling lines the agent or sudo wrote to stderr: the last few that are not
+        /// routine chatter, with any leading timestamp taken off.
         /// </summary>
         public string Diagnosis()
         {
             var excerpt = Excerpt();
             if (RemoteDesktopService.IsDisplayRefusal(pipe.StderrTail))
-                return $"x11vnc could not open display {Target.Display}: it may have ended, or this account " +
+                return $"The agent could not open display {Target.Display}: it may have ended, or this account " +
                        $"may not be allowed to use it. ({excerpt})";
             return excerpt;
         }
@@ -395,7 +554,7 @@ namespace VirtDeck.RemoteDesktop
                             l.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                             l.Contains("sudo", StringComparison.OrdinalIgnoreCase) ||
                             l.Contains("remote control agent", StringComparison.OrdinalIgnoreCase) ||
-                            l.StartsWith("vdrelay", StringComparison.Ordinal))
+                            l.StartsWith("virtdeck-agent", StringComparison.Ordinal))
                 .Distinct()
                 .TakeLast(3)
                 .ToList();
