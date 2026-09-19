@@ -572,6 +572,57 @@ namespace VirtDeck.Services
         }
 
         /// <summary>
+        /// Runs a sudo command on a brand new connection and answers its output, giving up after
+        /// <paramref name="timeout"/> whether that is spent connecting or running.
+        ///
+        /// <para>This is the network module's "can this PC still reach the host" test, and the
+        /// reason it is not <see cref="RunSudoCommandStreaming"/>: that one connects synchronously
+        /// under SSH.NET's 30 second default and cannot be cancelled while it does, and the question
+        /// here has to be answered well inside a NetworkManager rollback window. A connection that
+        /// is already open proves nothing about a change to the network, because TCP outlives a
+        /// short outage; only a new one shows what somebody connecting now would get.</para>
+        ///
+        /// <para>Like its streaming sibling it neither escapes <paramref name="command"/> nor wraps
+        /// it in a shell.</para>
+        /// </summary>
+        public async Task<string> RunSudoOnFreshConnectionAsync(string command, TimeSpan timeout, CancellationToken ct)
+        {
+            if (_client is null)
+                throw new InvalidOperationException("SSH is not connected.");
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeout);
+            using var fresh = new SshClient(_client.ConnectionInfo);
+            try
+            {
+                await fresh.ConnectAsync(cts.Token);
+                return await Task.Run(() =>
+                {
+                    using var cmd = fresh.CreateCommand($"sudo -S -p '' {command}");
+                    using var reg = cts.Token.Register(() =>
+                    {
+                        try { cmd.CancelAsync(); } catch { }
+                        try { fresh.Disconnect(); } catch { }
+                    });
+                    var ar = cmd.BeginExecute();
+                    FeedSudoPassword(cmd);
+                    cmd.EndExecute(ar);
+                    cts.Token.ThrowIfCancellationRequested();
+
+                    var output = cmd.Result;
+                    Interlocked.Add(ref _bytesReceived, output.Length);
+                    return cmd.ExitStatus == 0
+                        ? output
+                        : throw new Exception($"Command failed (exit {cmd.ExitStatus}): {StripSudoPrompt(cmd.Error)}{output}".TrimEnd());
+                }, CancellationToken.None);
+            }
+            finally
+            {
+                try { fresh.Disconnect(); } catch { }
+            }
+        }
+
+        /// <summary>
         /// Runs a command as the login user on a dedicated connection, calling
         /// <paramref name="onLine"/> for each line of stdout. Blocks until the command exits. Throws
         /// on non-zero exit status.

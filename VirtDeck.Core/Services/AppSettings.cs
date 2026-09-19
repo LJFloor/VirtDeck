@@ -153,6 +153,14 @@ namespace VirtDeck.Services
         public bool CronShowPlumbing { get; set; }
 
         /// <summary>
+        /// Whether the network module's Interfaces table shows the per-guest links: a container's
+        /// veth and a VM's tap, one per guest, which on a busy docker host outnumber everything else
+        /// in the table. Off by default, and one answer for every host for the reason
+        /// <see cref="CronShowPlumbing"/> gives.
+        /// </summary>
+        public bool NetworkShowGuests { get; set; }
+
+        /// <summary>
         /// Height in pixels of the VM module's details pane, the one layout value in this file.
         /// Read back through <see cref="VmDetailsHeightOrDefault"/>, which clamps it: a hand-edited
         /// or corrupted number must never be able to push the VM list off the screen, which is the

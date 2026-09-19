@@ -1,0 +1,68 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Network.FirewallAddDialog"
+        Title="Allow traffic"
+        Width="500" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="AddButton" Content="Add" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <StackPanel Orientation="Horizontal" Spacing="16">
+        <RadioButton Name="ServiceRadio" GroupName="what" Content="A service" IsChecked="True" />
+        <RadioButton Name="PortsRadio" GroupName="what" Content="Ports" />
+      </StackPanel>
+
+      <!-- Controls that do not apply to this firewall are disabled rather than hidden, and hang off
+           a Border so the reason still shows on hover. -->
+      <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Name="ServiceLabel" Text="Service" VerticalAlignment="Center" />
+        <!-- A dropdown of what the host defines, since nothing else can be allowed by name.
+             Typing jumps to an entry, which is what makes firewalld's two hundred usable. -->
+        <ComboBox Grid.Row="0" Grid.Column="1" Name="ServiceBox" HorizontalAlignment="Stretch"
+                  MaxDropDownHeight="320" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Ports" VerticalAlignment="Center" />
+        <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,8,130">
+          <TextBox Grid.Column="0" Name="PortsBox" PlaceholderText="8080, 9000-9010" />
+          <ComboBox Grid.Column="2" Name="ProtocolBox" HorizontalAlignment="Stretch" SelectedIndex="0">
+            <ComboBoxItem Content="TCP" />
+            <ComboBoxItem Content="UDP" />
+            <ComboBoxItem Content="TCP and UDP" />
+          </ComboBox>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="From" VerticalAlignment="Center" />
+        <TextBox Grid.Row="2" Grid.Column="1" Name="FromBox" PlaceholderText="anywhere" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Name="ScopeLabel" Text="Zone" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="3" Grid.Column="1" Name="ScopeBox" HorizontalAlignment="Stretch" />
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Action" VerticalAlignment="Center" />
+        <Border Grid.Row="4" Grid.Column="1" Name="ActionHost" Background="Transparent">
+          <ComboBox Name="ActionBox" HorizontalAlignment="Stretch" SelectedIndex="0">
+            <ComboBoxItem Content="allow" />
+            <ComboBoxItem Content="limit" />
+            <ComboBoxItem Content="deny" />
+            <ComboBoxItem Content="reject" />
+          </ComboBox>
+        </Border>
+
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="Comment" VerticalAlignment="Center" />
+        <Border Grid.Row="5" Grid.Column="1" Name="CommentHost" Background="Transparent">
+          <TextBox Name="CommentBox" />
+        </Border>
+      </Grid>
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

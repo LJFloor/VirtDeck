@@ -235,17 +235,32 @@ cross-check and is not ported (it is MPL, and Core is proprietary).
 maximum, not a fixed mode**, which is the whole reason this is possible at all and why the server is
 started at 4K.
 
-- **The sequence is the one xrandr performs**, and its order is not arbitrary: a mode added to the
-  output moves the configuration timestamp on, and the screen cannot shrink under a CRTC still
-  driving a larger mode. So: read the resources, get a mode of the wanted size, add it to the
-  output, read them again, turn the CRTC **off**, set the screen size, read them again, and turn the
-  CRTC back on at the new mode. The re-reads are three requests on a unix socket and they are what
-  keeps the timestamps the server checks from ever being stale.
+- **The sequence is the one xrandr performs**, and its order is not arbitrary: the screen cannot
+  shrink under a CRTC still driving a larger mode, and every change to what modes the output has
+  moves the server's configuration timestamp on. So: read the resources, turn the CRTC **off**, take
+  the mode this agent last made off the output, put the new one on, set the screen size, read the
+  resources again, and turn the CRTC back on at the new mode. Both timestamps the CRTC requests
+  carry are what the server is told to stamp the configuration with, not a promise about what it
+  looks like now.
+- **The whole sequence runs under a server grab, and the CRTC is set with `CurrentTime`.** A desktop
+  that manages displays itself (GNOME's mutter, and the same code in its forks) answers every screen
+  change by comparing the server's two RANDR timestamps: a configuration time later than the set
+  time means a hotplug, and a hotplug means re-applying **its own** configuration, which on an Xvfb
+  is the output's first mode, which is the 4K the server was started at. The grab is what keeps it
+  from ever seeing the half-configured state in the middle of the sequence (it is why xrandr grabs,
+  and mutter grabs for its own reconfigurations too), and `CurrentTime` is what leaves the set time
+  newer than the configuration time the new mode moved on. Handing back the timestamp that was read,
+  as this did at first, freezes the set time for the life of the server, so every later change looks
+  like a hotplug: that is why a GNOME desktop jumped to 4K the moment the window was resized, while
+  xfce4, which manages nothing, stayed where it was put. Measured against Xvfb with a mutter-derived
+  window manager on it: three resizes the old way, three reconfigurations by the desktop; three the
+  new way, none.
 - **A mode the server already has is used, and only then is one made.** A mode outlives the agent
   that created it (it stays on the output, and the CRTC is on it), so the session before this one
   left its own behind; `RRCreateMode` with a name that exists is `BadName`, and the name is the
   size. Looking first is what keeps those two from ever meeting. A mode this agent did make is taken
-  off the output when it moves away from it, so a dragged window edge does not leave a trail.
+  off the output when it moves away from it, so a dragged window edge does not leave a trail; that
+  happens with the CRTC already off, since a mode in use cannot go.
 - **Nothing here can end a session.** A display that refuses says so on stderr once per size and the
   picture carries on at the size it has.
 - **A capture can be overtaken by a resize.** GetImage of a root that has just shrunk is `BadMatch`,

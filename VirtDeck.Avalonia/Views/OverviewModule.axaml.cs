@@ -723,8 +723,7 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
     /// Binary units per second, matching <see cref="MountRow.Bytes"/>, so a figure means the same
     /// thing everywhere on this page.
     /// </summary>
-    private static string Rate(double bytesPerSecond) =>
-        $"{MountRow.Bytes((long)Math.Round(bytesPerSecond))}/s";
+    private static string Rate(double bytesPerSecond) => MountRow.Rate(bytesPerSecond);
 
     private static string Uptime(double seconds)
     {

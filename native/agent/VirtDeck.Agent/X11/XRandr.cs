@@ -20,11 +20,30 @@ namespace VirtDeck.Agent.X11
     /// the output moves the configuration timestamp on, and the screen cannot shrink under a CRTC
     /// that is still driving a larger mode, so the CRTC goes off first and comes back on the new
     /// mode afterwards.</para>
+    ///
+    /// <para><b>The desktop is watching, and it has opinions.</b> A desktop with a display manager
+    /// of its own (GNOME's mutter, and the same code in its forks) answers every screen change by
+    /// reading the server's two RANDR timestamps: when the configuration time is the later of the
+    /// two it takes the change for a hotplug and re-applies <i>its own</i> configuration, which on
+    /// an Xvfb means the output's first mode, which is the 4K the server was started at. Two things
+    /// keep that from happening, and both are what xrandr itself does: the whole sequence is done
+    /// under a <b>server grab</b>, so nobody sees the half-configured state in between, and each
+    /// CRTC configuration carries <b>CurrentTime</b> rather than the timestamp that was read, so
+    /// the set time the server is left with is newer than the configuration time the new mode moved
+    /// on. Handing back the timestamp that was read leaves the set time where it was for ever, so
+    /// every later change looks like a hotplug too; that is how a resized window became 4K.</para>
     /// </summary>
     internal sealed class XRandr
     {
         private const ushort ScreenChangeNotifyMask = 1;
         private const ushort Rotate0 = 1;
+
+        /// <summary>The server's own time, which is what a client asks the server to stamp a change with.</summary>
+        private const uint CurrentTime = 0;
+
+        // Core opcodes, for holding every other client out of the reconfiguration.
+        private const byte GrabServer = 36;
+        private const byte UngrabServer = 37;
 
         // Minor opcodes, all of them RANDR 1.2, which is the version XExtensions asks for.
         private const byte SelectInput = 4;
@@ -107,7 +126,22 @@ namespace VirtDeck.Agent.X11
 
             try
             {
-                return Apply(width, height);
+                var (minWidth, minHeight, maxWidth, maxHeight) = SizeRange();
+                width = Math.Clamp(width, Math.Max(MinimumSide, minWidth), maxWidth);
+                height = Math.Clamp(height, Math.Max(MinimumSide, minHeight), maxHeight);
+
+                var now = Measure();
+                if (now.Width == width && now.Height == height) return null;
+
+                Grab();
+                try
+                {
+                    return Apply(width, height);
+                }
+                finally
+                {
+                    Ungrab();
+                }
             }
             catch (XProtocolException ex)
             {
@@ -117,18 +151,21 @@ namespace VirtDeck.Agent.X11
             }
         }
 
+        /// <summary>
+        /// The reconfiguration itself, with the server grabbed. <b>Every change to what modes the
+        /// output has happens between the CRTC going off and the screen being resized</b>, so that
+        /// the configuration timestamp they move on has been told to everybody by the time the CRTC
+        /// comes back on; the set time the CRTC then leaves behind is the later of the two, which is
+        /// what a desktop's own display manager reads to tell a hotplug from somebody resizing the
+        /// screen.
+        /// </summary>
         private string? Apply(int width, int height)
         {
-            var (minWidth, minHeight, maxWidth, maxHeight) = SizeRange();
-            width = Math.Clamp(width, Math.Max(MinimumSide, minWidth), maxWidth);
-            height = Math.Clamp(height, Math.Max(MinimumSide, minHeight), maxHeight);
-
-            var now = Measure();
-            if (now.Width == width && now.Height == height) return null;
-
             var screen = Read();
             if (screen.Crtc == 0 || screen.Output == 0)
                 return "this display has no RANDR output, so its size is fixed";
+
+            if (Configure(screen, mode: 0, output: 0) is { } off) return off;
 
             // A mode of that size the server already has is the one to use, and there usually is
             // one: a mode outlives the agent that made it, so the session before this one left its
@@ -137,21 +174,23 @@ namespace VirtDeck.Agent.X11
             var mode = screen.ModeOf(width, height);
             bool created = mode == 0;
             if (created) mode = MakeMode(width, height);
-            AddMode(screen.Output, mode);
 
-            screen = Read(); // the new mode moved the configuration timestamp on
-            if (Configure(screen, mode: 0, output: 0) is { } off) return off;
+            // A mode this agent made and is moving off goes with it, or the server would be handed a
+            // new one for every size the window is ever dragged to. It can only go now that the CRTC
+            // is off it. One the server already had is left where it was found.
+            if (_ours != 0 && _ours != mode)
+            {
+                DropMode(screen.Output, _ours);
+                _ours = 0;
+            }
+
+            AddMode(screen.Output, mode);
+            if (created) _ours = mode;
 
             SetSize(width, height);
 
-            screen = Read();
+            screen = Read(); // the modes moved the configuration timestamp on, and this reads it back
             if (Configure(screen, mode, screen.Output) is { } on) return on;
-
-            // A mode this agent made and has now moved off goes with it, or the server would be
-            // handed a new one for every size the window is ever dragged to. One the server already
-            // had is left where it was found.
-            if (_ours != 0 && _ours != mode) DropMode(screen.Output, _ours);
-            _ours = created ? mode : 0;
 
             Interlocked.Exchange(ref _changed, 1);
             return null;
@@ -201,7 +240,7 @@ namespace VirtDeck.Agent.X11
                            BinaryPrimitives.ReadUInt16LittleEndian(extra[(at + 4)..]),
                            BinaryPrimitives.ReadUInt16LittleEndian(extra[(at + 6)..])));
 
-            return new Screen(reply.U32(8), reply.U32(12), crtc, output, modes);
+            return new Screen(reply.U32(12), crtc, output, modes);
         }
 
         /// <summary>
@@ -284,6 +323,24 @@ namespace VirtDeck.Agent.X11
             _x.Send(request);
         }
 
+        /// <summary>
+        /// Holds every other client out until <see cref="Ungrab"/>. Their requests are not refused,
+        /// they wait, so what a desktop reads about the screen after this is the finished state and
+        /// never one of the steps on the way there. It is what xrandr does for the same reason, and
+        /// what mutter does when it reconfigures a screen itself.
+        /// </summary>
+        private void Grab() => Server(GrabServer);
+
+        private void Ungrab() => Server(UngrabServer);
+
+        private void Server(byte opcode)
+        {
+            Span<byte> request = stackalloc byte[4];
+            request[0] = opcode;
+            BinaryPrimitives.WriteUInt16LittleEndian(request[2..], 1);
+            _x.Send(request);
+        }
+
         /// <summary>Puts the CRTC on that mode, or off with mode and output 0. Null when it took.</summary>
         private string? Configure(Screen screen, uint mode, uint output)
         {
@@ -293,7 +350,10 @@ namespace VirtDeck.Agent.X11
             request[1] = SetCrtcConfig;
             BinaryPrimitives.WriteUInt16LittleEndian(request.AsSpan(2), (ushort)(request.Length / 4));
             BinaryPrimitives.WriteUInt32LittleEndian(request.AsSpan(4), screen.Crtc);
-            BinaryPrimitives.WriteUInt32LittleEndian(request.AsSpan(8), screen.Timestamp);
+            // CurrentTime, not the timestamp that was read: the server stamps the configuration with
+            // whatever it is given, so handing back what it said last would leave its set time older
+            // than the configuration time this resize moves on, for ever. See the note on the class.
+            BinaryPrimitives.WriteUInt32LittleEndian(request.AsSpan(8), CurrentTime);
             BinaryPrimitives.WriteUInt32LittleEndian(request.AsSpan(12), screen.ConfigTimestamp);
             BinaryPrimitives.WriteInt16LittleEndian(request.AsSpan(16), 0);
             BinaryPrimitives.WriteInt16LittleEndian(request.AsSpan(18), 0);
@@ -310,8 +370,11 @@ namespace VirtDeck.Agent.X11
             };
         }
 
-        /// <summary>What one look at the screen's RANDR configuration found.</summary>
-        private readonly record struct Screen(uint Timestamp, uint ConfigTimestamp, uint Crtc, uint Output,
+        /// <summary>
+        /// What one look at the screen's RANDR configuration found. The reply's other timestamp, the
+        /// time the configuration was last set, is not kept: a change is stamped with CurrentTime.
+        /// </summary>
+        private readonly record struct Screen(uint ConfigTimestamp, uint Crtc, uint Output,
                                               List<(uint Id, int Width, int Height)> Modes)
         {
             /// <summary>A mode of exactly this size that the server already has, or 0.</summary>

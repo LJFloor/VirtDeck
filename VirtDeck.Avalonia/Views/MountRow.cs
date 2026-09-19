@@ -80,6 +80,13 @@ public sealed class MountRow : INotifyPropertyChanged
         _ => $"{b} B",
     };
 
+    /// <summary>
+    /// <see cref="Bytes"/> per second. Moved here from the Overview when the network module's rate
+    /// columns needed it, so a throughput reads the same on both pages.
+    /// </summary>
+    public static string Rate(double bytesPerSecond) =>
+        $"{Bytes((long)Math.Round(bytesPerSecond))}/s";
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)

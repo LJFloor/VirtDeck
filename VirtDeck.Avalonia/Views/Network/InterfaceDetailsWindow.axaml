@@ -1,0 +1,148 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:n="clr-namespace:VirtDeck.Avalonia.Views.Network"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.Network.InterfaceDetailsWindow"
+        x:DataType="n:RouteRow"
+        Title="Interface"
+        Width="900" Height="580" MinWidth="680" MinHeight="440"
+        WindowStartupLocation="CenterOwner">
+
+  <Window.Resources>
+    <x:Double x:Key="ColRtDst">200</x:Double>
+    <x:Double x:Key="ColRtVia">170</x:Double>
+    <x:Double x:Key="ColRtProto">90</x:Double>
+    <x:Double x:Key="ColRtMetric">70</x:Double>
+    <x:Double x:Key="ColRtScope">70</x:Double>
+  </Window.Resources>
+
+  <!-- The disk details window's fact pair, so a fact looks the same in both. -->
+  <Window.Styles>
+    <Style Selector="TextBlock.factlabel">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Width" Value="112" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+    <Style Selector="TextBlock.factvalue">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+    <Style Selector="TextBlock.headervalue">
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Opacity" Value="0.75" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </Window.Styles>
+
+  <Window.DataTemplates>
+    <DataTemplate DataType="n:InterfaceFact">
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,3" ToolTip.Tip="{Binding Tip}">
+        <TextBlock Classes="factlabel" Text="{Binding Label}" />
+        <TextBlock Classes="factvalue" Text="{Binding Value}" />
+      </StackPanel>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12"
+            BorderThickness="0,1,0,0" BorderBrush="#33808080" Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Name="StatusText" Grid.Column="0" Opacity="0.7"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Margin="0,0,12,0" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Border Background="Transparent" ToolTip.Tip="{Binding #EditButton.Tag}">
+            <Button Name="EditButton" Content="Settings..." MinWidth="88" />
+          </Border>
+          <Button Name="RefreshButton" Content="Refresh" MinWidth="88" />
+          <Button Name="CloseButton" Content="Close" IsCancel="True" MinWidth="88" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <TabControl Name="SectionTabs">
+
+      <TabItem Header="General">
+        <DockPanel Margin="16,14,16,14">
+
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <TextBlock Name="TitleName" DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Ellipse Name="TitleDot" DockPanel.Dock="Left" Width="9" Height="9"
+                     Margin="12,0,5,0" VerticalAlignment="Center" />
+            <TextBlock Name="TitleState" DockPanel.Dock="Left" VerticalAlignment="Center" />
+            <TextBlock Name="TitleNote" Opacity="0.6" Margin="10,0,0,0"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          </DockPanel>
+
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,24,*" Margin="0,0,0,14">
+            <ItemsControl Name="LeftFacts" Grid.Column="0" />
+            <ItemsControl Name="RightFacts" Grid.Column="2" />
+          </Grid>
+
+          <!-- The link's own traffic, from the module's traffic tail, which keeps running while
+               this window is open whatever page the module is on. -->
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Padding="0">
+            <HeaderedContentControl.Header>
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                  <TextBlock Name="RxValue" Classes="headervalue" />
+                  <TextBlock Name="TxValue" Classes="headervalue" />
+                </StackPanel>
+                <TextBlock Text="Traffic" />
+              </DockPanel>
+            </HeaderedContentControl.Header>
+            <c:MetricGraph Name="TrafficGraph" MinHeight="110" />
+          </HeaderedContentControl>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Routes">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="RouteHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Destination" SortKey="dst"    Width="{StaticResource ColRtDst}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Gateway"     SortKey="via"    Width="{StaticResource ColRtVia}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Protocol"    SortKey="proto"  Width="{StaticResource ColRtProto}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Metric"      SortKey="metric" Width="{StaticResource ColRtMetric}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Scope"       SortKey="scope"  Width="{StaticResource ColRtScope}" />
+              <c:ColumnHeader Text="Source" SortKey="src" />
+            </DockPanel>
+          </Border>
+          <Panel>
+            <ListBox Name="RouteList" Background="Transparent" Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="n:RouteRow">
+                  <StackPanel Classes="cells" Orientation="Horizontal">
+                    <TextBlock Text="{Binding Destination}" Width="{StaticResource ColRtDst}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding Destination}" />
+                    <TextBlock Text="{Binding Gateway}" Width="{StaticResource ColRtVia}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Protocol}" Width="{StaticResource ColRtProto}"
+                               Opacity="0.75" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding MetricText}" Width="{StaticResource ColRtMetric}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Scope}" Width="{StaticResource ColRtScope}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Source}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Name="RouteEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
+
+  </DockPanel>
+</Window>

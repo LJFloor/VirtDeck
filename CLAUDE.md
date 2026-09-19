@@ -80,6 +80,9 @@ in this index.
 | [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |
 | [storage-zfs.md](docs/storage-zfs.md) | The host's pools: listing, status, topology, create, scrub, import, export and destroy. |
 | [storage-zfs-datasets.md](docs/storage-zfs-datasets.md) | What is inside a pool, as a tree under it: filesystems and volumes, their properties, and create, edit, rename and destroy. |
+| [network.md](docs/network.md) | The host's interfaces: read with `ip` on every host and attributed to whoever configured them, the event and traffic tails, and the details window. |
+| [network-firewall.md](docs/network-firewall.md) | firewalld and ufw behind one interface, how each is read and changed without re-rendering a rule, and the lockout guard. |
+| [network-editing.md](docs/network-editing.md) | Changing links through NetworkManager or ifupdown: only what changed, argv without `--`, the checkpoint or timer that rolls a change back unless a fresh connection gets through, and bridges, bonds and VLANs. |
 | [file-explorer.md](docs/file-explorer.md) | Browsing as the login user, the one-shot root retry, cut/copy/paste, deleting, transfers in both directions, and dragging. |
 | [terminal.md](docs/terminal.md) | One shell on the host as the logged-in user, and how the keyboard is handled across the three terminal surfaces. |
 | [remote-control.md](docs/remote-control.md) | The host's own X11 desktop inline and scaled: `virtdeck-agent`, our own X11 client and RFB server that VirtDeck uploads, finding the displays, starting a virtual desktop on a host that has none, RFB over an SSH channel's stdin and stdout, the shared framebuffer view, and keysyms. |

@@ -1,0 +1,70 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Network.ConnectionEditDialog"
+        Title="Interface settings"
+        Width="520" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="ApplyButton" Content="Apply" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <HeaderedContentControl Header="IPv4" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Method" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="V4Method" HorizontalAlignment="Stretch" />
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Addresses" VerticalAlignment="Top" Margin="0,4,0,0" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="V4Addresses" AcceptsReturn="True" Height="52"
+                     PlaceholderText="192.168.1.10/24, one per line" />
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="V4Gateway" />
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="DNS" VerticalAlignment="Center" />
+            <TextBox Grid.Row="3" Grid.Column="1" ToolTip.ShowOnDisabled="True" Name="V4Dns" PlaceholderText="1.1.1.1, 9.9.9.9" />
+          </Grid>
+          <CheckBox ToolTip.ShowOnDisabled="True" Name="V4IgnoreAutoDns" Content="Use only these DNS servers" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Name="V6Group" Header="IPv6" Theme="{StaticResource JbGroupBox}"
+                              ToolTip.ShowOnDisabled="True">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Method" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="V6Method" HorizontalAlignment="Stretch" />
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Addresses" VerticalAlignment="Top" Margin="0,4,0,0" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="V6Addresses" AcceptsReturn="True" Height="52"
+                     PlaceholderText="2001:db8::10/64, one per line" />
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="V6Gateway" />
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="DNS" VerticalAlignment="Center" />
+            <TextBox Grid.Row="3" Grid.Column="1" Name="V6Dns" />
+          </Grid>
+          <CheckBox Name="V6IgnoreAutoDns" Content="Use only these DNS servers" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Header="General" Theme="{StaticResource JbGroupBox}">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="MTU" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="MtuBox" PlaceholderText="automatic" />
+          </Grid>
+          <CheckBox ToolTip.ShowOnDisabled="True" Name="AutoconnectBox" Content="Connect at boot" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <TextBlock Name="SshNote" Classes="note" TextWrapping="Wrap" IsVisible="False"
+                 Text="VirtDeck's connection uses this interface. If the host stops answering after the change, NetworkManager puts the old settings back within a minute." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

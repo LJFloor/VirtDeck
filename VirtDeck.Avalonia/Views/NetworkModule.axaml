@@ -1,0 +1,316 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.NetworkModule"
+             x:DataType="vm:InterfaceRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by the heading strip and its rows, so they stay aligned. -->
+    <x:Double x:Key="ColIfName">170</x:Double>
+    <x:Double x:Key="ColIfState">95</x:Double>
+    <x:Double x:Key="ColIfType">95</x:Double>
+    <x:Double x:Key="ColIfV4">150</x:Double>
+    <x:Double x:Key="ColIfV6">220</x:Double>
+    <x:Double x:Key="ColIfRx">95</x:Double>
+    <x:Double x:Key="ColIfTx">95</x:Double>
+
+    <x:Double x:Key="ColFwZone">110</x:Double>
+    <x:Double x:Key="ColFwName">150</x:Double>
+    <x:Double x:Key="ColFwTcp">120</x:Double>
+    <x:Double x:Key="ColFwUdp">120</x:Double>
+    <x:Double x:Key="ColFwFrom">150</x:Double>
+    <x:Double x:Key="ColFwAction">90</x:Double>
+
+    <x:Double x:Key="ColZnName">170</x:Double>
+    <x:Double x:Key="ColZnTarget">90</x:Double>
+    <x:Double x:Key="ColZnIf">170</x:Double>
+    <x:Double x:Key="ColZnSrc">170</x:Double>
+
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <!-- No Theme, so this picks up the implicit top-placed strip every module with pages uses. -->
+  <TabControl Name="Tabs">
+
+    <TabItem Name="InterfacesTab" Header="Interfaces">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <!-- The one command here that creates something, so the one accented. Its menu is
+                   built in code. -->
+              <Border Background="Transparent" ToolTip.Tip="{Binding #AddInterfaceButton.Tag}">
+                <Button Name="AddInterfaceButton" Content="Add" Classes="accent" />
+              </Border>
+              <!-- The event tail keeps the table current; this is for the one change it cannot see
+                   announced, and for somebody who wants to be sure. -->
+              <Button Name="RefreshInterfacesButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the interfaces again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <c:FilterBox DockPanel.Dock="Right" Name="InterfaceSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search name, address or type"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+            <!-- A container's veth and a VM's tap: one per guest, and on a busy docker host most of
+                 the table. Off by default and a toggle rather than an omission, the cron module's
+                 plumbing toggle. In a Border so the tooltip still answers while it is disabled. -->
+            <Border DockPanel.Dock="Right" Background="Transparent" Margin="10,0,0,0"
+                    ToolTip.Tip="{Binding #GuestBox.Tag}">
+              <CheckBox Name="GuestBox" Content="Show guest interfaces" VerticalAlignment="Center" />
+            </Border>
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <!-- A NetworkManager checkpoint nobody confirmed: VirtDeck's own if it was closed while
+             checking, or Cockpit's, or nmstate's. It rolls the host's network back when it runs
+             out, so it is said above the table rather than left to happen. -->
+        <Border Name="CheckpointBanner" DockPanel.Dock="Top" Padding="12,8" IsVisible="False"
+                Background="#22d68f00" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+              <Button Name="CheckpointKeepButton" Content="Keep changes" />
+              <Button Name="CheckpointRollbackButton" Content="Roll back" />
+            </StackPanel>
+            <TextBlock Name="CheckpointText" VerticalAlignment="Center" TextWrapping="Wrap" />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="IfHeaderStrip">
+            <!-- Every cell sorts; a third click returns to this table's own order: the hardware,
+                 then what is built on it, then the guests' links, then loopback. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Interface" SortKey="name"  Indent="14" Width="{StaticResource ColIfName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="State"     SortKey="state" Width="{StaticResource ColIfState}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Type"      SortKey="type"  Width="{StaticResource ColIfType}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="IPv4"      SortKey="ipv4"  Width="{StaticResource ColIfV4}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="IPv6"      SortKey="ipv6"  Width="{StaticResource ColIfV6}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Receiving" SortKey="rx"    Width="{StaticResource ColIfRx}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Sending"   SortKey="tx"    Width="{StaticResource ColIfTx}" />
+            <c:ColumnHeader Text="Managed by" SortKey="managed" />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="InterfaceList" SelectionMode="Single" Background="Transparent"
+                   Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu Name="InterfaceMenu">
+                <MenuItem Name="MenuIfDetails" Header="Details" />
+                <Separator />
+                <MenuItem Name="MenuIfEdit" Header="Settings..." />
+                <MenuItem Name="MenuIfConnect" Header="Connect" />
+                <MenuItem Name="MenuIfDisconnect" Header="Disconnect" />
+                <Separator />
+                <MenuItem Name="MenuIfDelete" Header="Delete" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:InterfaceRow">
+                <StackPanel Classes="cells" Orientation="Horizontal">
+                  <DockPanel Width="{StaticResource ColIfName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding StateText}" Width="{StaticResource ColIfState}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding TypeText}" Width="{StaticResource ColIfType}"
+                             Opacity="0.75" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Ipv4}" Width="{StaticResource ColIfV4}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding AddressTip}" />
+                  <TextBlock Text="{Binding Ipv6}" Width="{StaticResource ColIfV6}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding AddressTip}" />
+                  <TextBlock Text="{Binding RxText}" Width="{StaticResource ColIfRx}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding TxText}" Width="{StaticResource ColIfTx}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding ManagedBy}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ManagedTip}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Name="InterfaceEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+    <!-- The host's firewall, whichever of the two tools it has. Read on the first visit and by the
+         Refresh button, never polled: nothing announces a ufw change, and every read is a Python
+         start-up or two under sudo. Only Add is accented, the one command here that creates
+         something. -->
+    <TabItem Name="FirewallTab" Header="Firewall">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <!-- Each in a Border so the reason still answers while the button is disabled. -->
+              <Border Background="Transparent" ToolTip.Tip="{Binding #AddRuleButton.Tag}">
+                <Button Name="AddRuleButton" Content="Add" Classes="accent" />
+              </Border>
+              <Border Background="Transparent" ToolTip.Tip="{Binding #PowerButton.Tag}">
+                <Button Name="PowerButton" Content="Turn on" />
+              </Border>
+              <Button Name="RefreshFirewallButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the firewall again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <c:FilterBox DockPanel.Dock="Right" Name="RuleSearch" Width="220" Margin="10,0,0,0"
+                         PlaceholderText="Search service, port or address"
+                         ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+            <TextBlock Name="PolicyText" DockPanel.Dock="Right" Opacity="0.7" Margin="10,0,0,0"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="RuleHeaderStrip">
+            <!-- A third click returns to the tool's own order, which for ufw is the order it
+                 matches in. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Name="ZoneHeader" Text="Zone" SortKey="zone" Width="{StaticResource ColFwZone}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Allows"  SortKey="name"   Width="{StaticResource ColFwName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="TCP"     SortKey="tcp"    Width="{StaticResource ColFwTcp}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="UDP"     SortKey="udp"    Width="{StaticResource ColFwUdp}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="From"    SortKey="from"   Width="{StaticResource ColFwFrom}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Action"  SortKey="action" Width="{StaticResource ColFwAction}" />
+            <c:ColumnHeader Text="Note" SortKey="note" />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="RuleList" SelectionMode="Multiple" Background="Transparent" Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu>
+                <MenuItem Name="MenuRuleRemove" Header="Remove" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:FirewallRuleRow">
+                <StackPanel Classes="cells" Orientation="Horizontal" ToolTip.Tip="{Binding Tip}">
+                  <TextBlock Text="{Binding ZoneText}" Width="{StaticResource ColFwZone}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding NameText}" Width="{StaticResource ColFwName}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding TcpText}" Width="{StaticResource ColFwTcp}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding UdpText}" Width="{StaticResource ColFwUdp}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding FromText}" Width="{StaticResource ColFwFrom}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding ActionText}" Width="{StaticResource ColFwAction}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding NoteText}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Name="RuleEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+    <!-- firewalld's zones. Disabled with the reason on a ufw host, which has none. -->
+    <TabItem Name="ZonesTab" Header="Zones" ToolTip.ShowOnDisabled="True">
+      <DockPanel>
+
+        <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+              <Border Background="Transparent" ToolTip.Tip="{Binding #AddZoneButton.Tag}">
+                <Button Name="AddZoneButton" Content="Add zone" Classes="accent" />
+              </Border>
+              <Button Name="RefreshZonesButton" Theme="{StaticResource JbIconButton}"
+                      ToolTip.Tip="Read the firewall again">
+                <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                      Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+              </Button>
+            </StackPanel>
+            <Panel />
+          </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <DockPanel Name="ZoneHeaderStrip">
+            <!-- A third click returns to the default zone first, then the zones in use. -->
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Zone"       SortKey="name"       Indent="14" Width="{StaticResource ColZnName}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Target"     SortKey="target"     Width="{StaticResource ColZnTarget}"
+                            Tip="What happens to traffic nothing in the zone allows" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Interfaces" SortKey="interfaces" Width="{StaticResource ColZnIf}" />
+            <c:ColumnHeader DockPanel.Dock="Left" Text="Sources"    SortKey="sources"    Width="{StaticResource ColZnSrc}" />
+            <c:ColumnHeader Text="Allows" SortKey="allows" />
+          </DockPanel>
+        </Border>
+
+        <Panel>
+          <ListBox Name="ZoneList" SelectionMode="Single" Background="Transparent" Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}">
+            <ListBox.ContextMenu>
+              <ContextMenu>
+                <MenuItem Name="MenuZoneEdit" Header="Interfaces and sources..." />
+                <MenuItem Name="MenuZoneDefault" Header="Make default" />
+                <Separator />
+                <MenuItem Name="MenuZoneClear" Header="Remove from use" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:FirewallZoneRow">
+                <StackPanel Classes="cells" Orientation="Horizontal">
+                  <DockPanel Width="{StaticResource ColZnName}">
+                    <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                             VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                             ToolTip.Tip="{Binding StateText}" />
+                    <TextBlock Text="{Binding NameText}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding TargetText}" Width="{StaticResource ColZnTarget}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding InterfacesText}" Width="{StaticResource ColZnIf}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding InterfacesText}" />
+                  <TextBlock Text="{Binding SourcesText}" Width="{StaticResource ColZnSrc}"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding SourcesText}" />
+                  <TextBlock Text="{Binding AllowsText}" Opacity="0.75" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AllowsText}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Name="ZoneEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+
+      </DockPanel>
+    </TabItem>
+
+  </TabControl>
+</UserControl>

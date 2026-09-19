@@ -1,0 +1,72 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Network.InterfaceCreateDialog"
+        Title="New bridge"
+        Width="500" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="CreateButton" Content="Create" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <!-- One form for the three kinds. The rows a kind has no use for are hidden rather than
+           disabled: they are not a command somebody goes looking for, they are a different form. -->
+      <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Name="PortsLabel" Text="Ports" VerticalAlignment="Top" Margin="0,4,0,0" />
+        <ScrollViewer Grid.Row="1" Grid.Column="1" Name="PortsHost" MaxHeight="150">
+          <StackPanel Name="PortChecks" Spacing="4" />
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Name="ModeLabel" Text="Mode" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="2" Grid.Column="1" Name="ModeBox" HorizontalAlignment="Stretch" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Name="ParentLabel" Text="Parent" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="3" Grid.Column="1" Name="ParentBox" HorizontalAlignment="Stretch" />
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Name="VlanLabel" Text="VLAN ID" VerticalAlignment="Center" />
+        <TextBox Grid.Row="4" Grid.Column="1" Name="VlanBox" PlaceholderText="1 to 4094" />
+      </Grid>
+
+      <CheckBox Name="StpBox" Content="Spanning tree (STP)" />
+
+      <HeaderedContentControl Header="IPv4" Theme="{StaticResource JbGroupBox}">
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Method" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="0" Grid.Column="1" Name="V4Method" HorizontalAlignment="Stretch" SelectedIndex="0">
+            <ComboBoxItem Content="Automatic (DHCP)" />
+            <ComboBoxItem Content="Manual" />
+            <ComboBoxItem Content="Disabled" />
+          </ComboBox>
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Address" VerticalAlignment="Center" />
+          <TextBox Grid.Row="1" Grid.Column="1" Name="V4Address" PlaceholderText="192.168.1.10/24" />
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway" VerticalAlignment="Center" />
+          <TextBox Grid.Row="2" Grid.Column="1" Name="V4Gateway" />
+          <TextBlock Grid.Row="3" Grid.Column="0" Text="DNS" VerticalAlignment="Center" />
+          <TextBox Grid.Row="3" Grid.Column="1" Name="V4Dns" PlaceholderText="1.1.1.1, 9.9.9.9" />
+        </Grid>
+      </HeaderedContentControl>
+
+      <Grid ColumnDefinitions="110,*">
+        <TextBlock Grid.Column="0" Text="IPv6" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1" Name="V6Method" HorizontalAlignment="Stretch" SelectedIndex="0">
+          <ComboBoxItem Content="Automatic" />
+          <ComboBoxItem Content="Ignore" />
+        </ComboBox>
+      </Grid>
+
+      <TextBlock Name="CopyNote" Classes="note" TextWrapping="Wrap" IsVisible="False" />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

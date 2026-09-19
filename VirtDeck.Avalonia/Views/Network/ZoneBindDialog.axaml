@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Network.ZoneBindDialog"
+        Title="Add zone"
+        Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="ApplyButton" Content="Add" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <StackPanel Classes="page">
+
+      <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Zone" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="0" Grid.Column="1" Name="ZoneBox" HorizontalAlignment="Stretch" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Interfaces" VerticalAlignment="Top" Margin="0,4,0,0" />
+        <ScrollViewer Grid.Row="1" Grid.Column="1" MaxHeight="180">
+          <StackPanel Name="InterfaceChecks" Spacing="4" />
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Sources" VerticalAlignment="Top" Margin="0,4,0,0" />
+        <TextBox Grid.Row="2" Grid.Column="1" Name="SourcesBox" AcceptsReturn="True" Height="70"
+                 TextWrapping="NoWrap" PlaceholderText="192.168.1.0/24, one per line" />
+      </Grid>
+
+      <TextBlock Classes="note" TextWrapping="Wrap"
+                 Text="An interface is in one zone at a time. Ticking one moves it here." />
+
+      <TextBlock Name="ErrorText" Classes="error" TextWrapping="Wrap" IsVisible="False" />
+
+    </StackPanel>
+  </DockPanel>
+</Window>

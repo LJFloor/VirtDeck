@@ -568,7 +568,7 @@ namespace VirtDeck.Services
         private static long Delta(long now, long before) => now >= before ? now - before : 0;
 
         private static double Rate(long now, long before, double seconds) =>
-            now >= before ? (now - before) / seconds : 0;
+            Counters.Rate(now, before, seconds);
 
         // ---- the workload counts -----------------------------------------------
 

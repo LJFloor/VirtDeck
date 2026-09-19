@@ -35,6 +35,11 @@
          tell which of the two halves was meant. -->
     <StreamGeometry x:Key="IconStorage">M8,1.5 A6,6 0 0 1 14,4 A6,6 0 0 1 8,6.5 A6,6 0 0 1 2,4 A6,6 0 0 1 8,1.5 Z M2,4 V8 A6,6 0 0 0 8,10.5 A6,6 0 0 0 14,8 V4 M2,8 V12 A6,6 0 0 0 8,14.5 A6,6 0 0 0 14,12 V8</StreamGeometry>
 
+    <!-- Three boxes wired as a tree: one machine and the two it is connected to. A globe is what a
+         network page usually wears, and stroked at 16x16 a globe's meridians close up into a ball;
+         boxes and wires read at this size, and they sit at the weight of the other boxes here. -->
+    <StreamGeometry x:Key="IconNetwork">M6,1.5 H10 V5.5 H6 Z M1.5,10.5 H5.5 V14.5 H1.5 Z M10.5,10.5 H14.5 V14.5 H10.5 Z M8,5.5 V8 M3.5,10.5 V8 H12.5 V10.5</StreamGeometry>
+
     <!-- A page with a folded corner and two lines of writing on it. The obvious art for a log is a
          scroll or a list, and at 16x16 stroked both read as the file explorer's folder with extra
          strokes; a sheet with its corner turned is the one document shape that is unmistakable at
@@ -203,8 +208,23 @@
         <vm:UserAccountsModule />
       </TabItem>
 
-      <!-- Between the accounts and the explorer: the explorer browses what these devices hold, so
-           the two read as a pair. -->
+      <!-- Just above Storage: the host's links and its disks are the two halves of what it is
+           attached to, which is where Cockpit puts them too. Above rather than below, so Storage
+           keeps the File explorer beside it. -->
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconNetwork}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Network" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:NetworkModule />
+      </TabItem>
+
+      <!-- Directly above the explorer: the explorer browses what these devices hold, so the two
+           read as a pair. -->
       <TabItem>
         <TabItem.Header>
           <StackPanel Orientation="Horizontal" Spacing="8">
