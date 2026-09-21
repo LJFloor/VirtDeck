@@ -1,0 +1,162 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:pf="clr-namespace:VirtDeck.Avalonia.Views.Printing"
+        xmlns:vw="clr-namespace:VirtDeck.Avalonia.Views"
+        x:Class="VirtDeck.Avalonia.Views.Printing.AddPrinterWizard"
+        Title="Add printer"
+        Width="740" Height="600" MinWidth="640" MinHeight="520"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <!-- Header band: the wizard step title. Same shape as CreateVmWizard's, including the 15px,
+         which is one of the two deliberate exceptions to the app's 12px baseline. -->
+    <Border DockPanel.Dock="Top" Padding="16,11" BorderThickness="0,0,0,1" BorderBrush="#33808080"
+            Background="#11808080">
+      <TextBlock Name="TitleText" Text="Connection" FontSize="15" FontWeight="Bold" />
+    </Border>
+
+    <!-- Footer band. Unlike CreateVmWizard, a refused Next lands in StatusText rather than in a
+         dialog: that is the edit window's idiom and this module already reads that line. -->
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <DockPanel>
+        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8"
+                    HorizontalAlignment="Right">
+          <Button Name="BackButton" Content="Back" MinWidth="88" />
+          <Button Name="NextButton" Content="Next" MinWidth="88" IsDefault="True" Classes="accent" />
+          <Button Name="FinishButton" Content="Add printer" MinWidth="110" Classes="accent"
+                  IsVisible="False" />
+        </StackPanel>
+        <TextBlock Name="StatusText" Margin="12,0" VerticalAlignment="Center" Opacity="0.75"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <!-- No margin here: three of the four pages carry their own padding, and the driver page is
+         a control of its own, which brings its own. -->
+    <Panel>
+
+      <!-- Page 1: Connection -->
+      <ScrollViewer Name="ConnectionPage" Padding="16">
+        <StackPanel Classes="page">
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="What this queue prints to">
+            <StackPanel Classes="options">
+
+              <RadioButton Name="DetectedOption" GroupName="AddConnection" IsChecked="True"
+                           Content="Detected on this host" />
+              <TextBlock Classes="subnote" TextWrapping="Wrap"
+                         Text="What the host can see right now, over USB and on the network." />
+              <StackPanel Name="DetectedArea" Classes="under">
+                <DockPanel>
+                  <Border DockPanel.Dock="Right" Background="Transparent"
+                          ToolTip.Tip="{Binding #ScanButton.Tag}">
+                    <Button Name="ScanButton" Content="Scan again" MinWidth="88" />
+                  </Border>
+                  <TextBlock Name="ScanStatus" VerticalAlignment="Center" Opacity="0.75"
+                             Margin="0,0,8,0" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <Border BorderThickness="1" BorderBrush="#33808080" Height="150">
+                  <ListBox Name="DeviceList" Background="Transparent" Padding="0"
+                           ItemContainerTheme="{StaticResource JbTableRow}" />
+                </Border>
+              </StackPanel>
+
+              <Border Background="Transparent" ToolTip.Tip="{Binding #PdfOption.Tag}">
+                <RadioButton Name="PdfOption" GroupName="AddConnection"
+                             Content="PDF printer" />
+              </Border>
+              <TextBlock Name="PdfNote" Classes="subnote" TextWrapping="Wrap"
+                         Text="Prints into a file on the host instead of onto paper." />
+              <StackPanel Name="PdfArea" Classes="under">
+                <Grid ColumnDefinitions="110,*">
+                  <TextBlock Grid.Column="0" Text="Files land in" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1" Name="PdfFolderBox" />
+                </Grid>
+                <TextBlock Name="PdfFolderNote" Classes="subnote" TextWrapping="Wrap"
+                           IsVisible="False" />
+                <Border Background="Transparent" HorizontalAlignment="Left"
+                        ToolTip.Tip="{Binding #InstallPdfButton.Tag}">
+                  <Button Name="InstallPdfButton" Content="Install cups-pdf" IsVisible="False" />
+                </Border>
+              </StackPanel>
+
+              <RadioButton Name="AddressOption" GroupName="AddConnection"
+                           Content="Another address" />
+              <TextBlock Classes="subnote" TextWrapping="Wrap"
+                         Text="Anything CUPS understands, such as ipp://host/ipp/print or socket://host:9100." />
+              <StackPanel Name="AddressArea" Classes="under">
+                <TextBox Name="UriBox" />
+              </StackPanel>
+
+            </StackPanel>
+          </HeaderedContentControl>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Page 2: Driver. A control of its own because the picker behind it is. -->
+      <pf:PrinterDriverTab Name="DriverPage" IsVisible="False" />
+
+      <!-- Page 3: Identity -->
+      <ScrollViewer Name="IdentityPage" Padding="16" IsVisible="False">
+        <StackPanel Classes="page">
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Printer">
+            <StackPanel Classes="options">
+              <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+                <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Description" VerticalAlignment="Center" />
+                <TextBox Grid.Row="1" Grid.Column="1" Name="DescriptionBox" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Location" VerticalAlignment="Center" />
+                <TextBox Grid.Row="2" Grid.Column="1" Name="LocationBox" />
+              </Grid>
+              <TextBlock Classes="subnote" TextWrapping="Wrap"
+                         Text="The name is what every command addresses this queue by, and CUPS has no rename." />
+            </StackPanel>
+          </HeaderedContentControl>
+
+          <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="On this host">
+            <StackPanel Classes="options">
+              <CheckBox Name="SharedBox" Content="Share this printer on the network" />
+              <TextBlock Classes="subnote" TextWrapping="Wrap"
+                         Text="Other machines see it only while the server is also set to share printers, on the Server tab." />
+              <CheckBox Name="DefaultBox" Content="Make this the default printer" />
+            </StackPanel>
+          </HeaderedContentControl>
+
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Page 4: Summary -->
+      <DockPanel Name="SummaryPage" Margin="16" IsVisible="False">
+        <Border DockPanel.Dock="Bottom" Background="Transparent" Margin="0,12,0,0"
+                HorizontalAlignment="Left" ToolTip.Tip="{Binding #TestPageBox.Tag}">
+          <CheckBox Name="TestPageBox" Content="Print a test page afterwards" />
+        </Border>
+        <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+          <ScrollViewer Padding="12,10">
+            <ItemsControl Name="SummaryList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vw:SummaryRow">
+                  <Grid ColumnDefinitions="140,*" Margin="{Binding RowMargin}">
+                    <TextBlock Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Value}"
+                               FontWeight="SemiBold" IsVisible="{Binding IsHeader}" />
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Opacity="0.75"
+                               IsVisible="{Binding !IsHeader}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                               IsVisible="{Binding !IsHeader}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </DockPanel>
+
+    </Panel>
+  </DockPanel>
+</Window>

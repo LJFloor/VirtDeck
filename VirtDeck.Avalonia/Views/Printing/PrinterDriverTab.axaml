@@ -9,13 +9,6 @@
       <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Driver">
         <StackPanel Classes="options">
 
-          <!-- Only on an edit, where it is the default: re-choosing a driver from a list of
-               twenty thousand is not something to make somebody do to change a location. It sends
-               no -m at all, which is what leaves the queue's PPD alone. -->
-          <RadioButton Name="KeepOption" GroupName="Driver" IsVisible="False"
-                       Content="Keep the current driver" />
-          <TextBlock Name="KeepNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
-
           <RadioButton Name="DriverlessOption" GroupName="Driver" IsChecked="True"
                        Content="Driverless (IPP Everywhere)" />
           <TextBlock Classes="subnote" TextWrapping="Wrap"

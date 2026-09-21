@@ -17,8 +17,11 @@ namespace VirtDeck.Avalonia.Views.Printing;
 ///
 /// <para>Driverless is the default because it needs none of that, and because CUPS 3 removes PPD
 /// support altogether. The picker is the fallback for older hardware, not the main path.</para>
+///
+/// <para>Page 2 of <see cref="AddPrinterWizard"/> and nothing else: a queue's driver is chosen when
+/// it is made, and the edit window does not offer to change it.</para>
 /// </summary>
-public partial class PrinterDriverTab : UserControl, IPrinterTab
+public partial class PrinterDriverTab : UserControl
 {
     private CupsService? _cups;
 
@@ -60,38 +63,31 @@ public partial class PrinterDriverTab : UserControl, IPrinterTab
     }
 
     /// <summary>
-    /// The <c>-m</c> keyword to write, or <b>empty to send no <c>-m</c> at all</b>, which is what
-    /// leaves an existing queue's driver where it is. <c>everywhere</c> and <c>raw</c> are CUPS's
-    /// own keywords, verified present in <c>lpinfo -m</c> on a stock install.
+    /// The <c>-m</c> keyword to write. <c>everywhere</c> and <c>raw</c> are CUPS's own keywords,
+    /// verified present in <c>lpinfo -m</c> on a stock install.
     /// </summary>
     public string Model =>
-        KeepOption.IsChecked == true ? ""
-        : RawOption.IsChecked == true ? "raw"
+        RawOption.IsChecked == true ? "raw"
         : PickOption.IsChecked == true ? _picked
         : "everywhere";
 
-    public void Load(Printer printer, bool isNew)
+    /// <summary>The same answer in words, for the wizard's summary.</summary>
+    public string ModelText =>
+        RawOption.IsChecked == true ? "Raw queue"
+        : PickOption.IsChecked == true ? PickedLabel()
+        : "Driverless (IPP Everywhere)";
+
+    /// <summary>The picked driver as the host described it, falling back to its keyword.</summary>
+    private string PickedLabel()
     {
-        // An edit starts on "leave it alone", because lpadmin without -m keeps the PPD the queue
-        // already has. The other three stay offered, so an old queue can still be moved onto
-        // driverless without being deleted and added again.
-        if (isNew) return;
+        foreach (var model in _models)
+            if (model.Model == _picked) return Label(model);
 
-        KeepOption.IsVisible = true;
-        KeepOption.IsChecked = true;
-
-        if (printer.MakeAndModel.Length == 0) return;
-
-        KeepNote.Text = printer.MakeAndModel;
-        KeepNote.IsVisible = true;
+        return _picked;
     }
 
-    public void Apply(Printer printer)
-    {
-        // Nothing of this page belongs on the model: the driver is an argument to lpadmin and
-        // never comes back in the same words. The window reads Model instead.
-    }
-
+    /// <summary>Hands the page the service it fetches the driver list through, and what the host
+    /// has to fetch it with.</summary>
     public void SetContext(CupsService cups, PrinterCatalog catalog)
     {
         _cups = cups;
@@ -104,6 +100,7 @@ public partial class PrinterDriverTab : UserControl, IPrinterTab
         ToolTip.SetTip(PickOption, "This host has no lpinfo, so its driver list cannot be read.");
     }
 
+    /// <summary>The first problem with this page, or null.</summary>
     public string? Validate() =>
         PickOption.IsChecked == true && _picked.Length == 0 ? "Pick a driver, or choose one of the other two." : null;
 

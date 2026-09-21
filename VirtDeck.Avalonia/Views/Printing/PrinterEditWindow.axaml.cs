@@ -6,86 +6,194 @@ using VirtDeck.Services;
 namespace VirtDeck.Avalonia.Views.Printing;
 
 /// <summary>
-/// One window for adding a printer and for changing one.
+/// One window for changing a printer that is already on the host: its description, its location,
+/// and for a PDF queue, where the files land.
 ///
-/// <para><b>CUPS has one command for both.</b> <c>lpadmin -p</c> against a name that already
-/// exists modifies that queue in place, keeping its id and its spool, so unlike the containers
-/// module there is no recreate to explain and nothing to warn about. What differs between the two
-/// is the title, the button and whether the name may be typed.</para>
+/// <para><b>What it prints to, how it is driven and whether it is shared belong to
+/// <see cref="AddPrinterWizard"/></b>, and are not here. Those are the choices that make a queue;
+/// this is the jump to the field you came for once it exists. That is the split VMs already have
+/// between <c>CreateVmWizard</c> and <c>VmEditWindow</c>.</para>
+///
+/// <para><b>CUPS has one command for both</b> all the same: <c>lpadmin -p</c> against a name that
+/// already exists modifies that queue in place, keeping its id and its spool, so there is no
+/// recreate to explain and nothing to warn about.</para>
 /// </summary>
 public partial class PrinterEditWindow : Window
 {
+    private readonly CupsService? _cups;
     private readonly Printer _printer;
-    private readonly bool _isNew;
+
+    // ---- The PDF folder -------------------------------------------------
+    // What the host answered about cups-pdf, the instance this queue is on, and the folder that
+    // instance writes into. The read is cheap (three files) and deliberately not the wizard's
+    // PdfQueueAsync: the driver keyword behind that one is two seconds of lpinfo -m, and this
+    // window opens on every printer.
+    private PdfPrinterInfo _pdf;
+    private readonly string _instance;
+    private string _loadedFolder = "";
 
     /// <summary>Design-time only. Avalonia instantiates the class to preview the markup.</summary>
-    public PrinterEditWindow() : this(null!, new PrinterCatalog(), null) { }
+    public PrinterEditWindow() : this(null!, new Printer()) { }
 
-    public PrinterEditWindow(CupsService cups, PrinterCatalog catalog, Printer? existing)
+    public PrinterEditWindow(CupsService cups, Printer existing)
     {
         InitializeComponent();
 
-        _isNew = existing is null;
+        _cups = cups;
 
         // A copy, so Cancel costs nothing and the table's own row is never half-edited.
-        _printer = existing is null ? new Printer() : Clone(existing);
+        _printer = Clone(existing);
+        _instance = CupsService.PdfInstanceOf(_printer.DeviceUri);
 
-        Title = _isNew ? "Add printer" : $"Edit {_printer.Name}";
-        SaveButton.Content = _isNew ? "Add" : "Save";
+        Title = $"Edit {_printer.Name}";
 
-        foreach (var tab in Tabs)
-        {
-            tab.Load(_printer, _isNew);
-            if (cups is not null) tab.SetContext(cups, catalog);
-        }
+        NameBox.Text = _printer.Name;
+        DescriptionBox.Text = _printer.Description;
+        LocationBox.Text = _printer.Location;
+
+        PdfGroup.IsVisible = IsPdf;
+        PdfFolderBox.TextChanged += (_, _) => SyncPdf();
 
         SaveButton.Click += OnSave;
         CancelButton.Click += (_, _) => Close(false);
+
+        // An ordinary printer has no folder and no reason to pay for the answer.
+        if (cups is not null && IsPdf) _ = ReadPdfAsync();
     }
 
     /// <summary>The edited printer, or null when the window was cancelled.</summary>
     public Printer? Result { get; private set; }
 
-    /// <summary>The <c>-m</c> keyword the driver page settled on. Not part of the model: CUPS
-    /// takes it when a queue is written and never gives it back in the same words.</summary>
-    public string Model => DriverTab.Model;
+    /// <summary>
+    /// The folder to write for this queue, or null where nothing about it changed. Empty means the
+    /// queue was handed back to the host's own folder, which is a removal rather than a write.
+    ///
+    /// <para>Not part of the model: it lives in a cups-pdf config file rather than in the queue.
+    /// The module runs it, in the order that never leaves the device uri pointing at a config file
+    /// that is not there. See "A folder of its own".</para>
+    /// </summary>
+    public string? PdfFolder { get; private set; }
 
-    /// <summary>The pages, by what they implement rather than by name.</summary>
-    private IEnumerable<IPrinterTab> Tabs =>
-        SectionTabs.Items.OfType<TabItem>().Select(t => t.Content).OfType<IPrinterTab>();
+    /// <summary>Which cups-pdf config that folder belongs in: the name after <c>cups-pdf:/</c>, or
+    /// the queue's own where it had none.</summary>
+    public string PdfInstance { get; private set; } = "";
+
+    /// <summary>What the host said would have an opinion about it.</summary>
+    public PdfConfinement PdfConfinement => _pdf.Confinement;
+
+    private bool IsPdf => CupsService.IsPdfUri(_printer.DeviceUri.Trim());
 
     private void OnSave(object? sender, RoutedEventArgs e)
     {
-        // Applied before validating, and on every page: a page nobody opened still holds the
-        // defaults it was loaded with, and they belong in the model too.
-        foreach (var tab in Tabs) tab.Apply(_printer);
-
-        if (FirstProblem() is { } problem)
+        if (IsPdf && CupsService.PdfFolderProblem(PdfFolderBox.Text ?? "") is { } problem)
         {
             StatusText.Text = problem;
             return;
         }
+
+        // Not the name: it is the queue, and this window cannot change it.
+        _printer.Description = (DescriptionBox.Text ?? "").Trim();
+        _printer.Location = (LocationBox.Text ?? "").Trim();
+
+        ApplyPdf();
 
         Result = _printer;
         Close(true);
     }
 
     /// <summary>
-    /// The first page with something wrong, selected so the message is next to the control it is
-    /// about. Walks the TabItems rather than the contents, which is what makes selecting possible.
+    /// The folder, which is the one field here that is not a property of the queue: it lives in a
+    /// config file, and which file is what the device uri says. So a folder that is not the host's
+    /// own moves the uri onto an instance named after the queue, and one that is the host's own
+    /// moves it back to the bare backend.
+    ///
+    /// <para>Nothing is reported while the box still holds what it was loaded with, which is also
+    /// what makes this inert when the read never finished.</para>
     /// </summary>
-    private string? FirstProblem()
+    private void ApplyPdf()
     {
-        foreach (var item in SectionTabs.Items.OfType<TabItem>())
-        {
-            if (item.Content is not IPrinterTab tab) continue;
-            if (tab.Validate() is not { } problem) continue;
+        PdfFolder = null;
+        PdfInstance = "";
 
-            SectionTabs.SelectedItem = item;
-            return problem;
+        if (!IsPdf) return;
+
+        var folder = CupsService.PdfFolderText(PdfFolderBox.Text ?? "");
+        if (folder == _loadedFolder) return;
+
+        var host = CupsService.PdfFolderText(_pdf.Folder);
+
+        if (folder.Length == 0 || folder == host)
+        {
+            // Back to the host's own. There is only something to remove where this queue had a
+            // config file of its own in the first place.
+            if (_instance.Length == 0) return;
+
+            PdfFolder = "";
+            PdfInstance = _instance;
+            _printer.DeviceUri = CupsService.PdfUri;
+            return;
         }
 
-        return null;
+        PdfFolder = folder;
+        PdfInstance = _instance.Length > 0 ? _instance : _printer.Name;
+        _printer.DeviceUri = CupsService.PdfUriFor(PdfInstance);
+    }
+
+    /// <summary>
+    /// Where this queue writes now: its own instance file if it has one, the host's
+    /// <c>cups-pdf.conf</c> otherwise. Best-effort: a host that will not say leaves an empty box,
+    /// and an empty box changes nothing.
+    /// </summary>
+    private async Task ReadPdfAsync()
+    {
+        if (_cups is null) return;
+
+        try
+        {
+            _pdf = await _cups.PdfFoldersAsync();
+        }
+        catch
+        {
+            return; // the box stays empty and Save reports nothing
+        }
+
+        _loadedFolder = CupsService.PdfFolderText(_pdf.FolderOf(_instance));
+
+        // Never over something typed while the host was answering.
+        if ((PdfFolderBox.Text ?? "").Length == 0) PdfFolderBox.Text = _loadedFolder;
+
+        SyncPdf();
+    }
+
+    /// <summary>The one sentence under the folder, which says what changing it writes and what
+    /// may refuse it.</summary>
+    private void SyncPdf()
+    {
+        var folder = CupsService.PdfFolderText(PdfFolderBox.Text ?? "");
+        var host = CupsService.PdfFolderText(_pdf.Folder);
+        var own = folder.Length > 0 && folder != host;
+
+        var instance = _instance.Length > 0 ? _instance : _printer.Name;
+
+        var note = own
+            ? $"Writes {CupsService.PdfConfigPath(instance)}: the host's own cups-pdf.conf with this folder in it."
+            : "";
+
+        var confined = own
+            ? _pdf.Confinement switch
+            {
+                PdfConfinement.AppArmorLocal =>
+                    $" AppArmor confines cups-pdf here, so a rule for the folder goes in {CupsService.PdfAppArmorPath}.",
+                PdfConfinement.AppArmorFixed =>
+                    " AppArmor confines cups-pdf here and has no local file to add a rule to, so it may refuse this folder.",
+                PdfConfinement.SeLinux =>
+                    " SELinux is enforcing here, so it may refuse a folder outside the one it already labels.",
+                _ => "",
+            }
+            : "";
+
+        PdfFolderNote.Text = note + confined;
+        PdfFolderNote.IsVisible = PdfFolderNote.Text.Length > 0;
     }
 
     private static Printer Clone(Printer p) => new()

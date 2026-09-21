@@ -74,7 +74,7 @@ in this index.
 | [terminal-emulator.md](docs/terminal-emulator.md) | The three surfaces drawn by `TerminalControl`: reading a container's log, running a command in one, the PTY session, the emulator itself and mouse reporting. |
 | [services.md](docs/services.md) | systemd units in both scopes, the three read scripts and why they are three, the journal tail, and the commands. |
 | [cron.md](docs/cron.md) | every crontab on the host, the day-field rule and the next-run times, the byte-exact round trip, the conflict check, and the run-parts directories. |
-| [printing.md](docs/printing.md) | the host's CUPS in three tabs: the queues read as base64 blobs of lpstat prose, why there is no version string, the spool's own poll, what the CLI will not say about a job, and the driverless-first driver picker over a 20,000-entry list that never crosses the wire. |
+| [printing.md](docs/printing.md) | the host's CUPS in three tabs: the queues read as base64 blobs of lpstat prose, why there is no version string, the spool's own poll, what the CLI will not say about a job, and the driverless-first driver picker over a 20,000-entry list that never crosses the wire, the four-step add wizard beside the one-page editor, and the PDF queue over cups-pdf. |
 | [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, the listing the Overview shares, and the Settings tab over each manager's own configuration. |
 | [user-accounts.md](docs/user-accounts.md) | Users and groups, the name suggestion, the password path over stdin, and deleting. |
 | [storage.md](docs/storage.md) | The host's disks from one `lsblk -J`, and what SMART says about each one. |

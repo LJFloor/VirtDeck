@@ -17,10 +17,14 @@ namespace VirtDeck.Services
     /// The host's CUPS, over the shared SSH connection.
     ///
     /// <para><b>Reads are un-elevated and writes are not.</b> <c>lpstat</c>, <c>lpoptions</c>,
-    /// <c>lpinfo</c> and <c>cupsctl</c> all answer an ordinary account (verified), so looking at
-    /// this page never puts a sudo prompt in front of somebody who only wanted to look. Every
-    /// mutation goes through <c>RunSudoCommand</c>, which is the split
-    /// <see cref="PackageService"/> states and <see cref="SystemdService"/> follows.</para>
+    /// <c>lpinfo -m</c> and <c>cupsctl</c> all answer an ordinary account, so looking at this page
+    /// never puts a sudo prompt in front of somebody who only wanted to look. Every mutation goes
+    /// through <c>RunSudoCommand</c>, which is the split <see cref="PackageService"/> states and
+    /// <see cref="SystemdService"/> follows.</para>
+    ///
+    /// <para><b><see cref="DevicesAsync"/> is the one read on the other side of that line</b>, and
+    /// not by choice: <c>lpinfo -v</c> is an administration operation to cupsd, not a read. It is
+    /// also not on the path anybody takes to look at this page. See its own remarks.</para>
     ///
     /// <para><b>Each tool's whole output rides as one base64 blob rather than as tagged fields.</b>
     /// The CUPS tools print English sentences with colons in them, so a field-per-tab record would
@@ -587,9 +591,21 @@ namespace VirtDeck.Services
         /// What the host can see to print to, from <c>lpinfo -l -v</c>: its record is a
         /// <c>Device:</c> block of indented <c>key = value</c> lines.
         ///
+        /// <para><b>This is the one read in this service that is elevated, and it has to be.</b>
+        /// <c>lpinfo -v</c> asks cupsd for <c>CUPS-Get-Devices</c>, which the stock cupsd.conf puts
+        /// in the same <c>Limit</c> block as <c>CUPS-Add-Modify-Printer</c>: "all administration
+        /// operations require an administrator to authenticate", <c>Require user @SYSTEM</c>. An
+        /// account outside the host's <c>lpadmin</c> group is refused, lpinfo says so on stderr,
+        /// and this script fences stderr, so what came back was an empty listing that looked
+        /// exactly like a host with nothing plugged in. <c>lpinfo -m</c> is a different operation
+        /// (<c>CUPS-Get-PPDs</c>, which no Limit block names) and stays un-elevated, which is why
+        /// the driver picker works for anybody and this did not.</para>
+        ///
         /// <para>The schemes with no device behind them (a bare <c>ipp</c>, <c>socket</c>, <c>lpd</c>)
         /// come back too and are kept, because they are how somebody types in a printer this host
-        /// cannot discover.</para>
+        /// cannot discover. They are also the tell: <b>a cupsd that answers at all lists its own
+        /// backends</b>, so an empty list is a refusal rather than an answer, and the caller says
+        /// so rather than reporting that the host saw nothing.</para>
         /// </summary>
         public async Task<List<(string Uri, string Info, string DeviceId)>> DevicesAsync(
             CancellationToken ct = default)
@@ -601,7 +617,7 @@ namespace VirtDeck.Services
                 exit 0
                 """;
 
-            var raw = await Task.Run(() => _ssh.RunCommand(ShellScript.Wrap(script)), ct);
+            var raw = await Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
 
             var devices = new List<(string, string, string)>();
             string uri = string.Empty, info = string.Empty, id = string.Empty;
@@ -636,6 +652,259 @@ namespace VirtDeck.Services
             return devices;
         }
 
+        // The folder half of the PDF picture, in both readers below: the host's own Out line, every
+        // instance file beside it, and what would have an opinion about a folder that is neither.
+        //
+        // Un-elevated like every other read here. All three files are world readable where they
+        // exist (0644), and a host that hides one answers "no" rather than a sudo prompt.
+        private const string PdfFolderScript = """
+            o=""
+            [ -r /etc/cups/cups-pdf.conf ] &&
+              o="$(sed -n 's/^[[:space:]]*Out[[:space:]][[:space:]]*//p' \
+                   /etc/cups/cups-pdf.conf 2>/dev/null | head -n 1)"
+            printf 'o\t%s\n' "$o"
+            for f in /etc/cups/cups-pdf-*.conf; do
+              [ -f "$f" ] || continue
+              n=${f#/etc/cups/cups-pdf-}
+              n=${n%.conf}
+              printf 'i\t%s\t%s\n' "$n" \
+                "$(sed -n 's/^[[:space:]]*Out[[:space:]][[:space:]]*//p' "$f" 2>/dev/null | head -n 1)"
+            done
+            c=none
+            if [ "$(cat /sys/fs/selinux/enforce 2>/dev/null)" = 1 ]; then
+              c=selinux
+            elif [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ] &&
+                 [ -e /etc/apparmor.d/usr.sbin.cupsd ]; then
+              c=fixed
+              grep -q 'local/usr\.lib\.cups\.backend\.cups-pdf' \
+                /etc/apparmor.d/usr.sbin.cupsd 2>/dev/null && c=local
+            fi
+            printf 'c\t%s\n' "$c"
+            """;
+
+        /// <summary>
+        /// What it would take to make a PDF printer here: the driver keyword to pass
+        /// <c>lpadmin -m</c>, the driver's own name for the summary, and everything
+        /// <see cref="PdfFoldersAsync"/> reads about where the files land.
+        ///
+        /// <para><b>Whether the backend is there at all is not asked here.</b> That answer is
+        /// already in <see cref="DevicesAsync"/>'s listing, as a uri beginning <c>cups-pdf:</c>, and
+        /// the wizard reads it off the scan it runs anyway. This is the second half, and it is the
+        /// expensive one: the grep is over the same 20,000-line <c>lpinfo -m</c> the driver picker
+        /// refuses to carry, so it is asked only once somebody has chosen a PDF printer.</para>
+        ///
+        /// <para>The folder is cups-pdf's own <c>Out</c> line, in its own spelling, which normally
+        /// still contains <c>${USER}</c>: it is per user and this expands nothing on its behalf.
+        /// Best-effort, because the file is not there until the package is, and empty is a fine
+        /// answer for a sentence that simply does not get said.</para>
+        /// </summary>
+        public Task<PdfPrinterInfo> PdfQueueAsync(CancellationToken ct = default)
+        {
+            // The needle is a constant of this app's, not anything typed, so it stays in the script
+            // text; the driver picker's needle goes through an argv because it is the user's.
+            const string script = """
+                export LC_ALL=C
+                d=""
+                command -v lpinfo >/dev/null 2>&1 &&
+                  d="$(lpinfo -m 2>/dev/null | grep -i -F -- 'cups-pdf' 2>/dev/null | head -n 1)"
+                printf 'm\t%s\n' "$d"
+
+                """ + PdfFolderScript + "\nexit 0";
+
+            return Task.Run(() => ReadPdf(_ssh.RunCommand(ShellScript.Wrap(script))), ct);
+        }
+
+        /// <summary>
+        /// The same picture without the driver: where the files land, which queues already have a
+        /// folder of their own, and what confines the backend.
+        ///
+        /// <para>The edit window reads this rather than <see cref="PdfQueueAsync"/> because it
+        /// opens on every printer and the driver keyword is two seconds of <c>lpinfo -m</c> that
+        /// only somebody making a queue has a use for.</para>
+        /// </summary>
+        public Task<PdfPrinterInfo> PdfFoldersAsync(CancellationToken ct = default)
+        {
+            var script = "export LC_ALL=C\n" + PdfFolderScript + "\nexit 0";
+            return Task.Run(() => ReadPdf(_ssh.RunCommand(ShellScript.Wrap(script))), ct);
+        }
+
+        private static PdfPrinterInfo ReadPdf(string raw)
+        {
+            string driver = string.Empty, driverName = string.Empty, folder = string.Empty;
+            var instances = new List<PdfInstance>();
+            var confinement = PdfConfinement.None;
+
+            foreach (var record in raw.Split('\n'))
+            {
+                var line = record.TrimEnd('\r');
+                var tab = line.IndexOf('\t');
+                if (tab <= 0) continue;
+
+                var value = line[(tab + 1)..].Trim();
+                if (value.Length == 0) continue;
+
+                switch (line[..tab])
+                {
+                    case "m":
+                        // One lpinfo -m line: the keyword, a space, then the description.
+                        var space = value.IndexOf(' ');
+                        driver = space > 0 ? value[..space] : value;
+                        driverName = space > 0 ? value[(space + 1)..].Trim() : string.Empty;
+                        break;
+
+                    case "o": folder = value; break;
+
+                    case "i":
+                        // name, then its Out line, which may be empty: a file with no Out of its
+                        // own still claims the name, so the record stands either way.
+                        var at = value.IndexOf('\t');
+                        instances.Add(at < 0
+                            ? new PdfInstance(value, string.Empty)
+                            : new PdfInstance(value[..at], value[(at + 1)..].Trim()));
+                        break;
+
+                    case "c":
+                        confinement = value switch
+                        {
+                            "local" => PdfConfinement.AppArmorLocal,
+                            "fixed" => PdfConfinement.AppArmorFixed,
+                            "selinux" => PdfConfinement.SeLinux,
+                            _ => PdfConfinement.None,
+                        };
+                        break;
+                }
+            }
+
+            return new PdfPrinterInfo(driver, driverName, folder, instances, confinement);
+        }
+
+        /// <summary>
+        /// What the cups-pdf backend is packaged as, by package manager id. Empty where this app
+        /// has no name to offer, which is what makes the Install button disable itself with a
+        /// reason rather than run something invented.
+        ///
+        /// <para>Here rather than in the wizard because it is a fact about CUPS, and a constant of
+        /// this app's rather than anything typed: that is the rule
+        /// <c>SoftwareUpdatesModule.InstallSupportAsync</c> states about installing a named
+        /// package.</para>
+        /// </summary>
+        public static string PdfPackage(string managerId) => managerId switch
+        {
+            "apt" => "printer-driver-cups-pdf",
+            "dnf" or "pacman" => "cups-pdf",
+            _ => string.Empty,
+        };
+
+        // ---- A PDF queue's own folder ----------------------------------------
+
+        /// <summary>The bare backend, which writes wherever <c>/etc/cups/cups-pdf.conf</c> says.</summary>
+        public const string PdfUri = "cups-pdf:/";
+
+        /// <summary>The file the backend's AppArmor profile includes for rules that are not the
+        /// distribution's, on the hosts that ship one. See <see cref="PdfConfinement"/>.</summary>
+        public const string PdfAppArmorPath = "/etc/apparmor.d/local/usr.lib.cups.backend.cups-pdf";
+
+        public static bool IsPdfUri(string uri) =>
+            uri.StartsWith("cups-pdf:", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The instance a PDF device uri names, or empty for the bare backend.
+        ///
+        /// <para><b>This is the whole mechanism</b>: cups-pdf reads
+        /// <c>/etc/cups/cups-pdf-&lt;instance&gt;.conf</c> when the uri it was called with spells
+        /// one after the slash, and its own device listing announces one line per such file. So a
+        /// queue that writes somewhere of its own is an ordinary queue with a longer uri, and
+        /// nothing here symlinks or copies a backend.</para>
+        /// </summary>
+        public static string PdfInstanceOf(string uri) =>
+            IsPdfUri(uri) && uri.Length > PdfUri.Length ? uri[PdfUri.Length..].Trim() : string.Empty;
+
+        public static string PdfUriFor(string instance) =>
+            instance.Length == 0 ? PdfUri : PdfUri + instance;
+
+        public static string PdfConfigPath(string instance) => $"/etc/cups/cups-pdf-{instance}.conf";
+
+        /// <summary>
+        /// A folder as it is written into an <c>Out</c> line. Trailing slashes go, because
+        /// cups-pdf strips them itself and an AppArmor rule built from one would not match.
+        /// </summary>
+        public static string PdfFolderText(string folder)
+        {
+            var clean = folder.Trim();
+            while (clean.Length > 1 && clean.EndsWith('/')) clean = clean[..^1];
+            return clean;
+        }
+
+        /// <summary>
+        /// The first thing wrong with a folder somebody typed, or null. Empty is fine and means
+        /// the host's own <c>Out</c>, which is not this app's to have an opinion about.
+        /// </summary>
+        public static string? PdfFolderProblem(string folder)
+        {
+            var clean = PdfFolderText(folder);
+            if (clean.Length == 0) return null;
+
+            if (clean.Any(char.IsControl)) return "A folder cannot contain a control character.";
+
+            if (!clean.StartsWith('/') && !clean.StartsWith("${HOME}", StringComparison.Ordinal))
+                return "A PDF folder starts at / or at ${HOME}.";
+
+            // cups-pdf expands exactly two things and treats the rest of the line as the path, so
+            // anything else with a $ in it is not the folder it looks like. The globbing characters
+            // go with them: this folder also becomes an AppArmor rule, where they mean something.
+            var bare = clean.Replace("${HOME}", "").Replace("${USER}", "");
+
+            if (bare.Any(c => c is '$' or '{' or '}'))
+                return "cups-pdf expands ${HOME} and ${USER}, and nothing else.";
+
+            if (bare.Any(c => c is '"' or '\'' or '\\' or '*' or '?' or '[' or ']'))
+                return "A PDF folder cannot contain a quote, a backslash or a wildcard.";
+
+            return null;
+        }
+
+        /// <summary>
+        /// The rules that let the confined backend read one instance file and write into one
+        /// folder, for the local include Debian and Ubuntu leave in the profile.
+        ///
+        /// <para><c>${HOME}</c> becomes the tunable AppArmor already has and <c>${USER}</c> becomes
+        /// one path segment, because the rule has to cover whoever prints. The directories above
+        /// the folder are granted too: cups-pdf creates the whole chain on the first job, and a
+        /// rule for the folder alone would stop at its parent.</para>
+        /// </summary>
+        private static string PdfAppArmorRules(string instance, string folder)
+        {
+            var pattern = folder.Replace("${HOME}", "@{HOME}").Replace("${USER}", "*");
+
+            var lines = new List<string>
+            {
+                $"  {PdfConfigPath(instance)} r,",
+                $"  \"{pattern}/\" rw,",
+                $"  \"{pattern}/**\" rw,",
+            };
+
+            lines.AddRange(PdfParents(pattern).Select(parent => $"  \"{parent}/\" rw,"));
+
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>Every directory above one AppArmor pattern, up to but not including a
+        /// top-level one or <c>@{HOME}</c> itself: those exist on any host and are not the
+        /// backend's to make.</summary>
+        private static IEnumerable<string> PdfParents(string pattern)
+        {
+            for (var at = pattern.LastIndexOf('/'); at > 0;)
+            {
+                var parent = pattern[..at];
+
+                // "/srv" has its only slash first, and "@{HOME}" has none.
+                if (parent.LastIndexOf('/') <= 0) yield break;
+
+                yield return parent;
+                at = parent.LastIndexOf('/');
+            }
+        }
+
         // ---- Writing ---------------------------------------------------------
 
         /// <summary>Enables or disables a queue: whether it prints what it has taken.</summary>
@@ -655,30 +924,63 @@ namespace VirtDeck.Services
             Run(ct, "lpadmin", "-x", Addressable(name));
 
         /// <summary>
-        /// Creates a queue or changes one. <b>CUPS has one command for both</b>: <c>lpadmin -p</c>
-        /// against a name that exists modifies it in place, keeping its id and its spool, so there
-        /// is no recreate to warn about the way the containers module has.
+        /// Makes a queue that is not there yet. <b>CUPS has one command for both this and
+        /// <see cref="SaveAsync"/></b>: <c>lpadmin -p</c> against a name that exists modifies it in
+        /// place, keeping its id and its spool, so there is no recreate to warn about the way the
+        /// containers module has.
+        ///
+        /// <para>The name is checked <b>strictly</b>, because this is the one that creates it. See
+        /// "Creating versus addressing are different rules".</para>
         /// </summary>
-        public Task SaveAsync(Printer printer, string model, CancellationToken ct = default)
+        public Task CreateAsync(Printer printer, string model, CancellationToken ct = default)
         {
             var name = printer.Name.Trim();
             if (NewNameProblem(name) is { } problem) throw new ArgumentException(problem);
 
+            var newOnly = new List<string>();
+            if (model.Trim() is { Length: > 0 } driver) { newOnly.Add("-m"); newOnly.Add(driver); }
+            newOnly.Add("-o");
+            newOnly.Add("printer-is-shared=" + (printer.Shared ? "true" : "false"));
+
+            return Run(ct, LpadminArgv(name, printer, newOnly));
+        }
+
+        /// <summary>
+        /// Changes a queue that is already on the host, which is the same <c>lpadmin -p</c>.
+        ///
+        /// <para><b>No driver and no sharing</b>: those belong to the add wizard, and the edit
+        /// window does not show them. lpadmin without <c>-m</c> keeps the queue's PPD and without
+        /// <c>-o printer-is-shared</c> keeps its sharing, so an edit cannot change either by
+        /// writing back a value nobody looked at.</para>
+        ///
+        /// <para>The name is checked only for what would be a bug on our side, <b>not</b> against
+        /// <see cref="NewNameProblem"/>: a queue cupsd once accepted may carry a name this app
+        /// would refuse to create, and refusing to edit it would make its location unchangeable for
+        /// no reason. The argv rule is what makes addressing it safe.</para>
+        /// </summary>
+        public Task SaveAsync(Printer printer, CancellationToken ct = default) =>
+            Run(ct, LpadminArgv(Addressable(printer.Name), printer, []));
+
+        /// <summary>The one <c>lpadmin</c> vector both of the above run. What only a new queue gets
+        /// is handed in rather than flagged.</summary>
+        private static string[] LpadminArgv(string name, Printer printer, IEnumerable<string> newOnly)
+        {
             var argv = new List<string> { "lpadmin", "-p", name };
 
+            // The edit window never changes the uri itself, but a PDF folder of its own moves it
+            // onto an instance. An unchanged uri is a no-op to lpadmin.
             if (printer.DeviceUri.Trim() is { Length: > 0 } uri) { argv.Add("-v"); argv.Add(uri); }
-            if (model.Trim() is { Length: > 0 } driver) { argv.Add("-m"); argv.Add(driver); }
 
             argv.Add("-D"); argv.Add(printer.Description);
             argv.Add("-L"); argv.Add(printer.Location);
-            argv.Add("-o"); argv.Add("printer-is-shared=" + (printer.Shared ? "true" : "false"));
+            argv.AddRange(newOnly);
 
             // -E after -p enables the queue and sets it accepting, which is the only sensible
             // state for something somebody just added. On an edit it is equally harmless: both are
             // separate commands of their own on the page.
             argv.Add("-E");
 
-            return Run(ct, [.. argv]);
+            return [.. argv];
         }
 
         /// <summary>Cancels one job.</summary>
@@ -708,6 +1010,127 @@ namespace VirtDeck.Services
         /// </summary>
         public Task SetSettingAsync(string key, string value, CancellationToken ct = default) =>
             Run(ct, "cupsctl", key + "=" + value);
+
+        // The instance file, the AppArmor block that goes with it, and the removal of both. One
+        // script because they are one change: a config file the confined backend may not read is
+        // the same as no config file, and a rule for a file that is not there is litter.
+        //
+        // AppArmor goes FIRST, and is put back the way it was when the parser refuses it. That
+        // file is included by cupsd's own profile, so a block that does not compile would stop
+        // cupsd's confinement loading at the next boot; and a config file written before a refused
+        // rule would be left behind claiming the queue's name, so the wizard would refuse the
+        // retry.
+        //
+        // The instance file is the host's OWN cups-pdf.conf with one line changed, never a fresh
+        // file with an Out line in it. cups-pdf reads one config file and falls back to its
+        // compiled-in defaults for everything else, so a two-line file would quietly hand this
+        // queue upstream's Label, Log, GhostScript and umask rather than the ones the host is
+        // already printing with.
+        private const string PdfFolderWriteScript = """
+            q=${a[0]}
+            out=${a[1]}
+            confined=${a[2]}
+            rules=${a[3]}
+
+            f=/etc/cups/cups-pdf-$q.conf
+            mark="### Written by VirtDeck for the CUPS queue $q."
+            begin="# VirtDeck: cups-pdf-$q begin"
+            end="# VirtDeck: cups-pdf-$q end"
+            aa=/etc/apparmor.d/local/usr.lib.cups.backend.cups-pdf
+
+            if [ -n "$confined" ] && [ -d "$(dirname -- "$aa")" ]; then
+              rm -f -- "$aa.vd-old"
+              t=$(mktemp "$(dirname -- "$aa")/.vd-XXXXXX") || exit 1
+              trap 'rm -f -- "$t"' EXIT
+
+              # This queue's block is replaced and every other line is kept, including other
+              # queues' blocks and whatever the host's own administrator put there.
+              if [ -f "$aa" ]; then
+                awk -v b="$begin" -v e="$end" '$0==b {skip=1} !skip {print} $0==e {skip=0}' \
+                  "$aa" > "$t" || exit 1
+                cp -p -- "$aa" "$aa.vd-old" || exit 1
+              fi
+
+              [ -n "$out" ] && printf '%s\n%s\n%s\n' "$begin" "$rules" "$end" >> "$t"
+
+              chmod 0644 -- "$t"
+              mv -f -- "$t" "$aa" || exit 1
+              trap - EXIT
+
+              if command -v apparmor_parser >/dev/null 2>&1; then
+                said=$(apparmor_parser -r /etc/apparmor.d/usr.sbin.cupsd 2>&1) || {
+                  if [ -f "$aa.vd-old" ]; then mv -f -- "$aa.vd-old" "$aa"; else rm -f -- "$aa"; fi
+                  apparmor_parser -r /etc/apparmor.d/usr.sbin.cupsd >/dev/null 2>&1
+                  printf '%s\n' "$said" >&2
+                  exit 7
+                }
+              fi
+
+              rm -f -- "$aa.vd-old"
+            fi
+
+            if [ -n "$out" ]; then
+              t=$(mktemp /etc/cups/.cups-pdf-XXXXXX) || exit 1
+              trap 'rm -f -- "$t"' EXIT
+              printf '%s\n' "$mark" > "$t" || exit 1
+
+              if [ -r /etc/cups/cups-pdf.conf ]; then
+                awk -v out="$out" '
+                  /^[[:space:]]*Out[[:space:]]/ { if (!done) { print "Out " out; done=1 } next }
+                  { print }
+                  END { if (!done) print "Out " out }
+                ' /etc/cups/cups-pdf.conf >> "$t" || exit 1
+                chmod --reference=/etc/cups/cups-pdf.conf -- "$t" 2>/dev/null || chmod 0644 -- "$t"
+                chown --reference=/etc/cups/cups-pdf.conf -- "$t" 2>/dev/null || true
+              else
+                printf 'Out %s\n' "$out" >> "$t" || exit 1
+                chmod 0644 -- "$t"
+              fi
+
+              mv -f -- "$t" "$f" || exit 1
+              trap - EXIT
+            elif [ -f "$f" ] && head -n 1 -- "$f" | grep -q '^### Written by VirtDeck'; then
+              # Only a file this app wrote is this app's to remove. Somebody else's stays, and the
+              # queue has already been moved off it.
+              rm -f -- "$f"
+            fi
+
+            exit 0
+            """;
+
+        /// <summary>
+        /// Points one PDF queue at a folder of its own, or hands it back to the host's.
+        ///
+        /// <para><b>The queue is not touched here.</b> This writes the file its device uri names;
+        /// moving the uri is the same <c>lpadmin</c> as every other change to a queue, and the
+        /// module runs the two in the order that never leaves a uri pointing at a file that is not
+        /// there. See "A folder of its own".</para>
+        /// </summary>
+        /// <param name="instance">The name after <c>cups-pdf:/</c>, which is the queue's own name
+        /// for a queue that had none.</param>
+        /// <param name="folder">Where the files land, or empty to remove the instance file and let
+        /// the host's own <c>Out</c> stand.</param>
+        /// <param name="confinement">What the host answered about AppArmor and SELinux. Only
+        /// <see cref="PdfConfinement.AppArmorLocal"/> writes policy.</param>
+        public Task SetPdfFolderAsync(string instance, string folder, PdfConfinement confinement,
+            CancellationToken ct = default)
+        {
+            var name = Addressable(instance);
+            if (NewNameProblem(name) is { } problem) throw new ArgumentException(problem);
+
+            var clean = PdfFolderText(folder);
+            if (PdfFolderProblem(clean) is { } bad) throw new ArgumentException(bad);
+
+            // Whether there is an AppArmor half at all is its own field: a removal has no rules
+            // to write and still has this queue's old block to take out.
+            var confined = confinement == PdfConfinement.AppArmorLocal;
+            var rules = confined && clean.Length > 0 ? PdfAppArmorRules(name, clean) : string.Empty;
+
+            var script = ShellScript.ArrayFrom("a", [name, clean, confined ? "1" : "", rules]) +
+                         PdfFolderWriteScript;
+
+            return Task.Run(() => _ssh.RunSudoCommand(ShellScript.Wrap(script)), ct);
+        }
 
         // ---- Plumbing --------------------------------------------------------
 

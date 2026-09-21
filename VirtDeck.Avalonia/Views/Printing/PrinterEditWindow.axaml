@@ -1,9 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:pf="clr-namespace:VirtDeck.Avalonia.Views.Printing"
         x:Class="VirtDeck.Avalonia.Views.Printing.PrinterEditWindow"
-        Title="Add printer"
-        Width="760" Height="560" MinWidth="640" MinHeight="440"
+        Title="Edit printer"
+        Width="560" SizeToContent="Height" MinWidth="480"
         WindowStartupLocation="CenterOwner">
 
   <DockPanel>
@@ -15,19 +14,46 @@
                    VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
           <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
-          <Button Name="SaveButton" Content="Add" MinWidth="88" IsDefault="True" Classes="accent" />
+          <Button Name="SaveButton" Content="Save" MinWidth="88" IsDefault="True" Classes="accent" />
         </StackPanel>
       </Grid>
     </Border>
 
-    <!-- Pages on the left, one on the right. They are not named by the window's logic: it walks
-         these items and talks to whichever of them implement IPrinterTab, so a new page is a
-         TabItem here and nothing else. The x:Name is only for reading the driver page's own
-         answer back out, which is not part of the model. -->
-    <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
-      <TabItem Header="General"><pf:PrinterGeneralTab /></TabItem>
-      <TabItem Header="Driver"><pf:PrinterDriverTab Name="DriverTab" /></TabItem>
-    </TabControl>
+    <StackPanel Classes="page" Spacing="18" Margin="16">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Printer">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+            <!-- Disabled rather than hidden, with the reason on the wrapping Border, because the
+                 name is the queue: CUPS has no rename. -->
+            <Border Grid.Row="0" Grid.Column="1" Background="Transparent"
+                    ToolTip.Tip="CUPS has no rename. To change the name, add a printer and delete this one.">
+              <TextBox Name="NameBox" IsEnabled="False" />
+            </Border>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Description" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="DescriptionBox" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Location" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="LocationBox" />
+          </Grid>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <!-- Only for a queue on the cups-pdf backend. -->
+      <HeaderedContentControl Name="PdfGroup" Theme="{StaticResource JbGroupBox}" Header="PDF"
+                              IsVisible="False">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*">
+            <TextBlock Grid.Column="0" Text="Files land in" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Name="PdfFolderBox" />
+          </Grid>
+          <TextBlock Name="PdfFolderNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
 
   </DockPanel>
 </Window>

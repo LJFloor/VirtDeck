@@ -28,6 +28,10 @@ public partial class PrintingModule : UserControl, IModule
 {
     private CupsService? _cups;
 
+    /// <summary>Kept beside the service for the one thing the add wizard needs that CUPS does
+    /// not provide: installing the cups-pdf backend through the host's package manager.</summary>
+    private SshConnectionManager? _ssh;
+
     private CancellationTokenSource _cts = new();
     private bool _busy;
 
@@ -83,7 +87,7 @@ public partial class PrintingModule : UserControl, IModule
         PrinterList.SelectionChanged += (_, _) => UpdateMenu();
         JobList.SelectionChanged += (_, _) => UpdateMenu();
 
-        PrinterList.DoubleTapped += async (_, _) => await EditPrinterAsync(SelectedPrinters.FirstOrDefault());
+        PrinterList.DoubleTapped += async (_, _) => await EditPrinterAsync();
 
         // Both only re-render what is already in hand, so neither costs a round trip. The debounce
         // that makes typing cheap lives in FilterBox.
@@ -99,9 +103,9 @@ public partial class PrintingModule : UserControl, IModule
         JobRefreshButton.Click += async (_, _) => await RefreshAsync();
         ServerRefreshButton.Click += async (_, _) => await RefreshAsync();
 
-        AddPrinterButton.Click += async (_, _) => await EditPrinterAsync(null);
+        AddPrinterButton.Click += async (_, _) => await AddPrinterAsync();
 
-        MenuPrinterEdit.Click += async (_, _) => await EditPrinterAsync(SelectedPrinters.FirstOrDefault());
+        MenuPrinterEdit.Click += async (_, _) => await EditPrinterAsync();
         MenuPrinterDefault.Click += async (_, _) => await SetDefaultAsync();
         MenuPrinterEnable.Click += async (_, _) => await RunOverPrintersAsync(
             "Enabling", r => r.CanEnable, (c, n, t) => c.SetEnabledAsync(n, true, t));
@@ -194,6 +198,7 @@ public partial class PrintingModule : UserControl, IModule
 
     public void Attach(SshConnectionManager ssh)
     {
+        _ssh = ssh;
         _cups = new CupsService(ssh);
         _cups.ConfigChanged += OnConfigChanged;
     }
@@ -649,15 +654,71 @@ public partial class PrintingModule : UserControl, IModule
 
     // ---- Commands ------------------------------------------------------
 
-    private async Task EditPrinterAsync(PrinterRow? row)
+    /// <summary>
+    /// The add wizard, and then the commands it settled on.
+    ///
+    /// <para><b>The wizard runs no lpadmin of its own</b>: making the queue happens here, beside
+    /// every other printer command, so it gets the same status line, the same error dialog and the
+    /// same refresh.</para>
+    ///
+    /// <para><b>Making the queue is the one step allowed to fail the add.</b> The other two are
+    /// afterthoughts to a queue that now exists, and a test page CUPS refused must not be reported
+    /// as the printer not having been added; each names itself in the status slot and answers for
+    /// itself. That is the split <c>CreateVmWizard</c> makes between defining the shell and hanging
+    /// devices off it.</para>
+    /// </summary>
+    private async Task AddPrinterAsync()
     {
-        if (_cups is null) return;
+        if (_cups is null || _ssh is null) return;
 
-        var dialog = new PrinterEditWindow(Cups, _catalog, row?.Printer);
+        var wizard = new AddPrinterWizard(Cups, _ssh, _catalog);
+        if (await wizard.ShowDialog<bool?>(Owner) is not true || wizard.Result is not { } printer) return;
+
+        // The queue's device uri names a cups-pdf config file, so that file goes first: a uri
+        // pointing at one that is not there prints into the host's own folder instead, silently.
+        // This is the one step that can stop the add before anything exists.
+        if (wizard.PdfFolder is { Length: > 0 } folder &&
+            !await RunOneAsync($"Writing {CupsService.PdfConfigPath(printer.Name)}",
+                t => Cups.SetPdfFolderAsync(printer.Name, folder, wizard.PdfConfinement, t),
+                refresh: false))
+            return;
+
+        await RunOneAsync($"Adding {printer.Name}", t => Cups.CreateAsync(printer, wizard.Model, t));
+
+        // RunOneAsync re-reads, so this is the host's answer rather than ours.
+        if (!_catalog.Printers.Any(p => p.Name == printer.Name)) return;
+
+        if (wizard.MakeDefault)
+            await RunOneAsync($"Making {printer.Name} the default",
+                t => Cups.SetDefaultAsync(printer.Name, t));
+
+        if (wizard.PrintTestPage)
+            await RunOneAsync($"Printing a test page on {printer.Name}",
+                t => Cups.PrintTestPageAsync(printer.Name, t));
+    }
+
+    private async Task EditPrinterAsync()
+    {
+        if (_cups is null || SelectedPrinters.FirstOrDefault() is not { } row) return;
+
+        var dialog = new PrinterEditWindow(Cups, row.Printer);
         if (await dialog.ShowDialog<bool?>(Owner) is not true || dialog.Result is not { } printer) return;
 
-        await RunOneAsync(row is null ? $"Adding {printer.Name}" : $"Saving {printer.Name}",
-            t => Cups.SaveAsync(printer, dialog.Model, t));
+        // A folder of its own goes in before the queue points at it, and a folder handed back to
+        // the host's goes out after the queue has stopped pointing at it. Either way the uri never
+        // names a config file that is not there.
+        if (dialog.PdfFolder is { Length: > 0 } folder &&
+            !await RunOneAsync($"Writing {CupsService.PdfConfigPath(dialog.PdfInstance)}",
+                t => Cups.SetPdfFolderAsync(dialog.PdfInstance, folder, dialog.PdfConfinement, t),
+                refresh: false))
+            return;
+
+        if (!await RunOneAsync($"Saving {printer.Name}", t => Cups.SaveAsync(printer, t)))
+            return;
+
+        if (dialog.PdfFolder is { Length: 0 })
+            await RunOneAsync($"Removing {CupsService.PdfConfigPath(dialog.PdfInstance)}",
+                t => Cups.SetPdfFolderAsync(dialog.PdfInstance, "", dialog.PdfConfinement, t));
     }
 
     private async Task SetDefaultAsync()
@@ -785,9 +846,12 @@ public partial class PrintingModule : UserControl, IModule
 
     /// <summary>One command that is not per-row: the status slot says what, and the host's own
     /// words are what a failure reports.</summary>
-    private async Task RunOneAsync(string what, Func<CancellationToken, Task> action)
+    private async Task<bool> RunOneAsync(string what, Func<CancellationToken, Task> action,
+        bool refresh = true)
     {
-        if (_cups is null) return;
+        if (_cups is null) return false;
+
+        var done = true;
 
         SetStatus(what + "...");
         try
@@ -796,13 +860,18 @@ public partial class PrintingModule : UserControl, IModule
         }
         catch (OperationCanceledException)
         {
-            return;
+            return false;
         }
         catch (Exception ex)
         {
             await MessageDialog.Info(Owner, "Printing", CupsService.Reason(ex.Message));
+            done = false;
         }
 
-        await RefreshAsync();
+        // A step another one depends on is not the place for a round trip: the caller runs the
+        // next command either way, and the listing is read once at the end of the lot.
+        if (refresh) await RefreshAsync();
+
+        return done;
     }
 }

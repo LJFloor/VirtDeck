@@ -3,7 +3,8 @@ using Avalonia;
 namespace VirtDeck.Avalonia.Views;
 
 /// <summary>
-/// One line on the Create-VM wizard's summary page: either a section header or a label/value pair.
+/// One line on a wizard's summary page (Create VM, Add printer): either a section header or a
+/// label/value pair.
 /// The row carries its own margin so the list stays a plain <c>ItemsControl</c> with one template.
 /// </summary>
 public sealed class SummaryRow

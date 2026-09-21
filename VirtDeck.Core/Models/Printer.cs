@@ -141,6 +141,90 @@ namespace VirtDeck.Models
     public readonly record struct CupsSetting(string Key, string Value);
 
     /// <summary>
+    /// What the host would do about a folder that is not the one cups-pdf already writes into.
+    ///
+    /// <para>The backend runs as root and creates the folder itself, so the only thing that can
+    /// refuse one is a mandatory access control policy, and on the distributions that ship
+    /// cups-pdf there is one. This is what the host answered, and it decides whether VirtDeck
+    /// writes a rule beside the folder or only says what may happen.</para>
+    /// </summary>
+    public enum PdfConfinement
+    {
+        /// <summary>Nothing confines the backend, so a folder is a folder.</summary>
+        None,
+
+        /// <summary>An AppArmor profile that includes a local file rules can be added to, which is
+        /// how Debian and Ubuntu ship it.</summary>
+        AppArmorLocal,
+
+        /// <summary>An AppArmor profile with no local include to hang a rule on. The folder is
+        /// written and the policy is left alone, which may mean the backend cannot use it.</summary>
+        AppArmorFixed,
+
+        /// <summary>SELinux is enforcing. Its file contexts are not VirtDeck's to relabel, so the
+        /// folder is written and what happens next is the host's policy's business.</summary>
+        SeLinux,
+    }
+
+    /// <summary>One cups-pdf configuration beside the host's own: the instance name a device uri
+    /// spells after <c>cups-pdf:/</c>, and the folder that file's <c>Out</c> line names.</summary>
+    /// <param name="Name">The instance, which is the <c>&lt;name&gt;</c> in
+    /// <c>/etc/cups/cups-pdf-&lt;name&gt;.conf</c>.</param>
+    /// <param name="Folder">Its <c>Out</c> line, in cups-pdf's own spelling.</param>
+    public readonly record struct PdfInstance(string Name, string Folder);
+
+    /// <summary>
+    /// What a PDF printer would be made of on this host.
+    ///
+    /// <para>A PDF printer is not a kind of queue CUPS knows about: it is the ordinary
+    /// <c>cups-pdf</c> backend plus that package's own PPD, and neither is on a stock install. The
+    /// backend's presence is read off the device listing (a uri beginning <c>cups-pdf:</c>); this
+    /// carries the other halves, from <c>CupsService.PdfQueueAsync</c>.</para>
+    /// </summary>
+    /// <param name="Driver">The <c>lpadmin -m</c> keyword, or empty when the host has no PDF PPD,
+    /// which is the whole reason a PDF printer cannot be made.</param>
+    /// <param name="DriverName">The driver's own description, for the summary page.</param>
+    /// <param name="Folder">Where cups-pdf writes by default, in its own spelling from
+    /// <c>/etc/cups/cups-pdf.conf</c>, so normally still holding <c>${USER}</c>. Empty where that
+    /// file was not there to read.</param>
+    /// <param name="Instances">Every <c>/etc/cups/cups-pdf-*.conf</c> on the host, which is every
+    /// queue that already writes somewhere of its own. Null on a default value.</param>
+    /// <param name="Confinement">What would have to be told about a folder of one's own.</param>
+    public readonly record struct PdfPrinterInfo(
+        string Driver,
+        string DriverName,
+        string Folder,
+        IReadOnlyList<PdfInstance>? Instances = null,
+        PdfConfinement Confinement = PdfConfinement.None)
+    {
+        // Never null, because default is a real value here: both windows hold one until the host
+        // has answered, and a record struct's default skips every initializer, so the strings
+        // would otherwise be null rather than empty.
+        private readonly string? _driver = Driver;
+        private readonly string? _driverName = DriverName;
+        private readonly string? _folder = Folder;
+
+        public string Driver { get => _driver ?? ""; init => _driver = value; }
+        public string DriverName { get => _driverName ?? ""; init => _driverName = value; }
+        public string Folder { get => _folder ?? ""; init => _folder = value; }
+
+        /// <summary>Whether a PDF queue can be made at all, which is having a PPD to point at.</summary>
+        public bool Usable => Driver.Length > 0;
+
+        /// <summary>The instances, never null: <c>default</c> is a real value here.</summary>
+        public IReadOnlyList<PdfInstance> Configured => Instances ?? [];
+
+        /// <summary>The folder one instance writes into, or the host's own where that instance has
+        /// no file of its own yet.</summary>
+        public string FolderOf(string instance) =>
+            instance.Length == 0
+                ? Folder
+                : Configured.FirstOrDefault(i => i.Name == instance) is { Name.Length: > 0 } found
+                    ? found.Folder
+                    : Folder;
+    }
+
+    /// <summary>
     /// The whole picture from one round trip: the queues, the jobs, the server settings, and the
     /// three things the module has to be able to draw when there are no queues to show.
     /// </summary>
