@@ -1,0 +1,244 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.SambaModule"
+             x:DataType="vm:ShareRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. -->
+    <x:Double x:Key="ColShrName">180</x:Double>
+    <x:Double x:Key="ColShrPath">220</x:Double>
+    <x:Double x:Key="ColShrAccess">150</x:Double>
+    <x:Double x:Key="ColShrGuest">90</x:Double>
+    <x:Double x:Key="ColShrVisible">80</x:Double>
+    <x:Double x:Key="ColShrWhere">110</x:Double>
+
+    <x:Double x:Key="ColUsrName">200</x:Double>
+    <x:Double x:Key="ColUsrSource">130</x:Double>
+    <x:Double x:Key="ColUsrAccount">160</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- One line, above both tabs, and visible only when something is actually wrong. It sits
+         outside the TabControl because every condition it reports is about the host rather than
+         about a table: smbd not running makes the Users tab pointless too.
+
+         One notice at a time, the most blocking first. Two banners would be two things to read
+         before doing anything, and the second is nearly always a consequence of the first. -->
+    <Border DockPanel.Dock="Top" Name="NoticeStrip" IsVisible="False"
+            Padding="12,8" Background="#22D68F00" BorderThickness="0,0,0,1" BorderBrush="#33808080">
+      <DockPanel>
+        <Border DockPanel.Dock="Right" Background="Transparent" Margin="12,0,0,0"
+                ToolTip.Tip="{Binding #NoticeButton.Tag}">
+          <Button Name="NoticeButton" MinWidth="88" IsVisible="False" />
+        </Border>
+        <TextBlock Name="NoticeText" VerticalAlignment="Center" TextWrapping="Wrap" />
+      </DockPanel>
+    </Border>
+
+    <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, as the services,
+         accounts and cron modules do.
+
+         Two tabs because they are two kinds of thing. A shared folder is a place; a user is a
+         credential, and one user reaches many folders. Synology splits them the same way and for
+         the same reason: the permissions grid inside a folder is where the two meet, and that is
+         the only place they should. -->
+    <TabControl Name="Tabs">
+
+      <TabItem Header="Shared folders">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <!-- A Refresh button and no poll and no tail: nothing on a host announces that
+                     smb.conf changed, the way `docker events` announces a container. See the
+                     refresh policy in "Shared idioms"; this is the cron and accounts shape. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #ShareRefreshButton.Tag}">
+                  <Button Name="ShareRefreshButton" Theme="{StaticResource JbIconButton}">
+                    <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                </Border>
+                <!-- Accented because on this page it is the one command that brings something into
+                     being, which is the rule the accounts and storage toolbars follow. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #NewShareButton.Tag}">
+                  <Button Name="NewShareButton" Content="New shared folder" Classes="accent" />
+                </Border>
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="ShareSearch" Width="220" Margin="10,0,0,0"
+                           PlaceholderText="Search name, folder or description"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="ShareHeaderStrip">
+              <!-- Indent (not Margin) puts the heading over the rows' state dot without widening
+                   the column. -->
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name" SortKey="name" Indent="14"
+                              Width="{StaticResource ColShrName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Folder" SortKey="path"
+                              Width="{StaticResource ColShrPath}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Access" SortKey="access"
+                              Width="{StaticResource ColShrAccess}"
+                              Tip="Who is named in this folder's permissions." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Guests" SortKey="guest"
+                              Width="{StaticResource ColShrGuest}"
+                              Tip="What somebody with no password may do." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Visible" SortKey="visible"
+                              Width="{StaticResource ColShrVisible}"
+                              Tip="Whether the folder appears when the host is browsed." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="In file" SortKey="where"
+                              Width="{StaticResource ColShrWhere}"
+                              Tip="Which of the host's config files defines this share." />
+              <c:ColumnHeader Text="Description" SortKey="comment" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="ShareList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="ShareMenu">
+                  <MenuItem Name="MenuShareEdit" Header="Edit" />
+                  <MenuItem Name="MenuShareToggle" Header="Disable" />
+                  <Separator />
+                  <MenuItem Name="MenuShareReapply" Header="Reapply permissions" />
+                  <MenuItem Name="MenuShareLabel" Header="Label for Samba" />
+                  <MenuItem Name="MenuShareBrowse" Header="Browse files" />
+                  <Separator />
+                  <MenuItem Name="MenuShareDelete" Header="Delete" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:ShareRow">
+                  <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                    <!-- The same 9px state dot the VM, container, account and cron lists draw. Here
+                         it says whether the folder is actually being served, which a share that is
+                         perfectly configured and sitting on a missing directory otherwise looks
+                         exactly like. -->
+                    <DockPanel Width="{StaticResource ColShrName}" ToolTip.Tip="{Binding StateText}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                               ToolTip.Tip="{Binding StateText}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Path}" Width="{StaticResource ColShrPath}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding Path}" />
+                    <TextBlock Text="{Binding AccessText}" Width="{StaticResource ColShrAccess}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding GuestText}" Width="{StaticResource ColShrGuest}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding VisibleText}" Width="{StaticResource ColShrVisible}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Where}" Width="{StaticResource ColShrWhere}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Share.FilePath}" />
+                    <TextBlock Text="{Binding Comment}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Comment}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Why the list is empty, so an unusable module never just looks broken. -->
+            <TextBlock Name="ShareEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Users">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Border Background="Transparent" ToolTip.Tip="{Binding #UserRefreshButton.Tag}">
+                  <Button Name="UserRefreshButton" Theme="{StaticResource JbIconButton}">
+                    <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                </Border>
+                <Border Background="Transparent" ToolTip.Tip="{Binding #NewUserButton.Tag}">
+                  <Button Name="NewUserButton" Content="Add user" Classes="accent" />
+                </Border>
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="UserSearch" Width="220" Margin="10,0,0,0"
+                           PlaceholderText="Search user or folder"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="UserHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="User" SortKey="name" Indent="14"
+                              Width="{StaticResource ColUsrName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Source" SortKey="source"
+                              Width="{StaticResource ColUsrSource}"
+                              Tip="Whether VirtDeck created this account, or it was already on the host." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Unix account" SortKey="account"
+                              Width="{StaticResource ColUsrAccount}" />
+              <c:ColumnHeader Text="Shared folders" SortKey="shares" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="UserList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="UserMenu">
+                  <MenuItem Name="MenuUserPassword" Header="Change password" />
+                  <MenuItem Name="MenuUserToggle" Header="Disable" />
+                  <Separator />
+                  <MenuItem Name="MenuUserDelete" Header="Delete" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:SambaUserRow">
+                  <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                    <DockPanel Width="{StaticResource ColUsrName}" ToolTip.Tip="{Binding StateText}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                               ToolTip.Tip="{Binding StateText}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding SourceText}" Width="{StaticResource ColUsrSource}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding AccountText}" Width="{StaticResource ColUsrAccount}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SharesText}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding SharesText}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="UserEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
+  </DockPanel>
+</UserControl>

@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Printing.PrinterGeneralTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page" Spacing="18">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Printer">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+            <!-- Disabled rather than hidden on an edit, with the reason on the wrapping Border,
+                 because the name is the queue: CUPS has no rename. -->
+            <Border Grid.Row="0" Grid.Column="1" Name="NameHost" Background="Transparent">
+              <TextBox Name="NameBox" />
+            </Border>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Description" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="DescriptionBox" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Location" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="LocationBox" />
+          </Grid>
+          <TextBlock Name="NameNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Connection">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Detected" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="DeviceBox" HorizontalAlignment="Stretch" />
+            <Border Grid.Row="0" Grid.Column="2" Background="Transparent" Margin="8,0,0,0"
+                    ToolTip.Tip="{Binding #FindButton.Tag}">
+              <Button Name="FindButton" Content="Find" MinWidth="72" />
+            </Border>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Address" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Name="UriBox" />
+          </Grid>
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Find asks the host what it can see. Picking one fills the address in; anything CUPS understands can be typed there instead." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Sharing">
+        <StackPanel Classes="options">
+          <CheckBox Name="SharedBox" Content="Share this printer on the network" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Other machines see it only while the server is also set to share printers, on the Server tab." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

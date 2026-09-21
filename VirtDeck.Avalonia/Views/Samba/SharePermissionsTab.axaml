@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             xmlns:sf="clr-namespace:VirtDeck.Avalonia.Views.Samba"
+             x:Class="VirtDeck.Avalonia.Views.Samba.SharePermissionsTab">
+
+  <DockPanel Margin="16">
+
+    <TextBlock DockPanel.Dock="Top" Classes="note" Margin="0,0,0,12"
+               Text="Saving writes these onto the folder itself, so a file created there by anything else stays readable by the people listed here." />
+
+    <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+      <Grid ColumnDefinitions="100,220" ColumnSpacing="6">
+        <TextBlock Grid.Column="0" Text="Guests" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1" Name="GuestBox" HorizontalAlignment="Stretch" />
+      </Grid>
+      <TextBlock Name="GuestNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False"
+                 Text="Windows 10 and 11 refuse guest shares unless they are set to allow them." />
+      <TextBlock Name="AclNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+    </StackPanel>
+
+    <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Who may use this folder" Padding="0">
+      <DockPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="EntryTools" Margin="8,6,8,6" />
+
+        <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <Grid ColumnDefinitions="100,*,150" ColumnSpacing="6">
+            <TextBlock Grid.Column="0" Classes="columnheader" Text="Kind" />
+            <TextBlock Grid.Column="1" Classes="columnheader" Text="Name" />
+            <TextBlock Grid.Column="2" Classes="columnheader" Text="Access" />
+          </Grid>
+        </Border>
+
+        <ListBox Name="EntryList" Background="Transparent" Padding="0" BorderThickness="0"
+                 ItemContainerTheme="{StaticResource JbFormRow}"
+                 KeyboardNavigation.TabNavigation="Continue">
+          <!-- Not virtualised: an unrealised row has no cells for Tab to reach, and this list is a
+               handful of rows rather than a listing. -->
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="sf:PermissionRow">
+              <Grid ColumnDefinitions="100,*,150" ColumnSpacing="6">
+                <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding Kinds}" SelectedItem="{Binding Kind, Mode=TwoWay}" />
+
+                <!-- A closed list, because the host's accounts are already in hand when this
+                     window opens: the module hands its catalog down in the constructor, so unlike
+                     the container editor's pickers there is no round trip to be usable in front
+                     of. A name that is not on the host cannot be a permission anyway, since samba
+                     resolves every entry to a uid or gid. A name the catalog does not know is
+                     still offered, so an entry already in the file is never silently dropped;
+                     see PermissionRow.RefreshNames. -->
+                <ComboBox Grid.Column="1" HorizontalAlignment="Stretch"
+                          PlaceholderText="Choose"
+                          ItemsSource="{Binding Names}"
+                          SelectedItem="{Binding Name, Mode=TwoWay}" />
+
+                <ComboBox Grid.Column="2" HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding AccessOptions}" SelectedItem="{Binding Access, Mode=TwoWay}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </HeaderedContentControl>
+
+  </DockPanel>
+</UserControl>

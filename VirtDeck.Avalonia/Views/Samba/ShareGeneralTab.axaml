@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.Samba.ShareGeneralTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page" Spacing="18">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Shared folder">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Folder" VerticalAlignment="Center" />
+            <c:RemotePathBox Grid.Row="1" Grid.Column="1" Name="PathBox" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Description" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="CommentBox" />
+
+            <!-- Only shown on a host whose smb.conf includes other files, which most do not. A
+                 picker offering one choice is a question with one answer. -->
+            <TextBlock Grid.Row="3" Grid.Column="0" Name="FileLabel" Text="In file"
+                       VerticalAlignment="Center" IsVisible="False" />
+            <ComboBox Grid.Row="3" Grid.Column="1" Name="FileBox" IsVisible="False"
+                      HorizontalAlignment="Stretch" />
+          </Grid>
+
+          <CheckBox Name="CreateBox" Content="Create the folder if it is not there" />
+
+          <!-- The verdict for the folder currently in the box, so the answer arrives while the
+               path is being chosen rather than as a failure after Save. -->
+          <TextBlock Name="PathNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Availability">
+        <StackPanel Classes="options">
+          <CheckBox Name="AvailableBox" Content="Serve this folder" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Switched off, the folder keeps its settings and its permissions and Samba stops offering it." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Permissions on disk">
+        <StackPanel Classes="options">
+          <CheckBox Name="DeepBox" Content="Apply permissions to everything already in this folder" />
+          <TextBlock Name="DeepNote" Classes="subnote" TextWrapping="Wrap" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

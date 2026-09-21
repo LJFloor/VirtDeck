@@ -420,7 +420,7 @@ namespace VirtDeck.Services
         /// Asks the host for the docker client, whether its daemon answers, and the compose plugin,
         /// in one elevated round trip.
         ///
-        /// <para><b>Elevated</b>, unlike <see cref="VirshService.CheckHostCapabilities"/>, which
+        /// <para><b>Elevated</b>, unlike <see cref="VirshService.CheckKvmSupport"/>, which
         /// this used to mirror. The daemon question here is "does the socket answer", and on a host
         /// whose login user is not in a <c>docker</c> group the socket is root-only, so un-elevated
         /// there is no answer to give at all. This is an always-sudo module (see "Containers") and

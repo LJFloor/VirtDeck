@@ -30,12 +30,22 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
 {
     private HostMetricsService? _metrics;
     private PackageService? _packages;
+    private SuspendService? _suspend;
 
     /// <summary>Cancels the reads and only the reads. Never the sampler.</summary>
     private CancellationTokenSource _cts = new();
 
     private bool _active;
     private bool _busy;
+
+    /// <summary>
+    /// A command of this page's own is on the host. Separate from <see cref="_busy"/>, which guards
+    /// the reads: the suspend command runs a read of its own when it finishes.
+    /// </summary>
+    private bool _commandBusy;
+
+    /// <summary>What the host last said about putting itself to sleep. UI thread only.</summary>
+    private SuspendPolicy _policy = new();
 
     /// <summary>
     /// The previous sample, so a rate has two ends. Only ever touched on the UI thread, which is
@@ -123,6 +133,10 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
             ModuleRequested?.Invoke(typeof(SoftwareUpdatesModule));
         };
 
+        // The one command this page gives the host, and the only one either way: block sleeping, or
+        // let it sleep again. Which of the two it is comes off what the host last said.
+        SuspendButton.Click += (_, _) => _ = SuspendCommandAsync();
+
         // A tab switch is a module switch in miniature: the left slot is repainted from the incoming
         // page and only that page is read. The Source test is ContainersModule's: SelectionChanged
         // bubbles, so a selecting control inside a page would otherwise read as a tab switch.
@@ -204,6 +218,7 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
         _packages.Changed += OnPackagesChanged;
 
         _metrics = new HostMetricsService(ssh);
+        _suspend = new SuspendService(ssh);
 
         // All three arrive on the sampler's own read thread.
         _metrics.SampleReceived += OnSample;
@@ -225,6 +240,7 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
         // shared answer, which the other page may have refreshed while this one was off screen.
         DrawOverview(Metrics.Overview);
         DrawUpdates();
+        DrawSuspend();
         PaintSamplerState();
 
         await ReadActiveAsync();
@@ -518,6 +534,7 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
                 Diagnostics.SpiceLog.Log($"[overview] workload read failed: {ex.Message}");
             }
 
+            await ReadSuspendAsync();
             await ReadUpdatesAsync();
         }
         finally
@@ -525,6 +542,159 @@ public partial class OverviewModule : UserControl, IModule, IModuleNavigator
             _busy = false;
         }
     }
+
+    /// <summary>
+    /// Whether this host will put itself to sleep. Read on every visit rather than once per host,
+    /// unlike the update listing: it is a handful of <c>systemctl</c> calls and one
+    /// <c>gsettings</c> per login, so it costs about what the workload counts beside it do, and an
+    /// answer somebody changed in a terminal is worth being current.
+    ///
+    /// <para>A read that fails leaves the row where it was and says so in the log only. It is one
+    /// line in a status box, and a host whose sleep policy could not be read is not a host with a
+    /// problem to report.</para>
+    /// </summary>
+    private async Task ReadSuspendAsync()
+    {
+        // A tab switch while this page's own command is on the host would read a half-applied
+        // answer and draw it. What is on screen is the last good one, and the command reads back
+        // for itself when it is done. Same rule as the update row's under a package transaction.
+        if (_suspend is null || _commandBusy) return;
+
+        try
+        {
+            _policy = await _suspend.ReadAsync(_cts.Token);
+            DrawSuspend();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Diagnostics.SpiceLog.Log($"[overview] suspend read failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Two of the three answers get a row: something will put this host to sleep, or somebody has
+    /// already stopped it. The third, a host that could sleep but has nothing asking it to, is not
+    /// news and draws nothing, which is the call <see cref="DrawUpdates"/> makes for a host with no
+    /// package manager.
+    /// </summary>
+    private void DrawSuspend()
+    {
+        var warn = !_policy.Blocked && _policy.Sources.Count > 0;
+        var draw = _policy.Known && (_policy.Blocked || warn);
+
+        SuspendRowPanel.IsVisible = draw;
+        if (!draw) return;
+
+        SuspendText.Text = _policy.Summary();
+        SuspendText.Classes.Set("warn", warn);
+
+        var detail = _policy.Detail();
+        SuspendText.SetValue(ToolTip.TipProperty, detail.Length > 0 ? detail : null);
+
+        SuspendButton.Content = _policy.Blocked ? "Allow suspend" : "Disable suspend";
+        SuspendButton.IsEnabled = !_commandBusy;
+        SuspendButton.Tag = _commandBusy
+            ? "Working on the host."
+            : _policy.Blocked
+                ? "Unmasks the sleep targets. A desktop's own idle timer is not put back."
+                : "Masks the sleep targets and turns off what is asking.";
+    }
+
+    /// <summary>
+    /// Blocks sleeping on this host, or allows it again. Both ask first, because both change what
+    /// the machine does when nobody is looking at it.
+    ///
+    /// <para>The mask is the guarantee; turning the source off is tidying that may not be possible
+    /// on every host, so anything that could not be done is reported rather than swallowed. Without
+    /// that the read-back would say Blocked, which is true, while a desktop kept asking every
+    /// quarter of an hour.</para>
+    /// </summary>
+    private async Task SuspendCommandAsync()
+    {
+        if (_suspend is null || _commandBusy) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        var allow = _policy.Blocked;
+        var policy = _policy;
+
+        if (!await MessageDialog.Confirm(owner,
+                allow ? "Allow suspend" : "Disable suspend",
+                allow ? AllowPrompt() : DisablePrompt(policy)))
+            return;
+
+        _commandBusy = true;
+        DrawSuspend();
+
+        // The left slot is what the module is doing, which for the length of this is not the
+        // sampler's cadence. PaintSamplerState puts that back at the end.
+        _summaryStatus = allow ? "Allowing suspend..." : "Blocking suspend...";
+        PaintStatus();
+
+        try
+        {
+            if (allow)
+            {
+                await _suspend.AllowAsync(policy, _cts.Token);
+            }
+            else
+            {
+                var failures = await _suspend.DisableAsync(policy, _cts.Token);
+                if (failures.Count > 0)
+                    await MessageDialog.Info(owner, "Suspend is blocked",
+                        "The host will not sleep, but this was left as it was:\n\n" +
+                        string.Join("\n", failures));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Left the page. The command either landed on the host or it did not, and the next
+            // visit reads back whichever it was.
+        }
+        catch (Exception ex)
+        {
+            await MessageDialog.Info(owner, allow ? "Allow suspend" : "Disable suspend",
+                                     Trim(ex.Message));
+        }
+        finally
+        {
+            _commandBusy = false;
+            PaintSamplerState();
+        }
+
+        // Read back rather than assumed, the rule every command in this app follows: what the host
+        // says now is the answer, and a command that failed leaves the row where it was.
+        await ReadSuspendAsync();
+        DrawSuspend();
+    }
+
+    /// <summary>
+    /// What Disable suspend is about to do, built from what this host actually has, so nothing is
+    /// promised that will not happen and nothing happens that was not named.
+    /// </summary>
+    private static string DisablePrompt(SuspendPolicy policy)
+    {
+        var steps = new List<string>();
+
+        if (policy.Targets.Count > 0)
+            steps.Add($"Mask {string.Join(", ", policy.Targets.Keys)}.");
+
+        var logind = new List<string>();
+        if (policy.LogindSleeps) logind.Add("its idle action");
+        if (policy.LidSleeps) logind.Add("the lid switch");
+        if (logind.Count > 0)
+            steps.Add($"Set {string.Join(" and ", logind)} to ignore, in a logind drop-in.");
+
+        var users = policy.SleepingUsers;
+        if (users.Count > 0 && policy.HasGsettings)
+            steps.Add($"Turn GNOME's idle suspend off for {string.Join(", ", users)}.");
+
+        return string.Join("\n", steps) + "\n\nThe host will not sleep until this is undone.";
+    }
+
+    private static string AllowPrompt() =>
+        "The sleep targets will be unmasked and VirtDeck's logind drop-in removed.\n\n" +
+        "A desktop's own idle timer is not put back.";
 
     private void DrawWorkload(HostWorkload workload)
     {

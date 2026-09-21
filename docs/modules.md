@@ -1,7 +1,7 @@
 # Modules
 
 The main window is a **shell**, not a screen. `Views/ShellView` owns the SSH connection and the status bar, and the `Views/MainWindow` it sits in owns the process lifetime; everything a user manages lives in an `IModule`, and the side menu is a `JbModuleTabControl`. Modules: **Overview** (the host itself and what it is made of, and
-the module the shell lands on), **Logs** (the host's journal), **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Software updates**, **User accounts**, **Network** (the host's interfaces, see "Network"), **Storage** (the host's disks and their health, over a disk details window), **File explorer**, **Terminal** and **Remote control** (the host's own X11 desktop, see "Remote control"). See "Shared idioms" for the tab walk and the refresh policy.
+the module the shell lands on), **Logs** (the host's journal), **Virtual machines** (`VirtualMachinesModule` + `VmDetailsView`, the whole former `VmListWindow` minus the shell), **Containers** (containers, images and networks), **Services**, **Printing** (the host's CUPS, see "Printing"), **Software updates**, **User accounts**, **Network** (the host's interfaces, see "Network"), **Storage** (the host's disks and their health, over a disk details window), **File explorer**, **Terminal** and **Remote control** (the host's own X11 desktop, see "Remote control"). See "Shared idioms" for the tab walk and the refresh policy.
 
 - **`Attach(ssh)` rather than a constructor parameter.** A `UserControl` declared in XAML needs a parameterless constructor, and modules are built before the connection exists. The shell hands each the same `SshConnectionManager` once, before the first `ActivateAsync`, and a module builds its own service on top. **A service two modules share is built off the connection rather than by either of them**: `PackageService.For(ssh)` is one instance per connection, held in a weak table keyed on it, which is how the Overview and Software updates are two views of one listing without the shell knowing either exists. See "One listing, two pages". The connection stays the shell's to dispose. **Once, and there is no re-attach**, which is why switching host builds a new shell rather than re-pointing this one. That is a statement about the module set and not about the window: the shell is a `UserControl` (`Views/ShellView`) and the window swaps one for another, so a switch costs a new module set and keeps everything the window owns. See "Saved hosts".
 - **The status bar is two slots and a place to hang a control, and a module owns all three while on screen.** `Status` is the left slot (row counts, "Starting win11 (1/2)..."), `HostCapabilities` the right ("KVM ready", "docker 27.3.1"), and one `StatusChanged` event covers them. The file explorer and terminal modules used to write `user@host` into the right slot, and no longer do: the host cell at the far left of the same bar names the host permanently, and saying it twice in one strip is worse than an empty slot, which is what the shell already draws for a module with nothing to report. The shell repaints from the *incoming* module's strings on every switch and ignores a raise from a module that is not active. Throughput is the strip's third element and is the **shell's**, as is the host cell at the far left: its 1 s timer never stops, because `SpiceTraffic.BytesTransferred` and `NbdServer.TotalBytesServed` keep climbing whichever module is on screen. A module has no footer, which is why a Cancel button for a long operation has to go in a transfer strip of its own.
@@ -10,11 +10,11 @@ the module the shell lands on), **Logs** (the host's journal), **Virtual machine
 
 ## Which modules a host gets
 
-Nine of them are drawn only when the host has the tooling they are about, decided by one
+Most of them are drawn only when the host has the tooling they are about, decided by one
 un-elevated `command -v` round trip the shell owns (`ShellView.SyncModuleVisibilityAsync`,
 `Core/Services/HostTools`). **Virtual machines** needs `virsh`, **Containers** needs `docker`,
 **Services** needs `systemctl`, **Cron** needs `crontab`, **Logs** needs `journalctl`,
-**Storage** needs `lsblk`, **Network** needs `ip`,
+**Storage** needs `lsblk`, **Network** needs `ip`, **Printing** needs `lpstat`,
 **Software updates** needs `PackageManagers.Detect` to answer something other than
 `NullPackageManager`, and **Remote control** needs an X server (below). Overview, User accounts,
 File explorer and Terminal are unconditional: an SSH connection already implies a filesystem, a
@@ -55,7 +55,7 @@ being absent is an ordinary host. See "Network".
 - **The test is installed, not running.** A stopped `libvirtd` or `dockerd` keeps its module,
   because that module's own status slot is where the daemon state is reported and taking the page
   away would hide the explanation along with the problem. So the probe asks `command -v` and the
-  existing `CheckHostCapabilities` probes go on doing what they did.
+  existing capability probes (`CheckKvmSupport`, `CheckHostCapabilities`) go on doing what they did.
 - **A conditional tab starts hidden and the probe puts it back**, rather than starting visible and
   being taken away. The other order draws the full strip for a frame and then removes tabs from
   under the pointer, which reads as a glitch rather than as an answer; hiding is simply what the

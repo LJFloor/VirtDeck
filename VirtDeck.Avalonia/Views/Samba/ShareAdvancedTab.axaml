@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VirtDeck.Avalonia.Views.Samba.ShareAdvancedTab">
+
+  <ScrollViewer Padding="16">
+    <StackPanel Classes="page" Spacing="18">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Visibility">
+        <StackPanel Classes="options">
+          <CheckBox Name="BrowseableBox" Content="Show this folder when the host is browsed" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Hidden, the folder still works for anyone who types its name." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Recycle bin">
+        <StackPanel Classes="options">
+          <CheckBox Name="RecycleBox" Content="Keep deleted files in a recycle bin" />
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto" RowSpacing="6" Margin="20,0,0,0">
+            <TextBlock Grid.Row="0" Grid.Column="0" Name="RecycleFolderLabel"
+                       Text="Folder" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="RecycleFolderBox" />
+          </Grid>
+          <StackPanel Margin="20,0,0,0" Spacing="6">
+            <CheckBox Name="RecycleTreeBox" Content="Keep the folder structure" />
+            <CheckBox Name="RecycleVersionsBox" Content="Keep several versions of the same name" />
+          </StackPanel>
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Hidden and blocked files">
+        <StackPanel Classes="options">
+          <TextBox Name="VetoBox" AcceptsReturn="True" Height="90"
+                   TextWrapping="NoWrap" VerticalContentAlignment="Top" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="One pattern per line. These are hidden from clients and cannot be created." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Symbolic links">
+        <StackPanel Classes="options">
+          <CheckBox Name="SymlinkBox" Content="Follow symbolic links inside this folder" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Links pointing outside the folder are refused whatever this says, because turning that off would change every share on the host and not just this one." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Folder permissions">
+        <StackPanel Classes="options">
+          <CheckBox Name="LeaveAloneBox" Content="Leave the folder's own permissions alone" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="Only the Samba side is saved. The folder keeps whatever owner, mode and ACLs it has, which is what a folder something else manages needs." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

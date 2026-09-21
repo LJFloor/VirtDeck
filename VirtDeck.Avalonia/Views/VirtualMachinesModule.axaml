@@ -24,6 +24,15 @@
 
     <TabItem Header="Virtual machines">
       <DockPanel>
+        <!-- Hardware virtualization the host cannot use. Above the commands rather than in the
+             status slot beside them, because it is the one host fact that decides whether anything
+             on this page works, and the fix is in the machine's firmware rather than in this app.
+             The kernel's own line, where it printed one, is on the hover. -->
+        <Border Name="KvmBanner" DockPanel.Dock="Top" Padding="12,8" IsVisible="False"
+                Background="#22d68f00" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+          <TextBlock Name="KvmBannerText" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </Border>
+
         <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
           <!-- Only the commands that don't need a selection live here; everything per-VM is on
                the list's right-click menu. The filter box is the services module's, and it works

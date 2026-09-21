@@ -50,6 +50,46 @@ namespace VirtDeck.Services
         /// costs no round trip of its own.</summary>
         public CronCatalog Catalog { get; private set; } = new();
 
+        // ---- Watching ------------------------------------------------------
+
+        private readonly HostFileWatcher _watcher = new(ssh, "cron", elevated: true);
+
+        /// <summary>
+        /// Raised when a crontab, a drop-in or a run-parts script moved on the host, whoever moved
+        /// it. Nothing announces a crontab edit the way <c>docker events</c> announces a container,
+        /// so this is a loop on the host rather than an event tail: see
+        /// <see cref="HostFileWatcher"/>. A <c>journalctl --follow</c> on cron was considered and
+        /// rejected long before this, for a different reason: it reports a job <i>running</i>, not a
+        /// crontab being edited, and with no job identity to match a row against.
+        /// </summary>
+        public event Action? FilesChanged
+        {
+            add => _watcher.Changed += value;
+            remove => _watcher.Changed -= value;
+        }
+
+        /// <summary>
+        /// Watches every directory cron reads, and <c>/etc/crontab</c> itself.
+        ///
+        /// <para>Directories rather than the files in them, because <c>crontab -e</c> installs by
+        /// writing a new file into the spool rather than editing the old one in place, so watching
+        /// a spool file by name would follow an inode nothing writes to any more. Elevated, because
+        /// the spool is <c>drwx-wx--T root:crontab</c> and an ordinary account cannot even list
+        /// it.</para>
+        /// </summary>
+        public void StartWatching()
+        {
+            var paths = new List<string>
+            {
+                "/var/spool/cron/crontabs", "/var/spool/cron", "/etc/crontab", "/etc/cron.d",
+            };
+            paths.AddRange(Catalog.ScriptDirectories);
+
+            _watcher.Watch(paths);
+        }
+
+        public void StopWatching() => _watcher.Stop();
+
         // ---- Reading -------------------------------------------------------
 
         // One round trip for the lot, in the shape UserAccountService.LoadScript uses: a tag in

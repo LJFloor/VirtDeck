@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Samba.SambaUserDialog"
+        Title="Add user"
+        Width="560" SizeToContent="Height" MinWidth="480" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="16">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+      <Button Name="SaveButton" Content="Add" MinWidth="88" IsDefault="True" Classes="accent" />
+    </StackPanel>
+
+    <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
+               TextWrapping="Wrap" IsVisible="False" Margin="0,12,0,0" />
+
+    <StackPanel Classes="page" Spacing="18">
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="User">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="User name" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
+          </Grid>
+          <TextBlock Name="NameNote" Classes="subnote" TextWrapping="Wrap" />
+        </StackPanel>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Password">
+        <StackPanel Classes="options">
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Password" VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="PasswordBox" PasswordChar="&#x2022;" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Confirm" VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="ConfirmBox" PasswordChar="&#x2022;" />
+          </Grid>
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="This is the Samba password, which is separate from any login password the account has." />
+        </StackPanel>
+      </HeaderedContentControl>
+
+    </StackPanel>
+  </DockPanel>
+</Window>

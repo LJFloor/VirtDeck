@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="VirtDeck.Avalonia.Views.Printing.MovePrintJobDialog"
+        Title="Move to printer"
+        Width="420" SizeToContent="Height" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+        <Button Name="MoveButton" Content="Move" MinWidth="88" IsDefault="True" Classes="accent" />
+      </StackPanel>
+    </Border>
+
+    <StackPanel Margin="16" Spacing="10">
+      <TextBlock Name="PromptText" TextWrapping="Wrap" />
+      <ComboBox Name="TargetBox" HorizontalAlignment="Stretch" PlaceholderText="Pick a printer" />
+    </StackPanel>
+
+  </DockPanel>
+</Window>

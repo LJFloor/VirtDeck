@@ -2,14 +2,22 @@
 
 ## Host capability checks
 
-`VirshService` probes once, on the VM module's first activation (`LoadHostCapabilitiesAsync`), and caches the results.
+`VirshService` probes on the VM module's first activation (`LoadHostCapabilitiesAsync`) and caches the results, and **re-probes on every activation while KVM is not there**, by the re-probe rule in "Shared idioms": loading the kvm module or starting libvirtd at a terminal must not be a dead end.
 
 | Property | Check | Used by |
 |---|---|---|
 | `VirtSparseAvailable` | `which virt-sparsify` | Export dialog: disables sparse checkbox |
-| `CheckHostCapabilities()` | `/proc/cpuinfo` svm/vmx, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators |
+| `CheckKvmSupport()` | `/proc/cpuinfo` svm/vmx + `hypervisor`, `uname -m`, `/dev/kvm`, `systemctl is-active libvirtd` | Status-bar indicators, the banner below |
 
 All default to available on SSH error, **except `VirtSparseAvailable`** which defaults false (safe: prevents a silent no-op export).
+
+### The banner: virtualization the host cannot use
+
+`CheckKvmSupport` is **one un-elevated round trip** in the tagged-record idiom, where it used to be three separate commands. The VMs page leads with a banner (`KvmBanner`) whenever it comes back without `/dev/kvm`, because that one host fact decides whether anything on the page works and the fix is in the machine's firmware rather than anywhere in this app. `Models/KvmSupport` carries the facts and says which of six readings applies; the wording is the module's, as every user-facing string in this app is.
+
+- **The firmware claim rests on the kernel's own line and never on the flag.** Firmware that turns VT-x off clears the CPUID bit on some boards and leaves it standing on others, so a missing `vmx` is a symptom, not evidence. Where the device is missing, a **second and elevated** probe reads `dmesg` (falling back to `journalctl -k -b`, since a ring buffer on a host up for months has wrapped past the boot) for the three spellings the x86 modules use: `kvm: disabled by bios`, kvm_intel's `VMX (outside TXT) disabled by BIOS`, kvm_amd's `SVM disabled (by BIOS) in MSR_VM_CR`. Elevated because `kernel.dmesg_restrict` is 1 on every mainstream distribution, and asked **only** when there is something to explain, so a host where KVM works pays one un-elevated command and nothing else. The matched line goes on the banner's hover.
+- **The firmware line is picked out of the whole match, not read off the last one.** The modules print in the order they were tried, and the decisive line is rarely last: an AMD host with SVM off answers kvm_intel's `VMX not supported by CPU 1` *after* kvm_amd's `SVM disabled (by BIOS)` (measured). Where no line makes the firmware claim, the last one stands as the kernel's own words and the banner says only what it can see.
+- **Six readings, two of them silent.** `Ready` (the device is there) and `Unknown` (the probe could not run) draw nothing: the KVM probes default to *available* on purpose, and a false negative here would accuse a working host's firmware. The other four are `FirmwareOff`, `NestedOff` (the `hypervisor` flag and no extensions, so the setting is on somebody else's host and not in a menu anybody here can reach), `NoExtensions` (an x86 processor reporting neither flag, which is usually the firmware) and `NoDevice` (extensions reported, no device, no reason given, so the kvm module is not loaded). The arch is read because vmx/svm is not a question on ARM: there `NoExtensions` can never be reached and a missing device is simply `NoDevice`.
 
 ## Install media identification and device defaults
 

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using VirtDeck.Models;
+using VirtDeck.Updates;
 
 namespace VirtDeck.Services
 {
@@ -1068,20 +1069,127 @@ namespace VirtDeck.Services
             RunArgv("virsh", "detach-interface", RequireName(vm, VmName), "--type", type,
                     "--mac", RequireName(mac, "MAC address"), "--config");
 
+        // What the processor reports, whether QEMU has anything to accelerate with, and what the
+        // init system says about libvirt: one un-elevated round trip where it used to be three
+        // commands. The awk reads the first processor's flags only, because every core on a
+        // machine reports the same two, and it prints both records from END so an ARM host with no
+        // flags line still answers rather than saying nothing at all.
+        private const string KvmProbeScript = """
+            export LC_ALL=C
+            printf 'a\t%s\n' "$(uname -m)"
+            awk '/^flags[ \t]*:/ {
+                   for (i = 1; i <= NF; i++) {
+                     if ($i == "vmx" || $i == "svm") v = $i
+                     if ($i == "hypervisor") h = 1
+                   }
+                   exit
+                 }
+                 END { print "c\t" v; print "g\t" h + 0 }' /proc/cpuinfo 2>/dev/null
+            if [ -c /dev/kvm ]; then printf 'd\t1\n'; else printf 'd\t0\n'; fi
+            printf 'l\t%s\n' "$(systemctl is-active libvirtd 2>/dev/null)"
+            exit 0
+            """;
+
+        // Why KVM did not come up, in the kernel's own words. dmesg first, because it answers on a
+        // host with no systemd; journalctl -k as the fallback, because a ring buffer on a host that
+        // has been up for months has long since wrapped past the boot. Matched lines ride back
+        // base64'd for the reason the dmidecode read does: this is prose, not a record.
+        private const string KvmRefusalScript = """
+            export LC_ALL=C
+            pat='disabled by bios|disabled \(by bios\)|kvm: disabled|svm disabled|vmx .*disabled|no hardware support|not supported by (the )?cpu'
+            out=$(dmesg 2>/dev/null | grep -iE 'kvm|vmx|svm' | grep -iE "$pat" | tail -n 3)
+            [ -n "$out" ] || out=$(journalctl -k -b --no-pager 2>/dev/null | grep -iE 'kvm|vmx|svm' | grep -iE "$pat" | tail -n 3)
+            printf 'r\t%s\n' "$(printf '%s' "$out" | base64 | tr -d '\n')"
+            exit 0
+            """;
+
         /// <summary>
-        /// Checks host CPU virtualization support, BIOS enablement, and libvirt state.
-        /// Returns: cpuSupports (svm/vmx flag in cpuinfo), biosEnabled (/dev/kvm exists),
-        /// libvirtState ("active" | "inactive" | "unknown").
-        /// All checks are best-effort; failures leave the corresponding value at its default.
+        /// What the host says about hardware virtualization: the processor's flags, whether
+        /// <c>/dev/kvm</c> is there, and libvirt's state, in one un-elevated round trip.
+        ///
+        /// <para>Where the device is missing it asks a second, <b>elevated</b> question: what the
+        /// kernel printed when KVM's module refused to start. That one is elevated because
+        /// <c>kernel.dmesg_restrict</c> is 1 on every mainstream distribution, and it is asked only
+        /// then, so a host where KVM works pays one un-elevated command and nothing else.</para>
+        ///
+        /// <para>The firmware claim rests on that line alone and never on the flag: firmware that
+        /// turns VT-x off clears the CPUID bit on some boards and leaves it standing on others, so
+        /// a missing <c>vmx</c> is a symptom and the kernel's <c>disabled by BIOS</c> is the
+        /// evidence.</para>
+        ///
+        /// <para>A probe that could not run answers <see cref="KvmSupport.Probed"/> false rather
+        /// than a row of falses, so a dropped connection never puts a firmware warning on screen.</para>
         /// </summary>
-        public (bool cpuSupports, bool biosEnabled, string libvirtState) CheckHostCapabilities()
+        public KvmSupport CheckKvmSupport()
         {
-            bool cpu = false, bios = false;
-            var libvirt = "unknown";
-            try { cpu     = _ssh.RunCommand("grep -qE 'svm|vmx' /proc/cpuinfo && echo 1 || echo 0").Trim() == "1"; } catch { }
-            try { bios    = _ssh.RunCommand("test -c /dev/kvm && echo 1 || echo 0").Trim() == "1"; } catch { }
-            try { libvirt = _ssh.RunCommand("systemctl is-active libvirtd 2>/dev/null || true").Trim(); } catch { }
-            return (cpu, bios, libvirt);
+            string raw;
+            try { raw = _ssh.RunCommand(ShellScript.Wrap(KvmProbeScript)); }
+            catch { return new KvmSupport(); }
+
+            string arch = "", flag = "", libvirt = "";
+            bool guest = false, device = false;
+            foreach (var (tag, text) in PackageScripts.Records(raw))
+            {
+                var value = text.Trim();
+                switch (tag)
+                {
+                    case "a": arch = value; break;
+                    case "c": flag = value; break;
+                    case "g": guest = value == "1"; break;
+                    case "d": device = value == "1"; break;
+                    case "l": libvirt = value; break;
+                }
+            }
+
+            // The firmware line is picked out of the whole match rather than read off the last
+            // one, because the modules print in the order they were tried and the decisive line is
+            // rarely last: an AMD host whose SVM is off answers kvm_intel's "VMX not supported by
+            // CPU 1" after kvm_amd's "SVM disabled (by BIOS) in MSR_VM_CR" (measured). Where no
+            // line makes the firmware claim, the last one stands as the kernel's own words.
+            var lines = device ? new List<string>() : ReadKvmRefusal();
+            var firmware = lines.LastOrDefault(l => FirmwarePattern.IsMatch(l));
+            return new KvmSupport
+            {
+                Probed = true,
+                Arch = arch,
+                CpuFlag = flag,
+                IsGuest = guest,
+                KvmDevice = device,
+                LibvirtState = libvirt.Length > 0 ? libvirt : "unknown",
+                KernelRefusal = firmware ?? lines.LastOrDefault() ?? "",
+                FirmwareOff = firmware is not null,
+            };
+        }
+
+        /// <summary>
+        /// The three spellings the x86 KVM modules have used for "the firmware turned it off":
+        /// <c>kvm: disabled by bios</c> on older kernels, <c>VMX (outside TXT) disabled by BIOS</c>
+        /// from <c>kvm_intel</c>, and <c>SVM disabled (by BIOS) in MSR_VM_CR</c> from <c>kvm_amd</c>.
+        /// </summary>
+        private static readonly Regex FirmwarePattern =
+            new(@"disabled by (the )?bios|disabled \(by bios\)", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// The last few lines the kernel printed about KVM refusing to start, oldest first. Empty
+        /// where the buffer said nothing or could not be read, which is a silence and not a denial.
+        /// </summary>
+        private List<string> ReadKvmRefusal()
+        {
+            try
+            {
+                var raw = _ssh.RunSudoCommand(ShellScript.Wrap(KvmRefusalScript));
+                foreach (var (tag, text) in PackageScripts.Records(raw))
+                {
+                    if (tag != "r") continue;
+                    return ShellScript.Decode(text.Trim())
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(l => l.Trim())
+                        .Where(l => l.Length > 0)
+                        .ToList();
+                }
+            }
+            catch { /* the kernel's words are evidence where they can be had, never a requirement */ }
+            return new List<string>();
         }
 
         public List<string> ListNetworks()

@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.Printing.PrinterDriverTab">
+
+  <DockPanel>
+
+    <StackPanel DockPanel.Dock="Top" Classes="page" Margin="16,16,16,0">
+      <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Driver">
+        <StackPanel Classes="options">
+
+          <!-- Only on an edit, where it is the default: re-choosing a driver from a list of
+               twenty thousand is not something to make somebody do to change a location. It sends
+               no -m at all, which is what leaves the queue's PPD alone. -->
+          <RadioButton Name="KeepOption" GroupName="Driver" IsVisible="False"
+                       Content="Keep the current driver" />
+          <TextBlock Name="KeepNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
+
+          <RadioButton Name="DriverlessOption" GroupName="Driver" IsChecked="True"
+                       Content="Driverless (IPP Everywhere)" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="The printer describes itself. Right for anything made in the last decade, and the only option CUPS 3 will still have." />
+
+          <RadioButton Name="RawOption" GroupName="Driver" Content="Raw queue" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="CUPS sends what it is given, unchanged. For a printer driven by whatever is sending to it." />
+
+          <RadioButton Name="PickOption" GroupName="Driver" Content="Choose a driver" />
+          <TextBlock Classes="subnote" TextWrapping="Wrap"
+                     Text="For older hardware that needs a PPD. The list lives on the host and is read one manufacturer at a time." />
+
+        </StackPanel>
+      </HeaderedContentControl>
+    </StackPanel>
+
+    <!-- Everything below is the third option's, and greys out with it in one IsEnabled. -->
+    <Grid Name="PickerArea" Margin="16,12,16,16" IsEnabled="False"
+          RowDefinitions="Auto,Auto,*" ColumnDefinitions="110,*">
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Make" VerticalAlignment="Center" />
+      <ComboBox Grid.Row="0" Grid.Column="1" Name="MakeBox" HorizontalAlignment="Stretch"
+                PlaceholderText="Reading the host's driver list..." />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Model" VerticalAlignment="Center"
+                 Margin="0,8,0,0" />
+      <c:FilterBox Grid.Row="1" Grid.Column="1" Name="ModelSearch" Margin="0,8,0,0"
+                   PlaceholderText="Narrow this make's drivers" />
+
+      <Border Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" BorderThickness="1"
+              BorderBrush="#33808080">
+        <Panel>
+          <ListBox Name="ModelList" Background="Transparent" Padding="0"
+                   ItemContainerTheme="{StaticResource JbTableRow}" />
+          <TextBlock Name="ModelEmpty" Opacity="0.6" IsVisible="False"
+                     TextAlignment="Center" TextWrapping="Wrap" MaxWidth="320"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
+      </Border>
+
+    </Grid>
+  </DockPanel>
+</UserControl>

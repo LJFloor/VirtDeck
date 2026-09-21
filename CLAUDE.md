@@ -74,12 +74,14 @@ in this index.
 | [terminal-emulator.md](docs/terminal-emulator.md) | The three surfaces drawn by `TerminalControl`: reading a container's log, running a command in one, the PTY session, the emulator itself and mouse reporting. |
 | [services.md](docs/services.md) | systemd units in both scopes, the three read scripts and why they are three, the journal tail, and the commands. |
 | [cron.md](docs/cron.md) | every crontab on the host, the day-field rule and the next-run times, the byte-exact round trip, the conflict check, and the run-parts directories. |
+| [printing.md](docs/printing.md) | the host's CUPS in three tabs: the queues read as base64 blobs of lpstat prose, why there is no version string, the spool's own poll, what the CLI will not say about a job, and the driverless-first driver picker over a 20,000-entry list that never crosses the wire. |
 | [software-updates.md](docs/software-updates.md) | apt, dnf and pacman behind one interface, the progress percentage and when Cancel goes away, reboot and history, the listing the Overview shares, and the Settings tab over each manager's own configuration. |
 | [user-accounts.md](docs/user-accounts.md) | Users and groups, the name suggestion, the password path over stdin, and deleting. |
 | [storage.md](docs/storage.md) | The host's disks from one `lsblk -J`, and what SMART says about each one. |
 | [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |
 | [storage-zfs.md](docs/storage-zfs.md) | The host's pools: listing, status, topology, create, scrub, import, export and destroy. |
 | [storage-zfs-datasets.md](docs/storage-zfs-datasets.md) | What is inside a pool, as a tree under it: filesystems and volumes, their properties, and create, edit, rename and destroy. |
+| [samba.md](docs/samba.md) | Every Samba share on the host, read and written back through smb.conf and its includes byte for byte: the Synology-style editor, permissions written onto the filesystem as POSIX ACLs and why a default ACL alone is not enough, and the Samba users that are not the host's logins. |
 | [network.md](docs/network.md) | The host's interfaces: read with `ip` on every host and attributed to whoever configured them, the event and traffic tails, and the details window. |
 | [network-firewall.md](docs/network-firewall.md) | firewalld and ufw behind one interface, how each is read and changed without re-rendering a rule, and the lockout guard. |
 | [network-editing.md](docs/network-editing.md) | Changing links through NetworkManager or ifupdown: only what changed, argv without `--`, the checkpoint or timer that rolls a change back unless a fresh connection gets through, and bridges, bonds and VLANs. |

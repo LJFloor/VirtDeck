@@ -2,11 +2,12 @@
 
 `OverviewModule` is the host itself, over two tabs. **Summary** is what it is doing: who it is,
 what graphics cards are in it, how full its disks are, how many VMs and containers it is running,
-whether it has updates pending, over live CPU, memory, network, disk IO and GPU graphs.
+whether it has updates pending and whether it will put itself to sleep, over live CPU, memory,
+network, disk IO and GPU graphs.
 **Hardware** is what it is made of: the machine as its firmware describes it, the processor, every
 memory slot, and every PCI and USB device. `Views/OverviewModule`, `Views/MountRow`,
-`Controls/MetricGraph`, `Core/Services/HostMetricsService`, `Core/Models/HostSample` for the
-first; `Views/Overview/HardwareTab`, `Views/Overview/HardwareRows`,
+`Controls/MetricGraph`, `Core/Services/HostMetricsService`, `Core/Models/HostSample`,
+`Core/Services/SuspendService` and `Core/Models/SuspendPolicy` for the first; `Views/Overview/HardwareTab`, `Views/Overview/HardwareRows`,
 `Core/Services/HardwareService`, `Core/Models/HostHardware` for the second.
 
 It is the module the shell lands on, and **being first in the side menu is the whole of how**.
@@ -218,6 +219,42 @@ different landing page per host.
   defined and five up is doing exactly what it was asked to, and drawing that as a partial state put
   a warning colour on an ordinary machine. Dropping the totals also takes the second `virsh list`
   and the second `docker ps` out of the round trip.
+- **The Suspend row warns about a host that will put itself to sleep, and is the one command this
+  page gives.** A server that grew a desktop suspends itself after a quarter of an hour and the
+  first sign of it is the host going away, so `SuspendService` asks on every visit, in one elevated
+  round trip: `systemctl is-enabled` per sleep target, logind's own `IdleAction`, `IdleActionUSec`
+  and `HandleLidSwitch` off `busctl`, and GNOME's `sleep-inactive-*` pair for every login with a
+  session plus `gdm`, `gdm3`, `sddm` and `lightdm`. **It has to be both halves.** Almost every Linux
+  host *can* suspend, so a row about that would be amber on every machine; what is news is something
+  actually asking for it, and what settles it is whether the targets are masked.
+  Elevated because a greeter's dconf is root's to read, which the workload counts beside it already
+  pay for; one `gsettings list-recursively` per user rather than one call per key, because this sits
+  in a page read. logind is asked **one property per call and matched by name**: `busctl` has no
+  `--value` on every systemd we support and a three-property call answers by position only.
+- **Two of the three answers get a row, and the third is silence.** Something will sleep this host
+  (amber, with `Disable suspend`), somebody has already stopped it (`Blocked`, with `Allow
+  suspend`), or nothing asks, which is not news and draws nothing, the call the update row makes for
+  a host with no package manager. A lid and a battery are **stated by the machine before they are
+  reasoned about**: a server has neither, so `HandleLidSwitch=suspend` on one is not a finding, and
+  GNOME's battery timer on a desktop can never fire. GNOME ships mains and battery with the same
+  action and delay, so an identical pair is **one** finding and not two; only a machine where they
+  really differ says which is which. The row is one line and the tooltip holds the list, the rule
+  the update row follows, and a host that is Blocked while something still asks says **both**, or
+  the second half would look dealt with.
+- **The mask is the guarantee and turning the source off is tidying.** A masked target is a job
+  systemd refuses whoever asks, so it stops logind, GNOME and a typed `systemctl suspend` alike, and
+  it is what somebody who fixed this by hand already did. Blocked is therefore read **two ways**,
+  because there are two recipes in the wild and a host already fixed must not be warned at:
+  `sleep.target` alone is decisive (`systemd-suspend.service` carries `Requires=sleep.target`), and
+  so is the widely copied four-target recipe. Only the units the host actually has are named, on the
+  way in and on the way out. The rest of the command is a logind drop-in of ours, carrying only the
+  keys that were really sleeping, and `gsettings set ... nothing` per user through
+  `dbus-run-session`, which is what gives dconf the bus a write needs. Those two are **best-effort
+  and each failure is reported**, because a failure there is otherwise invisible: the read-back says
+  Blocked, which is true, while GNOME keeps asking every quarter of an hour and being refused.
+  `Allow suspend` unmasks and removes our drop-in, and **does not put a desktop timer back**: that
+  timer was the problem and nothing recorded what it was. The button says so rather than leaving it
+  to be discovered. KDE's powerdevil keeps its own settings elsewhere and is not read.
 - **No filter box.** A host has a handful of filesystems, which is where the "long lists only" rule
   already draws the line, and the graphs are not a list.
 

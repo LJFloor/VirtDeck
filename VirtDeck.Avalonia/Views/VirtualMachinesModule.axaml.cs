@@ -47,7 +47,9 @@ public partial class VirtualMachinesModule : UserControl, IModule
     private int _previewGen;       // bumped on selection change; drops stale background results
     private bool _refreshing;
     private bool _active;          // false while another module is on screen: no polling, no events
-    private bool _capsProbed;      // host capabilities are a one-off, not per activation
+    private bool _capsProbed;      // host capabilities are a one-off while KVM is there
+    private bool _kvmReady = true; // the KVM probes' default: available until the host says otherwise
+    private bool _eventsStarted;   // the lifecycle tail is started once and outlives Deactivate
 
     /// <summary>
     /// The details pane height as it was restored, so <c>Deactivate</c> can tell whether the user
@@ -171,9 +173,17 @@ public partial class VirtualMachinesModule : UserControl, IModule
 
         await RefreshAsync();
 
-        if (_capsProbed) return;
-        _capsProbed = true;
-        await LoadHostCapabilitiesAsync();
+        // One probe per session while the answer is yes, and one per entry while it is no, by the
+        // re-probe rule in "Shared idioms": loading the kvm module or starting libvirtd at a
+        // terminal must not be a dead end. It is one un-elevated round trip.
+        if (!_capsProbed || !_kvmReady)
+        {
+            _capsProbed = true;
+            await LoadHostCapabilitiesAsync();
+        }
+
+        if (_eventsStarted) return;
+        _eventsStarted = true;
         // The listener holds its own SSH connection for the session. It is deliberately not
         // stopped on Deactivate: reconnecting `virsh event --loop` on every module switch would
         // cost more than ignoring the events while hidden.
@@ -384,24 +394,64 @@ public partial class VirtualMachinesModule : UserControl, IModule
     {
         try
         {
-            var (cpu, bios, libvirt) = await Task.Run(() =>
+            var kvm = await Task.Run(() =>
             {
-                var caps = Virsh.CheckHostCapabilities();
+                var support = Virsh.CheckKvmSupport();
                 Virsh.CheckVirtSparseAvailable();
-                return caps;
+                return support;
             });
+            _kvmReady = kvm.Ready;
 
             var parts = new List<string>();
-            if (!cpu) parts.Add("no CPU virtualisation extensions");
-            if (!bios) parts.Add("/dev/kvm missing");
-            if (!string.Equals(libvirt, "active", StringComparison.OrdinalIgnoreCase))
-                parts.Add($"libvirtd {libvirt}");
+            if (kvm.CpuFlag.Length == 0 && kvm.IsX86) parts.Add("no CPU virtualisation extensions");
+            if (!kvm.KvmDevice) parts.Add("/dev/kvm missing");
+            if (!string.Equals(kvm.LibvirtState, "active", StringComparison.OrdinalIgnoreCase))
+                parts.Add($"libvirtd {kvm.LibvirtState}");
             SetCaps(parts.Count == 0 ? "KVM ready" : string.Join(" · ", parts));
+            ShowKvmBanner(kvm);
         }
         catch
         {
+            // The probe answers rather than throwing, so this is the connection going away. Both
+            // the slot and the banner say nothing, which is the KVM probes' default: a false
+            // negative here would accuse a working host's firmware.
+            _kvmReady = true;
             SetCaps("");
+            KvmBanner.IsVisible = false;
         }
+    }
+
+    /// <summary>
+    /// The one host fact this page leads with. Silent while KVM is there and while nothing could be
+    /// read, and otherwise one line saying what is wrong and what it costs, with the kernel's own
+    /// words on the hover where it printed any.
+    /// </summary>
+    private void ShowKvmBanner(KvmSupport kvm)
+    {
+        var text = kvm.Reading switch
+        {
+            KvmReading.FirmwareOff =>
+                "Hardware virtualization is off in this machine's firmware, so VMs here run emulated "
+                + "or refuse to start. Turn Intel VT-x or AMD-V on in the firmware setup.",
+            KvmReading.NoExtensions =>
+                "This processor reports no virtualization extensions, so VMs here run emulated or "
+                + "refuse to start. Intel VT-x or AMD-V is usually off in the firmware setup.",
+            KvmReading.NestedOff =>
+                "This host is a virtual machine whose own host passes no virtualization extensions "
+                + "through, so VMs here run emulated or refuse to start.",
+            // The flag is named only where there is one: on an ARM host vmx/svm is not a question,
+            // and a sentence about a flag nothing reports would be about nothing.
+            KvmReading.NoDevice when kvm.CpuFlag.Length > 0 =>
+                "/dev/kvm is missing, so VMs here run emulated or refuse to start. The processor "
+                + $"reports {kvm.CpuFlag.ToUpperInvariant()}, so the kvm module is not loaded.",
+            KvmReading.NoDevice =>
+                "/dev/kvm is missing, so VMs here run emulated or refuse to start.",
+            _ => "",
+        };
+
+        KvmBannerText.Text = text;
+        ToolTip.SetTip(KvmBanner, kvm.KernelRefusal.Length > 0 ? kvm.KernelRefusal : null);
+        KvmBanner.IsVisible = text.Length > 0;
     }
 
     // ---- Details sidebar ----------------------------------------------

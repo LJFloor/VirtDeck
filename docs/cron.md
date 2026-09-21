@@ -60,11 +60,16 @@ Cockpit dropped its cron page years ago in favour of systemd timers, and Webmin'
   crontab. So there is one privileged path and none of the retry-as-root machinery, which is
   `UserAccountService`'s shape and the deliberate opposite of `FileExplorerModule`'s. See "Always
   `sudo`, and this is the counterexample to `FileExplorerModule`".
-- **A Refresh button, no poll and no tail.** Nothing on a host announces that a crontab changed the
-  way `docker events` announces a container, so this is the accounts and file-explorer shape. See
-  "Refresh policy". `Deactivate` cancels the read in flight and the filter debounce and has nothing
-  else to stop, which is also why this is the one module with no "am I on screen" flag: every other
-  one keeps one to gate a poll, and with no poll the cancellation token is the whole of it.
+- **A watch on the files, not a poll and not an event tail.** Nothing on a host announces that a
+  crontab changed the way `docker events` announces a container, so the loop runs **on the host**
+  (`HostFileWatcher`): one channel, a signature over the spool directories, `/etc/crontab`,
+  `/etc/cron.d` and the run-parts directories, and a line only when it moves. A `crontab -e` at a
+  terminal shows up here within about two seconds, and the client pays no round trip per tick. See
+  "Refresh policy". Directories rather than the files in them, because `crontab -e` installs by
+  renaming a new file over the spool entry, so watching a spool file by name would follow an inode
+  nothing writes to any more. Elevated, because the spool is `drwx-wx--T root:crontab`. The Refresh
+  button stays: a watch answers "something moved", and somebody pressing Refresh is asking a
+  different question.
 - **No "last run" column, and its absence is the interesting half.** cron does log every run, as
   `CRON[pid]: (user) CMD (the command)`, and a `journalctl --follow` on it would fit the tail idiom
   exactly. It is not here because those lines carry **no job identity**: matching one back to a row

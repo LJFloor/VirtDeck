@@ -1,0 +1,346 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.PrintingModule"
+             x:DataType="vm:PrinterRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by each header strip and its rows, so they stay aligned. -->
+    <x:Double x:Key="ColPrnName">170</x:Double>
+    <x:Double x:Key="ColPrnState">125</x:Double>
+    <x:Double x:Key="ColPrnAccepting">85</x:Double>
+    <x:Double x:Key="ColPrnShared">70</x:Double>
+    <x:Double x:Key="ColPrnDefault">75</x:Double>
+    <x:Double x:Key="ColPrnLocation">130</x:Double>
+    <x:Double x:Key="ColPrnModel">190</x:Double>
+
+    <x:Double x:Key="ColJobId">200</x:Double>
+    <x:Double x:Key="ColJobPrinter">160</x:Double>
+    <x:Double x:Key="ColJobUser">120</x:Double>
+    <x:Double x:Key="ColJobSize">90</x:Double>
+    <x:Double x:Key="ColJobWhen">190</x:Double>
+
+    <!-- Refresh is the app's one arc glyph; the whole account of how it is drawn is in
+         FileExplorerModule.axaml, where it first appeared. -->
+    <StreamGeometry x:Key="IconRefresh">M13,8 A5,5 0 1 1 11.54,4.46 L13,5.78 M13,3 V5.78 H10.22</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <!-- One line, above all three tabs, and visible only when something is actually wrong. It sits
+         outside the TabControl because what it reports is about the host rather than about a
+         table: a scheduler that is down makes the Jobs and Server tabs pointless too.
+
+         No action button, unlike the Samba strip's: starting cups.service belongs in the Services
+         module, where every other unit on the host is started, and doing it from two places would
+         be two places to keep honest. -->
+    <Border DockPanel.Dock="Top" Name="NoticeStrip" IsVisible="False"
+            Padding="12,8" Background="#22D68F00" BorderThickness="0,0,0,1" BorderBrush="#33808080">
+      <TextBlock Name="NoticeText" VerticalAlignment="Center" TextWrapping="Wrap" />
+    </Border>
+
+    <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, as the services,
+         accounts, cron and samba modules do.
+
+         Three tabs because they are three kinds of thing: a queue is a destination, a job is
+         something passing through one, and the server settings are about cupsd itself. -->
+    <TabControl Name="Tabs">
+
+      <TabItem Header="Printers">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <!-- A watch on /etc/cups and a Refresh button, and no poll: nothing in CUPS
+                     announces that a queue changed. See the refresh policy in "Shared idioms";
+                     this is the cron and samba shape. The jobs tab is the one that polls. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #PrinterRefreshButton.Tag}">
+                  <Button Name="PrinterRefreshButton" Theme="{StaticResource JbIconButton}">
+                    <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                </Border>
+                <!-- Accented because on this page it is the one command that brings something into
+                     being, which is the rule the samba, accounts and storage toolbars follow. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #AddPrinterButton.Tag}">
+                  <Button Name="AddPrinterButton" Content="Add printer" Classes="accent" />
+                </Border>
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="PrinterSearch" Width="220" Margin="10,0,0,0"
+                           PlaceholderText="Search name, location or model"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="PrinterHeaderStrip">
+              <!-- Indent (not Margin) puts the heading over the rows' state dot without widening
+                   the column. -->
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name" SortKey="name" Indent="14"
+                              Width="{StaticResource ColPrnName}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="State" SortKey="state"
+                              Width="{StaticResource ColPrnState}"
+                              Tip="Whether the queue prints what it has." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Accepting" SortKey="accepting"
+                              Width="{StaticResource ColPrnAccepting}"
+                              Tip="Whether the queue takes new jobs. Separate from its state: CUPS can be doing either without the other." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Shared" SortKey="shared"
+                              Width="{StaticResource ColPrnShared}"
+                              Tip="Whether this queue is published to the network." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Default" SortKey="default"
+                              Width="{StaticResource ColPrnDefault}"
+                              Tip="The destination a job with no printer named goes to." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Location" SortKey="location"
+                              Width="{StaticResource ColPrnLocation}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Make and model" SortKey="model"
+                              Width="{StaticResource ColPrnModel}"
+                              Tip="What the driver calls the hardware. Empty where the host has no lpoptions." />
+              <c:ColumnHeader Text="Connection" SortKey="uri" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="PrinterList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="PrinterMenu">
+                  <MenuItem Name="MenuPrinterEdit" Header="Edit" />
+                  <MenuItem Name="MenuPrinterDefault" Header="Set as default" />
+                  <Separator />
+                  <MenuItem Name="MenuPrinterEnable" Header="Enable" />
+                  <MenuItem Name="MenuPrinterDisable" Header="Disable" />
+                  <MenuItem Name="MenuPrinterAccept" Header="Accept jobs" />
+                  <MenuItem Name="MenuPrinterReject" Header="Reject jobs" />
+                  <Separator />
+                  <MenuItem Name="MenuPrinterTest" Header="Print test page" />
+                  <Separator />
+                  <MenuItem Name="MenuPrinterDelete" Header="Delete" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:PrinterRow">
+                  <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
+                    <!-- The same 9px state dot the VM, container, account, cron and samba lists
+                         draw. Here it carries the sentence a one-word State cell cannot: why a
+                         stopped queue stopped, in the backend's own words. -->
+                    <DockPanel Width="{StaticResource ColPrnName}" ToolTip.Tip="{Binding StateHint}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}"
+                               ToolTip.Tip="{Binding StateHint}" />
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding StateText}" Width="{StaticResource ColPrnState}"
+                               Foreground="{Binding StateBrush}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding StateHint}" />
+                    <TextBlock Text="{Binding AcceptingText}" Width="{StaticResource ColPrnAccepting}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding SharedText}" Width="{StaticResource ColPrnShared}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding DefaultText}" Width="{StaticResource ColPrnDefault}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Location}" Width="{StaticResource ColPrnLocation}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Location}" />
+                    <TextBlock Text="{Binding MakeAndModel}" Width="{StaticResource ColPrnModel}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding MakeAndModel}" />
+                    <TextBlock Text="{Binding Connection}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Connection}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Why the list is empty, so an unusable module never just looks broken. -->
+            <TextBlock Name="PrinterEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Jobs">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
+                <Border Background="Transparent" ToolTip.Tip="{Binding #JobRefreshButton.Tag}">
+                  <Button Name="JobRefreshButton" Theme="{StaticResource JbIconButton}">
+                    <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                          Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                  </Button>
+                </Border>
+                <Border Background="Transparent" ToolTip.Tip="{Binding #CancelAllButton.Tag}">
+                  <Button Name="CancelAllButton" Content="Cancel all" />
+                </Border>
+                <!-- This tick is a query and not a view of an answer already in hand: the two
+                     listings are two round trips, so it empties the table and re-reads. The one
+                     place in this module where the ordinary filter rule does not apply. -->
+                <Border Background="Transparent" ToolTip.Tip="{Binding #ShowCompleted.Tag}"
+                        VerticalAlignment="Center" Margin="6,0,0,0">
+                  <CheckBox Name="ShowCompleted" Content="Show completed jobs" />
+                </Border>
+              </StackPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="JobSearch" Width="220" Margin="10,0,0,0"
+                           PlaceholderText="Search job, printer or user"
+                           ToolTip.Tip="Narrows the table in hand (Ctrl+F)." />
+              <Panel />
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="JobHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Job" SortKey="id" Indent="14"
+                              Width="{StaticResource ColJobId}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Printer" SortKey="printer"
+                              Width="{StaticResource ColJobPrinter}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="User" SortKey="user"
+                              Width="{StaticResource ColJobUser}" />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Size" SortKey="size"
+                              Width="{StaticResource ColJobSize}"
+                              Tip="What CUPS said, which is exact to the kilobyte and no better." />
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Submitted" SortKey="when"
+                              Width="{StaticResource ColJobWhen}" />
+              <c:ColumnHeader Text="State" SortKey="state" />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ListBox Name="JobList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="JobMenu">
+                  <MenuItem Name="MenuJobCancel" Header="Cancel" />
+                  <Separator />
+                  <MenuItem Name="MenuJobHold" Header="Hold" />
+                  <MenuItem Name="MenuJobRelease" Header="Release" />
+                  <Separator />
+                  <MenuItem Name="MenuJobMove" Header="Move to printer" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:PrintJobRow">
+                  <StackPanel Classes="cells" Orientation="Horizontal">
+                    <DockPanel Width="{StaticResource ColJobId}">
+                      <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,5,0"
+                               VerticalAlignment="Center" Fill="{Binding StateBrush}" />
+                      <TextBlock Text="{Binding Id}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Id}" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Printer}" Width="{StaticResource ColJobPrinter}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding User}" Width="{StaticResource ColJobUser}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SizeText}" Width="{StaticResource ColJobSize}"
+                               Opacity="0.75" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding SubmittedText}" Width="{StaticResource ColJobWhen}"
+                               Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding StateText}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Name="JobEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Server">
+        <DockPanel>
+
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <Border DockPanel.Dock="Left" Background="Transparent"
+                      ToolTip.Tip="{Binding #ServerRefreshButton.Tag}">
+                <Button Name="ServerRefreshButton" Theme="{StaticResource JbIconButton}">
+                  <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+              </Border>
+              <!-- No Save and no Revert, the way the software updates settings tab has none:
+                   moving a control writes it, and Refresh is the way back. -->
+              <TextBlock Classes="note" VerticalAlignment="Center" Margin="10,0,0,0"
+                         Text="Changes are saved to the host as you make them." />
+            </DockPanel>
+          </Border>
+
+          <Panel>
+            <ScrollViewer Name="ServerScroll" Padding="16">
+              <StackPanel Classes="page" MaxWidth="620" HorizontalAlignment="Left">
+
+                <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Sharing">
+                  <StackPanel Classes="options">
+                    <Border Background="Transparent" ToolTip.Tip="Publishes this host's queues to other machines on the network.">
+                      <CheckBox Name="SetSharePrinters" Content="Share printers connected to this host" />
+                    </Border>
+                    <Border Background="Transparent" ToolTip.Tip="Lets machines on other networks print here, not only the local one.">
+                      <CheckBox Name="SetRemoteAny" Content="Allow printing from the internet" />
+                    </Border>
+                  </StackPanel>
+                </HeaderedContentControl>
+
+                <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Administration">
+                  <StackPanel Classes="options">
+                    <Border Background="Transparent" ToolTip.Tip="Lets queues be added and changed from another machine, not only from this host.">
+                      <CheckBox Name="SetRemoteAdmin" Content="Allow remote administration" />
+                    </Border>
+                    <Border Background="Transparent" ToolTip.Tip="Lets anybody cancel anybody's job, not only their own.">
+                      <CheckBox Name="SetUserCancelAny" Content="Allow users to cancel any job" />
+                    </Border>
+                    <Border Background="Transparent" ToolTip.Tip="The CUPS web interface on port 631.">
+                      <CheckBox Name="SetWebInterface" Content="Enable the web interface" />
+                    </Border>
+                  </StackPanel>
+                </HeaderedContentControl>
+
+                <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Jobs">
+                  <StackPanel Classes="options">
+                    <Grid ColumnDefinitions="220,*" RowSpacing="6">
+                      <TextBlock Grid.Column="0" Text="When a job fails" VerticalAlignment="Center" />
+                      <Border Grid.Column="1" Background="Transparent"
+                              ToolTip.Tip="What cupsd does with a job whose backend reported a failure.">
+                        <ComboBox Name="SetErrorPolicy" HorizontalAlignment="Stretch" />
+                      </Border>
+                    </Grid>
+                    <TextBlock Classes="note"
+                               Text="Retry keeps the job and tries again; abort throws it away; stop printer holds everything until somebody looks." />
+                  </StackPanel>
+                </HeaderedContentControl>
+
+                <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Troubleshooting">
+                  <StackPanel Classes="options">
+                    <Border Background="Transparent" ToolTip.Tip="Writes a great deal to the host's error log. Turn it off again afterwards.">
+                      <CheckBox Name="SetDebugLogging" Content="Log debugging information" />
+                    </Border>
+                  </StackPanel>
+                </HeaderedContentControl>
+
+              </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock Name="ServerEmpty" Opacity="0.6" IsVisible="False"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
+  </DockPanel>
+</UserControl>

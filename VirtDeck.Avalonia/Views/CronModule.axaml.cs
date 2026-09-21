@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using VirtDeck.Avalonia.Controls;
 using VirtDeck.Avalonia.Services;
@@ -20,11 +21,15 @@ namespace VirtDeck.Avalonia.Views;
 /// draw, and every job on the page is a foreign job. That is what makes the byte-exact round trip in
 /// <c>CronFile</c> the load-bearing part of this module rather than a nicety.</para>
 ///
-/// <para><b>A Refresh button, no poll and no tail.</b> Nothing on a host announces that a crontab
-/// changed the way <c>docker events</c> announces a container, so this is the accounts and
-/// file-explorer shape. A <c>journalctl --follow</c> on cron was considered and rejected: cron logs
-/// a run as <c>CRON[pid]: (user) CMD (...)</c> with no job identity, so matching a line back to a
-/// row is by command text and would be a guess dressed as a fact.</para>
+/// <para><b>A watch on the files, not a poll and not an event tail.</b> Nothing on a host announces
+/// that a crontab changed the way <c>docker events</c> announces a container, so the loop runs on
+/// the host: one channel, a line only when a signature over the spool, <c>/etc/crontab</c>,
+/// <c>/etc/cron.d</c> and the run-parts directories moves, and no round trip per tick. A
+/// <c>crontab -e</c> at a terminal shows up here within about two seconds. A
+/// <c>journalctl --follow</c> on cron was considered and rejected long before this, for a different
+/// reason: cron logs a run as <c>CRON[pid]: (user) CMD (...)</c> with no job identity, so it reports
+/// a job <i>running</i> rather than a crontab being edited, and matching a line back to a row would
+/// be a guess dressed as a fact.</para>
 /// </summary>
 public partial class CronModule : UserControl, IModule
 {
@@ -32,6 +37,15 @@ public partial class CronModule : UserControl, IModule
     private SshConnectionManager? _ssh;
     private CancellationTokenSource _cts = new();
     private bool _busy;
+
+    /// <summary>Whether this module is the one on screen. The watch runs whether or not it is; what
+    /// this gates is paying a round trip for a change nobody is looking at.</summary>
+    private bool _active;
+
+    /// <summary>400 ms, the debounce every event tail in this app uses, because one action moves
+    /// several files and the watcher reports each.</summary>
+    private readonly DispatcherTimer _watchDebounce =
+        new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     private CronCatalog _catalog = new();
     private TimeZoneInfo? _zone;
@@ -116,6 +130,12 @@ public partial class CronModule : UserControl, IModule
 
         FilterBox.AttachFindShortcut(this, () => Tabs.SelectedIndex == 0 ? JobSearch : ScriptSearch);
 
+        _watchDebounce.Tick += async (_, _) =>
+        {
+            _watchDebounce.Stop();
+            await RefreshAsync();
+        };
+
         UpdateMenu();
     }
 
@@ -148,11 +168,29 @@ public partial class CronModule : UserControl, IModule
     {
         _ssh = ssh;
         _cron = new CronService(ssh);
+        _cron.FilesChanged += OnFilesChanged;
     }
+
+    /// <summary>
+    /// A crontab moved under us. Debounced, because <c>crontab -e</c> writes a temp file and renames
+    /// it over the spool, which moves the directory more than once.
+    ///
+    /// <para>Raised on the watcher's own thread, so it hops to the UI thread before touching a
+    /// timer. Ignored while the module is off screen: the watch itself runs on, and
+    /// <see cref="ActivateAsync"/> refreshes on the way back in anyway.</para>
+    /// </summary>
+    private void OnFilesChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_active) return;
+        _watchDebounce.Stop();
+        _watchDebounce.Start();
+    });
 
     public async Task ActivateAsync()
     {
         if (_cron is null) return;   // design time, or the shell never attached
+
+        _active = true;
 
         // The last answer goes back on screen before the round trip that replaces it, the way the
         // services module draws its cached table on the way in.
@@ -168,6 +206,9 @@ public partial class CronModule : UserControl, IModule
     /// </summary>
     public void Deactivate()
     {
+        _active = false;
+        _watchDebounce.Stop();
+
         JobSearch.Cancel();
         ScriptSearch.Cancel();
 
@@ -184,6 +225,7 @@ public partial class CronModule : UserControl, IModule
     public void Shutdown()
     {
         Deactivate();
+        _cron?.StopWatching();
 
         foreach (var window in _runWindows.ToList())
         {
@@ -206,6 +248,11 @@ public partial class CronModule : UserControl, IModule
             _catalog = await Cron.LoadAsync(_cts.Token);
             _zone = Cron.Zone;
             SetCaps(Cron.CapabilityText);
+
+            // After the load, so the watch covers whichever /etc/cron.<period> directories this
+            // host turned out to have. Asking for the set already in hand is a no-op.
+            Cron.StartWatching();
+
             Draw();
         }
         catch (OperationCanceledException)

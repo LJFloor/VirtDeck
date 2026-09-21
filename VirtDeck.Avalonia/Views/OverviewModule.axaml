@@ -28,6 +28,11 @@
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+    <!-- A fact worth acting on. The house warning amber, the same value the three banners and the
+         host cell's restart glyph carry, and saturated enough to read on either face. -->
+    <Style Selector="TextBlock.factvalue.warn">
+      <Setter Property="Foreground" Value="#D68F00" />
+    </Style>
     <!-- The value a graph's header carries. The header presenter makes its content SemiBold, which
          is right for the title beside it and wrong for a live figure. -->
     <Style Selector="TextBlock.headervalue">
@@ -118,6 +123,25 @@
                     </Border>
                   </StackPanel>
                 </StackPanel>
+
+                <!-- Drawn on two of the three answers this check can give: something on the host
+                     will put it to sleep, or somebody has already stopped it. A host that can
+                     suspend but has nothing asking it to gets no row, the same call the update row
+                     makes for a host with no package manager. The button is the Update now shape,
+                     indent and Border and all, for the same two reasons. -->
+                <StackPanel Name="SuspendRowPanel" IsVisible="False" Spacing="4">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Classes="factlabel" Text="Suspend" />
+                    <TextBlock Name="SuspendText" Classes="factvalue" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Classes="factlabel" />
+                    <Border Background="Transparent" ToolTip.Tip="{Binding #SuspendButton.Tag}">
+                      <Button Name="SuspendButton" />
+                    </Border>
+                  </StackPanel>
+                </StackPanel>
+
                 <TextBlock Name="RebootText" Classes="error" IsVisible="False" Margin="0,4,0,0" />
               </StackPanel>
             </HeaderedContentControl>

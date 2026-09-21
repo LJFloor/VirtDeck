@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:pf="clr-namespace:VirtDeck.Avalonia.Views.Printing"
+        x:Class="VirtDeck.Avalonia.Views.Printing.PrinterEditWindow"
+        Title="Add printer"
+        Width="760" Height="560" MinWidth="640" MinHeight="440"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
+            Background="#11808080">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" Name="StatusText" Margin="0,0,12,0"
+                   VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <Button Name="SaveButton" Content="Add" MinWidth="88" IsDefault="True" Classes="accent" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Pages on the left, one on the right. They are not named by the window's logic: it walks
+         these items and talks to whichever of them implement IPrinterTab, so a new page is a
+         TabItem here and nothing else. The x:Name is only for reading the driver page's own
+         answer back out, which is not part of the model. -->
+    <TabControl Name="SectionTabs" Theme="{StaticResource JbSideTabControl}">
+      <TabItem Header="General"><pf:PrinterGeneralTab /></TabItem>
+      <TabItem Header="Driver"><pf:PrinterDriverTab Name="DriverTab" /></TabItem>
+    </TabControl>
+
+  </DockPanel>
+</Window>
