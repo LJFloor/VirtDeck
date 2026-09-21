@@ -288,9 +288,9 @@ finishes with no file anywhere. The folder read reports one of four answers (`Pd
   chain. The profile is reloaded with `apparmor_parser -r`. **If the parser refuses, the old file
   is put back before anything else happens**: it is included by cupsd's own profile, and a block
   that does not compile would keep that profile from loading at the next boot.
-- **AppArmor without the include**, and **SELinux enforcing**: the folder is written and the note
-  under the box says the policy may refuse it. Editing a distribution's profile or relabelling a
-  tree is not this module's call.
+- **AppArmor without the include**, and **SELinux enforcing**: the folder is written and the policy
+  is left alone, so it may still refuse the folder. Editing a distribution's profile or relabelling
+  a tree is not this module's call.
 - **Neither**: a folder is a folder.
 
 ## The tables

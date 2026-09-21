@@ -49,7 +49,6 @@
             <TextBlock Grid.Column="0" Text="Files land in" VerticalAlignment="Center" />
             <TextBox Grid.Column="1" Name="PdfFolderBox" />
           </Grid>
-          <TextBlock Name="PdfFolderNote" Classes="subnote" TextWrapping="Wrap" IsVisible="False" />
         </StackPanel>
       </HeaderedContentControl>
 

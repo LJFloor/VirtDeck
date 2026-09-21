@@ -52,7 +52,6 @@ public partial class PrinterEditWindow : Window
         LocationBox.Text = _printer.Location;
 
         PdfGroup.IsVisible = IsPdf;
-        PdfFolderBox.TextChanged += (_, _) => SyncPdf();
 
         SaveButton.Click += OnSave;
         CancelButton.Click += (_, _) => Close(false);
@@ -161,39 +160,6 @@ public partial class PrinterEditWindow : Window
 
         // Never over something typed while the host was answering.
         if ((PdfFolderBox.Text ?? "").Length == 0) PdfFolderBox.Text = _loadedFolder;
-
-        SyncPdf();
-    }
-
-    /// <summary>The one sentence under the folder, which says what changing it writes and what
-    /// may refuse it.</summary>
-    private void SyncPdf()
-    {
-        var folder = CupsService.PdfFolderText(PdfFolderBox.Text ?? "");
-        var host = CupsService.PdfFolderText(_pdf.Folder);
-        var own = folder.Length > 0 && folder != host;
-
-        var instance = _instance.Length > 0 ? _instance : _printer.Name;
-
-        var note = own
-            ? $"Writes {CupsService.PdfConfigPath(instance)}: the host's own cups-pdf.conf with this folder in it."
-            : "";
-
-        var confined = own
-            ? _pdf.Confinement switch
-            {
-                PdfConfinement.AppArmorLocal =>
-                    $" AppArmor confines cups-pdf here, so a rule for the folder goes in {CupsService.PdfAppArmorPath}.",
-                PdfConfinement.AppArmorFixed =>
-                    " AppArmor confines cups-pdf here and has no local file to add a rule to, so it may refuse this folder.",
-                PdfConfinement.SeLinux =>
-                    " SELinux is enforcing here, so it may refuse a folder outside the one it already labels.",
-                _ => "",
-            }
-            : "";
-
-        PdfFolderNote.Text = note + confined;
-        PdfFolderNote.IsVisible = PdfFolderNote.Text.Length > 0;
     }
 
     private static Printer Clone(Printer p) => new()

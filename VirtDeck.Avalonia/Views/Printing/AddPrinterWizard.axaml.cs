@@ -104,9 +104,7 @@ public partial class AddPrinterWizard : Window
 
         // The fold is idempotent rather than flagged, which is what makes it safe to re-enter:
         // assigning Text raises TextChanged again, and the second pass finds nothing to change.
-        NameBox.TextChanged += (_, _) => { FoldName(); SyncPdfFolder(); };
-
-        PdfFolderBox.TextChanged += (_, _) => SyncPdfFolder();
+        NameBox.TextChanged += (_, _) => FoldName();
 
         Retake(catalog);
         SyncConnection();
@@ -279,35 +277,8 @@ public partial class AddPrinterWizard : Window
         SyncPdfFolder();
     }
 
-    /// <summary>
-    /// The folder box and the one sentence under it, which says what a folder of its own costs:
-    /// a config file of this queue's, and on a host that confines the backend, either a rule
-    /// beside it or a warning that there is nowhere to put one.
-    /// </summary>
-    private void SyncPdfFolder()
-    {
-        PdfFolderBox.IsEnabled = IsPdf && _pdfUri.Length > 0;
-
-        var note =
-            !CustomFolder ? ""
-            : QueueName.Length > 0
-                ? $"Writes {CupsService.PdfConfigPath(QueueName)}: the host's own cups-pdf.conf with this folder in it."
-                : "Writes a cups-pdf config of its own, named after the queue.";
-
-        var confined = _pdf.Confinement switch
-        {
-            PdfConfinement.AppArmorLocal when CustomFolder =>
-                $" AppArmor confines cups-pdf here, so a rule for the folder goes in {CupsService.PdfAppArmorPath}.",
-            PdfConfinement.AppArmorFixed when CustomFolder =>
-                " AppArmor confines cups-pdf here and has no local file to add a rule to, so it may refuse this folder.",
-            PdfConfinement.SeLinux when CustomFolder =>
-                " SELinux is enforcing here, so it may refuse a folder outside the one it already labels.",
-            _ => "",
-        };
-
-        PdfFolderNote.Text = note + confined;
-        PdfFolderNote.IsVisible = PdfFolderNote.Text.Length > 0;
-    }
+    /// <summary>The folder box is only for a PDF printer on a host that has the backend.</summary>
+    private void SyncPdfFolder() => PdfFolderBox.IsEnabled = IsPdf && _pdfUri.Length > 0;
 
     private (string Uri, string Info)? Selected()
     {
