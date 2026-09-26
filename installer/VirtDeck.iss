@@ -49,9 +49,11 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 ; produced by publish.bat. Installed beside the app so the binary is "accompanied by source"
 ; (LGPL/GPL §3(a)), so no separate written offer or hosted URL is required.
 Source: "..\publish\SpiceClient-src.zip"; DestDir: "{app}"; Flags: ignoreversion
-; The app's freeware EULA, plus third-party notices + license texts. We redistribute the
-; LGPL/MIT native DLLs and the Apache-licensed UsbDk MSI, so their licenses ship beside them.
+; The app's GPL-2 licence, SpiceClient's LGPL-3, plus third-party notices + license texts. We
+; redistribute the LGPL/MIT native DLLs and the Apache-licensed UsbDk MSI, so their licenses ship
+; beside them. GPL-3.0.txt, which LGPL-3 builds on, is already among the native licences.
 Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\SpiceClient\COPYING.LESSER"; DestDir: "{app}\licenses"; DestName: "LGPL-3.0.txt"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\native\win-x64\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "redist\UsbDk-LICENSE-Apache-2.0.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion

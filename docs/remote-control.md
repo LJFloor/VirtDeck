@@ -178,7 +178,7 @@ a gesture with no outcome.
 Both ends are ours: `RfbSession` here, `Rfb/RfbServer` in the agent. The wire numbers they share
 live once, in `RemoteDesktop/RfbProtocol.cs`, which the agent's project links, so the two cannot
 drift. Written from RFC 6143 and the community protocol description; noVNC was only a behaviour
-cross-check and is not ported (it is MPL, and Core is proprietary).
+cross-check and is not ported (it is MPL).
 
 - **Pixel format** 32 bpp, depth 24, little-endian, true colour, red at bit 16, green at 8, blue at
   0: every pixel arrives as B, G, R, which is the framebuffer's BGRA **and X11's own ZPixmap layout

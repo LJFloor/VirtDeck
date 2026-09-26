@@ -88,12 +88,13 @@ SOFTWARE.
 
 ## SpiceClient (SPICE protocol client, component of this product)
 
-The `SpiceClient` library's protocol code was ported from **spice-html5** (LGPL), making it
-a derivative work under the **LGPL**. Its corresponding source ships alongside the app
+The `SpiceClient` library's protocol code was ported from **spice-html5** (LGPL-3.0-or-later),
+making it a derivative work under the same licence; the texts are `SpiceClient/COPYING.LESSER` and
+`SpiceClient/COPYING`. Its corresponding source ships alongside the app
 (`SpiceClient-src.zip` next to `virtdeck.exe` on Windows, and
 `usr/share/virtdeck/SpiceClient-src.tar.gz` inside the AppImage), and it is a separate DLL
 (relinkable).
 - spice-html5: https://gitlab.freedesktop.org/spice/spice-html5
 
-The remainder of VirtDeck (the `virtdeck` application, `VirtDeck.Core`) is proprietary; see
-`LICENSE.txt`.
+The remainder of VirtDeck is GPL-2.0-only, with an exception that permits linking with
+SpiceClient and UsbDk; see `LICENSE.txt`.

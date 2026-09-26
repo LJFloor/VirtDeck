@@ -57,6 +57,8 @@ cp "$APPDIR/virtdeck.png" "$APPDIR/.DirIcon"
 install -Dm644 "$REPO_ROOT/packaging/70-virtdeck-usb.rules" \
     "$APPDIR/usr/share/virtdeck/70-virtdeck-usb.rules"
 install -Dm644 "$REPO_ROOT/LICENSE.txt" "$APPDIR/usr/share/virtdeck/LICENSE.txt"
+install -Dm644 "$REPO_ROOT/SpiceClient/COPYING.LESSER" "$APPDIR/usr/share/virtdeck/licenses/LGPL-3.0.txt"
+install -Dm644 "$REPO_ROOT/SpiceClient/COPYING" "$APPDIR/usr/share/virtdeck/licenses/GPL-3.0.txt"
 install -Dm644 "$REPO_ROOT/THIRD-PARTY-NOTICES.md" "$APPDIR/usr/share/virtdeck/THIRD-PARTY-NOTICES.md"
 
 # LGPL corresponding source for SpiceClient (the spice-html5-derived component), shipped inside
