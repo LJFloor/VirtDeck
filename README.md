@@ -13,7 +13,7 @@ It runs on **Windows and Linux**.
 # Features
 
 - **Virtual machines**: create, edit, start, stop and export libvirt/KVM VMs, with a built-in
-  SPICE console (audio, clipboard, USB redirection, and ISOs streamed straight from your PC)
+  SPICE console (audio, clipboard, USB redirection (experimental), and ISOs streamed straight from your PC)
 - **Unattended Windows installs**: build an answer file and attach it to a new VM
 - **Containers**: Docker containers, images, volumes, networks and compose stacks
 - **Host overview**: live CPU, memory, network, disk and GPU graphs, plus the hardware

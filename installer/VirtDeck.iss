@@ -15,7 +15,7 @@
 
 #define AppName "VirtDeck"
 #define AppPublisher "Leendert-Jan Floor"
-#define AppVersion "1.0.0"
+#define AppVersion "0.1.0"
 ; The Avalonia project's <AssemblyName> is lower-case, so the apphost is virtdeck.exe.
 #define AppExe "virtdeck.exe"
 #define UsbDkMsi "UsbDk_1.0.22_x64.msi"

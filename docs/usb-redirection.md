@@ -1,5 +1,7 @@
 # USB redirection
 
+**Experimental.** The dialog says so in a banner. Bulk, HID and mass storage devices work; isochronous devices (webcams, audio) are unreliable.
+
 The console can redirect a physical USB device into the guest (the SPICE **usbredir** channel, type 9), on **Windows and Linux**. It is independent of the guest agent; the guest needs only a USB controller and the device's normal driver.
 
 - **Native stack (not a C# port):** `SpiceClient` P/Invokes `usbredirhost` + `usbredirparser` + `libusb-1.0`, loaded by bare name through `Interop/NativeLibraryResolver`. On Windows the x64 DLLs must sit next to `virtdeck.exe`; stage them in `native\win-x64\` (see its `VERSIONS.txt`) and the csproj copies them. On Linux they come from the distro.

@@ -25,7 +25,11 @@ packaging/build-appimage.sh 1.2.3   # Linux   -> publish/VirtDeck-1.2.3-x86_64.A
 publish.bat                         # Windows -> installer\output\VirtDeckSetup-*.exe
 ```
 
-`.github/workflows/publish.yml` builds both on every push to `main`, and that is the whole of CI: it **uploads nothing**, so it is the no-regression gate and not a source of downloads. The repo being private is why: build artifacts count against the account's Actions storage allowance, one push to `main` stored about 107 MB for the pair, and once the allowance is full *every* upload in the repo fails, so a green build reports as a failed run. Both halves are still built, because ISCC and appimagetool are part of what can regress. There is no tag-triggered release workflow any more; a release is built locally with the two commands above.
+`.github/workflows/publish.yml` builds both on every push to `main` and uploads nothing: that is the no-regression gate, and both halves are built because ISCC and appimagetool are part of what can regress. Pushing a `v*` tag runs the same builds at the tag's version and attaches the installer and the AppImage to a GitHub release:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
 
 ## The Remote Control host agent
 

@@ -1,14 +1,13 @@
 name: Build & Publish
 
 # Build the app on every merge to main: the Windows installer and the Linux AppImage, mirroring
-# publish.bat and packaging/build-appimage.sh respectively. Nothing is uploaded, so this workflow
-# is purely the no-regression gate. The repo being private is why: build artifacts count against
-# the account's Actions storage allowance, one push to main stored about 107 MB for the pair, and
-# once the allowance is full every upload in the repo fails, so a green build reports as a failed
-# run. Both halves are still built, because ISCC and appimagetool are part of what can regress.
+# publish.bat and packaging/build-appimage.sh respectively. A push to main uploads nothing, so it
+# is the no-regression gate. A pushed v* tag builds the same pair at the tag's version and
+# attaches both to a GitHub release.
 on:
   push:
     branches: [main]
+    tags: ['v*']
 
 jobs:
   windows:
@@ -23,11 +22,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # No tag here, so stamp a traceable CI version from the run number.
-      - name: Derive CI version
+      # A tag names the version; otherwise stamp a traceable CI version from the run number.
+      - name: Derive version
         id: ver
         shell: pwsh
-        run: '"version=1.0.0.${{ github.run_number }}" >> $env:GITHUB_OUTPUT'
+        run: |
+          $v = if ('${{ github.ref_type }}' -eq 'tag') { '${{ github.ref_name }}'.TrimStart('v') } else { '1.0.0.${{ github.run_number }}' }
+          "version=$v" >> $env:GITHUB_OUTPUT
 
       # Zip the SpiceClient source BEFORE building so no bin/obj leaks in. The
       # installer ships this beside the app as LGPL "corresponding source"
@@ -48,12 +49,24 @@ jobs:
           -p:Version=${{ steps.ver.outputs.version }}
           -o publish/win-x64
 
+      # As publish.bat: the symbols are dead weight in the installer.
+      - name: Drop debug symbols
+        shell: pwsh
+        run: Get-ChildItem publish/win-x64 -Recurse -Filter *.pdb | Remove-Item
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
       - name: Build installer
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\VirtDeck.iss'
+
+      - name: Upload installer
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: installer/output/VirtDeckSetup-${{ steps.ver.outputs.version }}.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -67,11 +80,39 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Derive CI version
+      - name: Derive version
         id: ver
-        run: echo "version=1.0.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "${{ github.ref_type }}" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="1.0.0.${{ github.run_number }}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # The script downloads appimagetool itself and runs it with APPIMAGE_EXTRACT_AND_RUN, so the
       # runner needs no FUSE and no extra packages.
       - name: Build AppImage
         run: packaging/build-appimage.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Upload AppImage
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: publish/VirtDeck-${{ steps.ver.outputs.version }}-x86_64.AppImage
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "VirtDeck ${GITHUB_REF_NAME#v}" --generate-notes

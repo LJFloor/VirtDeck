@@ -13,6 +13,11 @@
 
   <DockPanel Margin="12">
 
+    <Border DockPanel.Dock="Top" Padding="10,6" Margin="0,0,0,10" Background="#22d68f00">
+      <TextBlock TextWrapping="Wrap"
+                 Text="USB redirection is experimental. Webcams and audio devices may not work." />
+    </Border>
+
     <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
       <Button Name="CloseButton" DockPanel.Dock="Right" Content="Close" MinWidth="88" IsCancel="True" />
       <StackPanel Orientation="Horizontal" Spacing="8">

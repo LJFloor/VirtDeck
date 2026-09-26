@@ -39,7 +39,7 @@ in this index.
 | File | What is in it |
 |---|---|
 | [overview.md](docs/overview.md) | What the app is, the flow from the host manager to a console, and the older app it was rewritten from. |
-| [build-and-packaging.md](docs/build-and-packaging.md) | The four projects, the two release artifacts, and why CI uploads nothing. |
+| [build-and-packaging.md](docs/build-and-packaging.md) | The four projects, the two release artifacts, and the tag that releases them. |
 | [shared-idioms.md](docs/shared-idioms.md) | The rules that recur everywhere: tab walks, one round trip with tagged records, never interpolating user text into a shell, absent tooling as a stated answer, the refresh policy, merged rather than rebuilt rows, sorting and filtering, auto-fill. |
 
 ### Across the app
