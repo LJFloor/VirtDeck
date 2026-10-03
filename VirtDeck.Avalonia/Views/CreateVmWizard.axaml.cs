@@ -33,7 +33,7 @@ public partial class CreateVmWizard : Window
     private readonly List<NicAddOp> _nics = new();
     private readonly List<DiskAddOp> _disks = new();
     private readonly HashSet<string> _usedTargets = new();
-    private readonly List<NbdServer> _servers = new();
+    private readonly List<IMediaServer> _servers = new();
 
     private readonly ObservableCollection<NicOpRow> _nicRows = new();
     private readonly ObservableCollection<DiskOpRow> _diskRows = new();
@@ -87,7 +87,7 @@ public partial class CreateVmWizard : Window
     public bool VmStarted { get; private set; }
 
     /// <summary>Host media stream servers started during create; the caller keeps them alive.</summary>
-    public IReadOnlyList<NbdServer> StreamingServers => _servers;
+    public IReadOnlyList<IMediaServer> StreamingServers => _servers;
 
     /// <summary>Design-time only.</summary>
     public CreateVmWizard() : this(null!, null!) { }
@@ -833,8 +833,7 @@ public partial class CreateVmWizard : Window
             case "cdrom":
                 if (op.IsoMode == "stream")
                 {
-                    var server = new NbdServer();
-                    server.Start(op.Source, _ssh.Client, writable: false);
+                    var server = MediaServer.Start(op.Source, _ssh.Client, writable: false, _virsh);
                     _servers.Add(server);
                     _virsh.AttachNetworkCdrom(_name, server.RemoteUrl, op.Target, op.Bus);
                 }
@@ -847,8 +846,7 @@ public partial class CreateVmWizard : Window
                 if (op.IsoMode == "stream")
                 {
                     // Writable: guest writes to a streamed floppy persist back to the local file.
-                    var fserver = new NbdServer();
-                    fserver.Start(op.Source, _ssh.Client, writable: true);
+                    var fserver = MediaServer.Start(op.Source, _ssh.Client, writable: true, _virsh);
                     _servers.Add(fserver);
                     _virsh.AttachNetworkFloppy(_name, fserver.RemoteUrl, op.Target);
                 }

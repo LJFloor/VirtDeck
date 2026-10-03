@@ -14,7 +14,7 @@
 - `CursorShape`: decoded ALPHA cursor (BGRA + hotspot).
 
 ## VirtDeck.Core (shared, cross-platform)
-- `Services/`: `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `DockerService`, `SystemdService`, `UserAccountService`, `RemoteFileService`, `RemoteTransferService`, `NbdServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level, not via `virt-xml`.
+- `Services/`: `SshConnectionManager`, `SshPortForwarder`, `VirshService` (sudo via stdin + marker), `DockerService`, `SystemdService`, `UserAccountService`, `RemoteFileService`, `RemoteTransferService`, `NbdServer`, `IsoHttpServer`, `UsbProvisioning`, `OsLabelCatalog`. Image compression is steered at the protocol level, not via `virt-xml`.
 - `RemoteDesktop/`: the Remote Control module's engine, toolkit-agnostic like `Terminal/`. `RfbSession` (RFB over any pair of streams: a reader thread, `RfbWriter`'s writer thread, `TightDecoder` over `TightInflater`'s session-long zlib streams) and `RemoteDesktopService` (the X displays, the embedded `AgentBundle` uploaded to `~/.cache/virtdeck`, and starting `virtdeck-agent` there). See [remote-control.md](remote-control.md).
 - **A protocol over an exec channel** goes through `SshConnectionManager.OpenPipeAsync` + `Services/SshPipe`: stdin and stdout as binary streams for the life of the command, stderr drained into a tail, its own connection. The PTY below is for people; this is for protocols, and nothing on it rewrites a byte.
 - **Interactive commands** go through `SshConnectionManager.OpenSudoPtyAsync`/`OpenShellPtyAsync` + `Services/SshPtySession`, the only bidirectional channel in the app.

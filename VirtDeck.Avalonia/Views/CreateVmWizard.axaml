@@ -48,7 +48,7 @@
 
           <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="24">
             <RadioButton Name="IsoStreamRadio" GroupName="IsoMode" Content="Stream from this PC" IsChecked="True" />
-            <RadioButton Name="IsoServerRadio" GroupName="IsoMode" Content="File on server (fastest)" />
+            <RadioButton Name="IsoServerRadio" GroupName="IsoMode" Content="File on server" />
           </StackPanel>
 
           <!-- Both inputs share the same row; only one is visible at a time. -->

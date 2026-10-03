@@ -782,7 +782,7 @@ public partial class ShellView : UserControl
     // BytesSent is here because the file explorer's uploads are the first thing in the app to send
     // enough for the readout's claim to cover everything to be worth anything.
     private long TotalTunnelBytes() =>
-        _ssh.BytesReceived + _ssh.BytesSent + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed;
+        _ssh.BytesReceived + _ssh.BytesSent + SpiceTraffic.BytesTransferred + NbdServer.TotalBytesServed + IsoHttpServer.TotalBytesServed;
 
     private void UpdateThroughput()
     {

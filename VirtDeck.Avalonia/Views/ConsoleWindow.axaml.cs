@@ -53,7 +53,7 @@ public partial class ConsoleWindow : Window
     private string? _cdromBus;
     private string? _floppyTarget;
     private bool _hasSoundDevice; // VM exposes a <sound> device → SPICE offers a playback channel
-    private readonly List<NbdServer> _mediaServers = new(); // streamed "this PC" media; alive while open
+    private readonly List<IMediaServer> _mediaServers = new(); // streamed "this PC" media; alive while open
     private bool _mediaBusy;      // a change-media action is in flight; drops must not stack
     private bool _dragActive;     // a file drag is over this window (see SetDragActive)
 
@@ -592,14 +592,14 @@ public partial class ConsoleWindow : Window
     private async Task InsertLocalMediaAsync(bool cdrom, string localPath)
     {
         if (Target(cdrom) is not { } t) return;
-        // One media action at a time: two quick drops would otherwise race two NbdServers onto the
+        // One media action at a time: two quick drops would otherwise race two media servers onto the
         // same drive, and the loser would sit in _mediaServers holding a forward until close.
         if (_mediaBusy) return;
         _mediaBusy = true;
         try
         {
             string bus = _cdromBus ?? "sata";
-            NbdServer? server = null;
+            IMediaServer? server = null;
 
             // Started once, even if the live attempt falls back to the saved config below.
             void Apply(bool live)
@@ -608,8 +608,7 @@ public partial class ConsoleWindow : Window
                 {
                     // A floppy is exported read-write so guest writes persist back to the local
                     // file; an ISO is read-only.
-                    server = new NbdServer();
-                    server.Start(localPath, _ssh.Client, writable: !cdrom);
+                    server = MediaServer.Start(localPath, _ssh.Client, writable: !cdrom, _virsh);
                     lock (_mediaServers) _mediaServers.Add(server);
                 }
                 if (cdrom) _virsh.UpdateCdromNetwork(VmName, t, bus, server.RemoteUrl, live);

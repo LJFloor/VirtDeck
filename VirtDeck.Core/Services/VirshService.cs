@@ -713,7 +713,26 @@ namespace VirtDeck.Services
                     "--mode", "readonly", "--config");
 
         /// <summary>
-        /// Attaches a network CD-ROM (NBD URL) so QEMU streams the ISO over its built-in NBD client.
+        /// Whether the host's QEMU has the curl block driver (needed to stream over HTTP). Probed once;
+        /// an error counts as absent, so streaming falls back to NBD.
+        /// </summary>
+        public bool QemuCurlAvailable => _qemuCurl ??= ProbeQemuCurl();
+        private bool? _qemuCurl;
+
+        private bool ProbeQemuCurl()
+        {
+            try
+            {
+                var found = _ssh.RunCommand("find /usr/lib /usr/lib64 -name 'block-curl.so' 2>/dev/null | head -n1").Trim();
+                if (found.Length > 0) return true;
+                var help = _ssh.RunCommand("qemu-system-x86_64 -drive driver=curl,help 2>&1 || true");
+                return help.Contains("url=", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Attaches a network CD-ROM (HTTP or NBD URL) so QEMU streams the ISO through its curl or NBD client.
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
         /// install CD must be ejected/removed or the domain won't start; the caller surfaces that to the user.
         /// </summary>
@@ -740,8 +759,8 @@ namespace VirtDeck.Services
         public void UpdateFloppyNetwork(string vm, string target, string url, bool live = true) =>
             RunDeviceXml("update-device", vm, BuildNetworkMediaXml(url, target, "fdc", "floppy", readOnly: false), live ? "--live" : "--config");
 
-        // Builds a `<disk type='network'>` element for a streamed NBD export. The export name is omitted for
-        // the default (path-less) export. `<readonly/>` is emitted only for read-only media (CD-ROM); a
+        // Builds a `<disk type='network'>` element for a streamed HTTP or NBD source. The name is omitted for
+        // NBD's default (path-less) export. `<readonly/>` is emitted only for read-only media (CD-ROM); a
         // writable floppy must stay read-write so the guest's writes reach the local file.
         private static string BuildNetworkMediaXml(string url, string target, string bus, string device, bool readOnly)
         {

@@ -37,7 +37,7 @@ public partial class VirtualMachinesModule : UserControl, IModule
     private TableSort? _netSortOrNull;
 
     private readonly Dictionary<string, ConsoleWindow> _consoles = new();
-    private readonly List<NbdServer> _mediaServers = new(); // host NBD media streams, alive for the session
+    private readonly List<IMediaServer> _mediaServers = new(); // host media streams, alive for the session
 
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _tickTimer;

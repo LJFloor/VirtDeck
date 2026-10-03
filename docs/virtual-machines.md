@@ -83,7 +83,12 @@ QUIC and GLZ are not decoded. The client decodes BITMAP + LZ_RGB + JPEG and stee
 
 ## Removable media (ISO / floppy)
 
-Optical (`.iso`, `device='cdrom'`) and floppy (`device='floppy'` on the `fdc` bus, target `fda`) share one pipeline. Each can be a **file on the server** or **streamed from this PC**: the local file is served by `Services/NbdServer` (a native C# NBD fixed-newstyle server, file-agnostic) over an SSH reverse-forward, and QEMU pulls it through its built-in NBD client from a `<disk type='network' protocol='nbd'>` element (`VirshService.BuildNetworkMediaXml`). NBD is always compiled into QEMU, so streaming needs **no host package**. ISO is exported read-only; **floppy is exported read-write, so guest writes persist back to the local file**. Change/eject reuse `virsh change-media`/`--eject` (generic by target).
+Optical (`.iso`, `device='cdrom'`) and floppy (`device='floppy'` on the `fdc` bus, target `fda`) share one pipeline. Each can be a **file on the server** or **streamed from this PC** over an SSH reverse-forward, as a `<disk type='network'>` element whose protocol is the URL's scheme (`VirshService.BuildNetworkMediaXml`). `MediaServer.Start` picks the server:
+
+- **An ISO goes over HTTP** (`Services/IsoHttpServer`, HEAD plus Range) when the host's QEMU has the curl block driver (`VirshService.QemuCurlAvailable`, probed once: `qemu-block-extra` on Debian, `qemu-block-curl` on Fedora). **It is about ten times faster than NBD** (measured 74 MB/s against 6-7 MB/s): the emulated CD-ROM is queue-depth 1, so NBD pays a round trip per small ISO 9660 read at boot, while the curl driver fetches 256 KiB per request and serves the following reads from its own buffers.
+- **Everything else goes over NBD** (`Services/NbdServer`, a native C# fixed-newstyle server): a floppy, which is exported **read-write so guest writes persist back to the local file**, and an ISO on a host without the curl driver. NBD is always compiled into QEMU, so it needs no host package.
+
+Both implement `IMediaServer`, which is what the callers hold. Change/eject reuse `virsh change-media`/`--eject` (generic by target).
 
 Streaming surfaces: the Create-VM wizard (a single **install-media** picker, ISO to CD-ROM and floppy image to floppy, classified in `BuildInstallMediaOpAsync` and added to the boot order), the editor's disk context menu, and the console's **CD/DVD** and **Floppy** toolbar dropdowns. The console's Floppy button is hidden unless the VM has a floppy drive, and the editor's boot-order list includes **Floppy** (`<boot dev='fd'/>`). Caveat: the `fdc` controller is native on `i440fx` (the BIOS-only XP F6-driver case) but may be unavailable on `q35`/UEFI.
 

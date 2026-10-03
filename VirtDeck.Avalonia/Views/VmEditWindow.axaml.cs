@@ -109,7 +109,7 @@ public partial class VmEditWindow : Window
     /// <summary>Media streamed from this PC over SSH (pending until Save), plus the drive's bus/kind.</summary>
     private sealed class StreamedMedia
     {
-        public NbdServer Server = null!;
+        public IMediaServer Server = null!;
         public string Bus = "sata";
         public bool IsFloppy;
         public string Display = "";
@@ -119,7 +119,7 @@ public partial class VmEditWindow : Window
     /// Streaming servers created in this editor that back saved media URLs. The caller must keep them
     /// alive for the session on OK (and dispose them otherwise); the URL is only reachable while they run.
     /// </summary>
-    public IReadOnlyList<NbdServer> StreamingServers =>
+    public IReadOnlyList<IMediaServer> StreamingServers =>
         _mediaStreams.Values.Select(s => s.Server).ToList();
 
     private async Task LoadAsync()
@@ -401,12 +401,11 @@ public partial class VmEditWindow : Window
     {
         string bus = string.IsNullOrEmpty(d.Bus) ? (d.IsFloppy ? "fdc" : "sata") : d.Bus;
 
-        NbdServer server;
+        IMediaServer server;
         try
         {
-            server = new NbdServer();
             // A floppy is exported read-write, so guest writes persist back to the local file.
-            server.Start(local, _ssh.Client, writable: d.IsFloppy);
+            server = await Task.Run(() => MediaServer.Start(local, _ssh.Client, writable: d.IsFloppy, _virsh));
         }
         catch (Exception ex)
         {
