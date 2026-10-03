@@ -310,10 +310,10 @@ public partial class ConsoleWindow : Window
             StatusText.Text = "Connecting to SPICE…";
             SpiceLog.Log($"=== Connecting {VmName}: remote spice {spiceHost}:{remotePort} -> local {localPort} ===");
 
-            _session = new SpiceSession("127.0.0.1", localPort, string.Empty);
+            var session = _session = new SpiceSession("127.0.0.1", localPort, string.Empty);
             _session.VerboseLogging = SpiceLog.Verbose;
             _session.LogMessage += SpiceLog.Log;
-            _session.Disconnected += OnSessionDisconnected;
+            _session.Disconnected += reason => OnSessionDisconnected(session, reason);
             _session.StatusMessage += OnSessionStatus;
             _session.ClipboardTextFromGuest += OnClipboardTextFromGuest;
             _session.ClipboardImageFromGuest += OnClipboardImageFromGuest;
@@ -412,9 +412,12 @@ public partial class ConsoleWindow : Window
         _forwarder = null;
     }
 
-    private void OnSessionDisconnected(string reason) => Dispatcher.UIThread.Post(() =>
+    private void OnSessionDisconnected(SpiceSession from, string reason) => Dispatcher.UIThread.Post(() =>
     {
-        if (_closing) return;
+        // Disposing a session makes the server drop it, and a channel not yet disposed reports
+        // that as a disconnect. Acting on it would schedule a retry that kills the next session,
+        // which then reports its own drop: a reconnect every second.
+        if (_closing || !ReferenceEquals(from, _session)) return;
         CleanupConnection();
         ScheduleReconnect($"Disconnected: {reason}");
     });
