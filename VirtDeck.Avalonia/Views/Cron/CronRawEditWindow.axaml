@@ -7,31 +7,35 @@
         Width="860" Height="580" MinWidth="520" MinHeight="320"
         WindowStartupLocation="CenterOwner">
 
-  <DockPanel Margin="16">
+  <DockPanel>
 
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
-      <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
-      <Border Background="Transparent" ToolTip.Tip="{Binding #SaveButton.Tag}">
-        <Button Name="SaveButton" Content="Save" MinWidth="88" Classes="accent" />
-      </Border>
-    </StackPanel>
-
-    <!-- What is being edited and what reads it, said before the text rather than in the title bar
-         alone: /etc/crontab and a user crontab look identical in an editor and are not the same
-         file in any other way, one of them carrying a user field per line and the other not. -->
-    <TextBlock DockPanel.Dock="Top" Name="WhatText" Classes="note"
-               TextWrapping="Wrap" Margin="0,0,0,10" />
-
-    <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
-               TextWrapping="Wrap" IsVisible="False" Margin="0,10,0,0" />
-
-    <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}">
-      <edit:TextEditor Name="Editor" ShowLineNumbers="True"
-                       c:CodeEditor.Language="Crontab"
-                       HorizontalScrollBarVisibility="Auto"
-                       VerticalScrollBarVisibility="Auto" />
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+        <Border Background="Transparent" ToolTip.Tip="{Binding #SaveButton.Tag}">
+          <Button Name="SaveButton" Content="Save" MinWidth="88" Classes="accent" />
+        </Border>
+      </StackPanel>
     </Border>
 
+    <DockPanel Margin="16">
+
+      <!-- What is being edited and what reads it, said before the text rather than in the title bar
+           alone: /etc/crontab and a user crontab look identical in an editor and are not the same
+           file in any other way, one of them carrying a user field per line and the other not. -->
+      <TextBlock DockPanel.Dock="Top" Name="WhatText" Classes="note"
+                 TextWrapping="Wrap" Margin="0,0,0,10" />
+
+      <TextBlock DockPanel.Dock="Bottom" Name="ErrorText" Classes="error"
+                 TextWrapping="Wrap" IsVisible="False" Margin="0,10,0,0" />
+
+      <Border BorderThickness="1" BorderBrush="{DynamicResource JbGroupBoxBorder}">
+        <edit:TextEditor Name="Editor" ShowLineNumbers="True"
+                         c:CodeEditor.Language="Crontab"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Auto" />
+      </Border>
+
+    </DockPanel>
   </DockPanel>
 </Window>

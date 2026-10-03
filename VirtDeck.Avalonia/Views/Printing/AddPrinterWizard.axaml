@@ -18,8 +18,7 @@
 
     <!-- Footer band. Unlike CreateVmWizard, a refused Next lands in StatusText rather than in a
          dialog: that is the edit window's idiom and this module already reads that line. -->
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
-            Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <DockPanel>
         <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8"

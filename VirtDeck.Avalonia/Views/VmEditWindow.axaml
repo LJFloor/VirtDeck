@@ -1,9 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
         x:Class="VirtDeck.Avalonia.Views.VmEditWindow"
         Title="Edit VM"
-        Width="720" Height="560"
+        Width="820" Height="600" MinWidth="680" MinHeight="460"
         WindowStartupLocation="CenterOwner">
 
   <Window.Styles>
@@ -20,164 +21,177 @@
 
   <DockPanel>
 
-    <DockPanel DockPanel.Dock="Bottom" Margin="12">
-      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-        <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
-        <Button Name="OkButton" Content="Save" MinWidth="88" IsDefault="True" Classes="accent" />
-      </StackPanel>
-      <TextBlock Name="NoteText" VerticalAlignment="Center" Opacity="0.65" TextWrapping="Wrap"
-                 Text="Changes are saved to the VM configuration and take effect on next boot." />
-    </DockPanel>
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" Name="NoteText" Margin="0,0,12,0"
+                   VerticalAlignment="Center" Opacity="0.75" TextWrapping="Wrap"
+                   Text="Changes take effect on next boot." />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
+          <Button Name="OkButton" Content="Save" MinWidth="88" IsDefault="True" Classes="accent" />
+        </StackPanel>
+      </Grid>
+    </Border>
 
-    <TabControl>
+    <TabControl Theme="{StaticResource JbSideTabControl}">
 
-      <!-- General -->
       <TabItem Header="General">
-        <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
-              RowSpacing="12" ColumnSpacing="6" Margin="20,14,20,20">
-          <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" />
-          <TextBox   Grid.Row="0" Grid.Column="1" Name="NameBox" Width="300" HorizontalAlignment="Left" />
+        <ScrollViewer Padding="16">
+          <StackPanel Classes="page">
 
-          <TextBlock Grid.Row="1" Grid.Column="0" Text="vCPUs:" VerticalAlignment="Center" />
-          <NumericUpDown Grid.Row="1" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
-                         Minimum="1" Maximum="256" Value="1" Increment="1" FormatString="0" />
+            <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Virtual machine">
+              <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+                <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox" />
 
-          <TextBlock Grid.Row="2" Grid.Column="0" Text="Memory:" VerticalAlignment="Center" />
-          <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
-            <NumericUpDown Name="MemBox" Width="150" Minimum="64" Maximum="1048576"
-                           Value="1024" Increment="256" FormatString="0" />
-            <TextBlock Text="MiB" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="vCPUs" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Row="1" Grid.Column="1" Name="VcpuBox" Width="120" HorizontalAlignment="Left"
+                               Minimum="1" Maximum="256" Value="1" Increment="1" FormatString="0" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Memory" VerticalAlignment="Center" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                  <NumericUpDown Name="MemBox" Width="150" Minimum="64" Maximum="1048576"
+                                 Value="1024" Increment="256" FormatString="0" />
+                  <TextBlock Text="MiB" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="CPU mode" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="3" Grid.Column="1" Name="CpuBox" Width="220" HorizontalAlignment="Left" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="GPU" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="4" Grid.Column="1" Name="GpuBox" Width="220" HorizontalAlignment="Left" />
+              </Grid>
+            </HeaderedContentControl>
+
+            <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Startup">
+              <CheckBox Name="AutostartCheck" Content="Start automatically with the host" />
+            </HeaderedContentControl>
+
           </StackPanel>
-
-          <TextBlock Grid.Row="3" Grid.Column="0" Text="CPU mode:" VerticalAlignment="Center" />
-          <ComboBox  Grid.Row="3" Grid.Column="1" Name="CpuBox" Width="220" HorizontalAlignment="Left" />
-
-          <TextBlock Grid.Row="4" Grid.Column="0" Text="GPU:" VerticalAlignment="Center" />
-          <ComboBox  Grid.Row="4" Grid.Column="1" Name="GpuBox" Width="220" HorizontalAlignment="Left" />
-
-          <CheckBox Grid.Row="5" Grid.Column="1" Name="AutostartCheck"
-                    Content="Start automatically with the host" />
-        </Grid>
+        </ScrollViewer>
       </TabItem>
 
-      <!-- Boot -->
+      <!-- The list pages fill the height rather than scroll, so the list is what grows. -->
       <TabItem Header="Boot">
-        <DockPanel Margin="20,14,20,20">
-          <TextBlock DockPanel.Dock="Top" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,10"
-                     Text="Tick devices to boot from. Order is priority; topmost is tried first." />
-          <StackPanel DockPanel.Dock="Right" Spacing="6" Margin="10,0,0,0" VerticalAlignment="Top">
-            <Button Name="BootUpButton" Content="Up" MinWidth="80" />
-            <Button Name="BootDownButton" Content="Down" MinWidth="80" />
-          </StackPanel>
-          <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
-            <ListBox Name="BootList" Background="Transparent"
-                     Padding="0"
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Boot order"
+                                Margin="16" VerticalAlignment="Stretch">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Classes="note" Margin="0,0,0,8"
+                       Text="Tick devices to boot from. The topmost is tried first." />
+            <StackPanel DockPanel.Dock="Right" Spacing="6" Margin="10,0,0,0" VerticalAlignment="Top">
+              <Button Name="BootUpButton" Content="Up" MinWidth="80" />
+              <Button Name="BootDownButton" Content="Down" MinWidth="80" />
+            </StackPanel>
+            <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
+              <ListBox Name="BootList" Background="Transparent"
+                       Padding="0"
+                       ItemContainerTheme="{StaticResource JbTableRow}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate DataType="vm:BootItem">
+                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Content="{Binding Label}" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
+          </DockPanel>
+        </HeaderedContentControl>
+      </TabItem>
+
+      <TabItem Header="Storage">
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Disks" Padding="0"
+                                Margin="16" VerticalAlignment="Stretch">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="8,6,8,6">
+              <c:RowToolbar Name="DiskTools" />
+              <TextBlock VerticalAlignment="Center" Classes="note" Margin="8,0,0,0"
+                         Text="Right-click a disk to edit it or change its media." />
+            </StackPanel>
+            <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                    BorderThickness="0,0,0,1" BorderBrush="#22808080">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Target" Width="70" Classes="columnheader" />
+                <TextBlock Text="Kind"   Width="70" Classes="columnheader" />
+                <TextBlock Text="Bus"    Width="70" Classes="columnheader" />
+                <TextBlock Text="Source" Classes="columnheader" />
+              </StackPanel>
+            </Border>
+            <ListBox Name="DiskList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" BorderThickness="0"
                      ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ContextMenu>
+                <ContextMenu Name="DiskMenu">
+                  <MenuItem Name="MenuDiskEdit" Header="Edit" />
+                  <MenuItem Name="MenuDiskChangeMedia" Header="Change ISO">
+                    <MenuItem Name="MenuDiskMediaServer" Header="On the server" />
+                    <MenuItem Name="MenuDiskMediaLocal" Header="Local machine" />
+                  </MenuItem>
+                  <MenuItem Name="MenuDiskEject" Header="Eject" />
+                  <Separator Name="MenuDiskSep" />
+                  <MenuItem Name="MenuDiskRemove" Header="Remove" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
-                <DataTemplate DataType="vm:BootItem">
-                  <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Content="{Binding Label}" />
+                <DataTemplate DataType="vm:DiskEditRow">
+                  <StackPanel Orientation="Horizontal"
+                              Classes.pending="{Binding IsPending}" Classes.added="{Binding IsAdded}">
+                    <TextBlock Text="{Binding Target}" Width="70" />
+                    <TextBlock Text="{Binding Kind}"   Width="70" />
+                    <TextBlock Text="{Binding Bus}"    Width="70" />
+                    <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
-          </Border>
-        </DockPanel>
+          </DockPanel>
+        </HeaderedContentControl>
       </TabItem>
 
-      <!-- Storage -->
-      <TabItem Header="Storage">
-        <DockPanel Margin="20,14,20,20">
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-            <Button Name="AddDiskButton" Content="Add" />
-            <TextBlock VerticalAlignment="Center" Opacity="0.6" Margin="8,0,0,0"
-                       Text="Right-click a disk for edit / media / remove." />
-          </StackPanel>
-          <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
-            <DockPanel>
-              <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
-                <StackPanel Orientation="Horizontal">
-                  <TextBlock Text="Target" Width="70" FontWeight="SemiBold" />
-                  <TextBlock Text="Kind"   Width="70" FontWeight="SemiBold" />
-                  <TextBlock Text="Bus"    Width="70" FontWeight="SemiBold" />
-                  <TextBlock Text="Source" FontWeight="SemiBold" />
-                </StackPanel>
-              </Border>
-              <ListBox Name="DiskList" SelectionMode="Multiple" Background="Transparent"
-                       Padding="0"
-                       ItemContainerTheme="{StaticResource JbTableRow}">
-                <ListBox.ContextMenu>
-                  <ContextMenu Name="DiskMenu">
-                    <MenuItem Name="MenuDiskEdit" Header="Edit" />
-                    <MenuItem Name="MenuDiskChangeMedia" Header="Change ISO">
-                      <MenuItem Name="MenuDiskMediaServer" Header="On the server" />
-                      <MenuItem Name="MenuDiskMediaLocal" Header="Local machine" />
-                    </MenuItem>
-                    <MenuItem Name="MenuDiskEject" Header="Eject" />
-                    <Separator Name="MenuDiskSep" />
-                    <MenuItem Name="MenuDiskRemove" Header="Remove" />
-                  </ContextMenu>
-                </ListBox.ContextMenu>
-                <ListBox.ItemTemplate>
-                  <DataTemplate DataType="vm:DiskEditRow">
-                    <StackPanel Orientation="Horizontal"
-                                Classes.pending="{Binding IsPending}" Classes.added="{Binding IsAdded}">
-                      <TextBlock Text="{Binding Target}" Width="70" />
-                      <TextBlock Text="{Binding Kind}"   Width="70" />
-                      <TextBlock Text="{Binding Bus}"    Width="70" />
-                      <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </DockPanel>
-          </Border>
-        </DockPanel>
-      </TabItem>
-
-      <!-- Network -->
       <TabItem Header="Network">
-        <DockPanel Margin="20,14,20,20">
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-            <Button Name="AddNicButton" Content="Add" />
-            <Button Name="RemoveNicButton" Content="Remove" />
-          </StackPanel>
-          <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
-            <DockPanel>
-              <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
-                <StackPanel Orientation="Horizontal">
-                  <TextBlock Text="Model"  Width="90"  FontWeight="SemiBold" />
-                  <TextBlock Text="Type"   Width="90"  FontWeight="SemiBold" />
-                  <TextBlock Text="Source" Width="150" FontWeight="SemiBold" />
-                  <TextBlock Text="MAC"    FontWeight="SemiBold" />
-                </StackPanel>
-              </Border>
-              <ListBox Name="NicList" SelectionMode="Multiple" Background="Transparent"
-                       Padding="0"
-                       ItemContainerTheme="{StaticResource JbTableRow}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate DataType="vm:NicEditRow">
-                    <StackPanel Orientation="Horizontal" Classes.added="{Binding IsAdded}">
-                      <TextBlock Text="{Binding Model}"  Width="90" />
-                      <TextBlock Text="{Binding Type}"   Width="90" />
-                      <TextBlock Text="{Binding Source}" Width="150" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding Mac}" />
-                    </StackPanel>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </DockPanel>
-          </Border>
-        </DockPanel>
+        <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Network adapters" Padding="0"
+                                Margin="16" VerticalAlignment="Stretch">
+          <DockPanel>
+            <c:RowToolbar DockPanel.Dock="Top" Name="NicTools" Margin="8,6,8,6" />
+            <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                    BorderThickness="0,0,0,1" BorderBrush="#22808080">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Model"  Width="90"  Classes="columnheader" />
+                <TextBlock Text="Type"   Width="90"  Classes="columnheader" />
+                <TextBlock Text="Source" Width="150" Classes="columnheader" />
+                <TextBlock Text="MAC"    Classes="columnheader" />
+              </StackPanel>
+            </Border>
+            <ListBox Name="NicList" SelectionMode="Multiple" Background="Transparent"
+                     Padding="0" BorderThickness="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:NicEditRow">
+                  <StackPanel Orientation="Horizontal" Classes.added="{Binding IsAdded}">
+                    <TextBlock Text="{Binding Model}"  Width="90" />
+                    <TextBlock Text="{Binding Type}"   Width="90" />
+                    <TextBlock Text="{Binding Source}" Width="150" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Mac}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </HeaderedContentControl>
       </TabItem>
 
-      <!-- Sound -->
       <TabItem Header="Sound">
-        <StackPanel Margin="20,14,20,20" Spacing="12">
-          <CheckBox Name="SoundCheck" Content="Emulate a sound card" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="Model:" VerticalAlignment="Center" Width="60" />
-            <ComboBox Name="SoundBox" Width="220" />
+        <ScrollViewer Padding="16">
+          <StackPanel Classes="page">
+            <HeaderedContentControl Theme="{StaticResource JbGroupBox}" Header="Sound card">
+              <StackPanel Classes="options">
+                <CheckBox Name="SoundCheck" Content="Emulate a sound card" />
+                <Grid ColumnDefinitions="110,*">
+                  <TextBlock Grid.Column="0" Text="Model" VerticalAlignment="Center" />
+                  <ComboBox Grid.Column="1" Name="SoundBox" Width="220" HorizontalAlignment="Left" />
+                </Grid>
+              </StackPanel>
+            </HeaderedContentControl>
           </StackPanel>
-        </StackPanel>
+        </ScrollViewer>
       </TabItem>
 
     </TabControl>

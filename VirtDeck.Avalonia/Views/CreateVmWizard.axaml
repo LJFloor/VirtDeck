@@ -20,8 +20,7 @@
     </Border>
 
     <!-- Footer band: setup.exe-style button row -->
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
-            Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <DockPanel>
         <Button Name="CancelButton" Content="Cancel" MinWidth="88" IsCancel="True" />
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
@@ -91,10 +90,7 @@
 
       <!-- Page 2: Network -->
       <DockPanel Name="NetworkPage" IsVisible="False">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-          <Button Name="AddNicButton" Content="Add" />
-          <Button Name="RemoveNicButton" Content="Remove" />
-        </StackPanel>
+        <c:RowToolbar DockPanel.Dock="Top" Name="NicTools" Margin="0,0,0,8" />
         <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
           <DockPanel>
             <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080">
@@ -123,9 +119,8 @@
       <!-- Page 3: Storage -->
       <DockPanel Name="StoragePage" IsVisible="False">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-          <Button Name="AddDiskButton" Content="Add" />
+          <c:RowToolbar Name="DiskTools" />
           <Button Name="EditDiskButton" Content="Edit" />
-          <Button Name="RemoveDiskButton" Content="Remove" />
         </StackPanel>
         <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="3">
           <DockPanel>

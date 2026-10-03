@@ -14,8 +14,7 @@
          front door needs. Login is the accented default because it is what somebody opening the
          app came to do; Save commits the list and stays open; Close asks before dropping an edit,
          since here closing is also how the app is quit. -->
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0"
-            BorderBrush="#33808080" Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <Grid ColumnDefinitions="*,Auto">
         <TextBlock Grid.Column="0" Name="StatusText" Margin="0,0,12,0" TextWrapping="Wrap"
                    VerticalAlignment="Center" />

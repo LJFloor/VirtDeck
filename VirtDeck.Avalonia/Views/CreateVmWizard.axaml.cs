@@ -145,11 +145,17 @@ public partial class CreateVmWizard : Window
         FinishButton.Click += async (_, _) => await FinishAsync();
         CancelButton.Click += (_, _) => Close();
 
-        AddNicButton.Click += async (_, _) => await AddNicAsync();
-        RemoveNicButton.Click += (_, _) => RemoveNic();
-        AddDiskButton.Click += async (_, _) => await AddDiskAsync();
+        NicTools.Describe("Add a network adapter", "Remove the selected adapter");
+        NicTools.AddClicked += async () => await AddNicAsync();
+        NicTools.RemoveClicked += RemoveNic;
+        NicTools.CanRemove = false;
+        NicList.SelectionChanged += (_, _) => NicTools.CanRemove = NicList.SelectedItem != null;
+        DiskTools.Describe("Add a disk", "Remove the selected disk");
+        DiskTools.AddClicked += async () => await AddDiskAsync();
+        DiskTools.RemoveClicked += RemoveDisk;
+        DiskTools.CanRemove = false;
+        DiskList.SelectionChanged += (_, _) => DiskTools.CanRemove = DiskList.SelectedItem != null;
         EditDiskButton.Click += async (_, _) => await EditDiskAsync();
-        RemoveDiskButton.Click += (_, _) => RemoveDisk();
 
         _nics.Add(_defaultNic);
         RebuildNicList();

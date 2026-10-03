@@ -8,8 +8,7 @@
 
   <DockPanel>
 
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
-            Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <!-- All three move a file between this window and this PC, never the host, so they sit away
              from the accept pair. A preset is what this window reads back; the answer file is what

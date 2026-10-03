@@ -966,6 +966,18 @@
   </ControlTheme>
 
   <!--
+    Dialog footer: the shaded strip under an edit window, details window or wizard that holds the
+    status text and the buttons. A theme rather than markup copied into each window, so every
+    footer has the same inset, hairline and fill. The caller still docks it.
+  -->
+  <ControlTheme x:Key="JbDialogFooter" TargetType="Border">
+    <Setter Property="Padding" Value="16,12" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="BorderBrush" Value="#33808080" />
+    <Setter Property="Background" Value="#11808080" />
+  </ControlTheme>
+
+  <!--
     Group box: a titled frame with a header strip, which is what every settings page in this app
     draws by hand. Given a ControlTheme because the answer-file window alone has a few dozen of
     them; eight lines of Border/DockPanel markup repeated that many times is where an idiom starts

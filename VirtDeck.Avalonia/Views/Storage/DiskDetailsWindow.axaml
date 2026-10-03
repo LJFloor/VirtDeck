@@ -38,8 +38,7 @@
          either happened or did not, so there is no half-finished state to take back the way a
          transfer or a package install has. What runs while one is in flight is nothing: Refresh and
          the partition table's menu both grey out until it answers. -->
-    <Border DockPanel.Dock="Bottom" Padding="16,12"
-            BorderThickness="0,1,0,0" BorderBrush="#33808080" Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <Grid ColumnDefinitions="*,Auto">
         <TextBlock Name="StatusText" Grid.Column="0" Opacity="0.7"
                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"

@@ -76,7 +76,11 @@ public partial class VmEditWindow : Window
         BootUpButton.Click += (_, _) => MoveBoot(-1);
         BootDownButton.Click += (_, _) => MoveBoot(+1);
 
-        AddDiskButton.Click += async (_, _) => await AddDiskAsync();
+        DiskTools.Describe("Add a disk", "Remove the selected disks");
+        DiskTools.AddClicked += async () => await AddDiskAsync();
+        DiskTools.RemoveClicked += async () => await RemoveDisksAsync();
+        DiskTools.CanRemove = false;
+        DiskList.SelectionChanged += (_, _) => DiskTools.CanRemove = DiskList.SelectedItems?.Count > 0;
         MenuDiskEdit.Click += async (_, _) => await EditDiskAsync();
         MenuDiskMediaServer.Click += async (_, _) => await ChangeMediaServerAsync();
         MenuDiskMediaLocal.Click += async (_, _) => await ChangeMediaLocalAsync();
@@ -90,8 +94,11 @@ public partial class VmEditWindow : Window
         DiskList.AddHandler(DragDrop.DragOverEvent, OnDiskDragOver);
         DiskList.AddHandler(DragDrop.DropEvent, OnDiskDrop);
 
-        AddNicButton.Click += async (_, _) => await AddNicAsync();
-        RemoveNicButton.Click += (_, _) => RemoveNics();
+        NicTools.Describe("Add a network adapter", "Remove the selected adapters");
+        NicTools.AddClicked += async () => await AddNicAsync();
+        NicTools.RemoveClicked += RemoveNics;
+        NicTools.CanRemove = false;
+        NicList.SelectionChanged += (_, _) => NicTools.CanRemove = NicList.SelectedItems?.Count > 0;
 
         OkButton.Click += async (_, _) => await SaveAsync();
         CancelButton.Click += (_, _) => Close();
@@ -139,7 +146,7 @@ public partial class VmEditWindow : Window
         foreach (var c in new Control[]
                  {
                      NameBox, VcpuBox, MemBox, AutostartCheck, CpuBox, GpuBox, SoundCheck, SoundBox,
-                     BootList, BootUpButton, BootDownButton, AddDiskButton, AddNicButton, RemoveNicButton,
+                     BootList, BootUpButton, BootDownButton, DiskTools, NicTools,
                      OkButton,
                  })
             c.IsEnabled = false;

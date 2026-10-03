@@ -8,8 +8,7 @@
 
   <DockPanel>
 
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
-            Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <DockPanel>
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
           <!-- No IsCancel and no IsDefault anywhere on this bar: Escape and Enter belong to the

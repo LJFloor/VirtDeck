@@ -8,8 +8,7 @@
 
   <DockPanel>
 
-    <Border DockPanel.Dock="Bottom" Padding="16,12" BorderThickness="0,1,0,0" BorderBrush="#33808080"
-            Background="#11808080">
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Saving is several host commands (a pull, a stop, a create), so the one that is running
              says so here rather than the window simply going quiet. -->

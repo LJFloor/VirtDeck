@@ -26,9 +26,6 @@ persists nothing, as no window in this app does.
   by **kname** rather than device path, unlike the SMART dictionary: the kname is what the row is
   already merged on and is never empty, where a listing too old to carry `PATH` would give two disks
   the same empty-string key.
-- **Top-placed tabs, not `JbSideTabControl`.** The container editor and the answer-file window use
-  the side rail because they have five and seventeen pages; two short names do not earn a 160px
-  column. `VmEditWindow` is the precedent, a read-only tabbed window over the theme's top-placed pair.
 - **The tab walk, and a second interface for the one event.** `IDiskTab.Show(DiskView)` is the whole
   page contract and the window never names a page. `IDiskWakeRequest` is separate because an event
   cannot be defaulted on an interface and the other page has nothing to ask for, which is exactly why
