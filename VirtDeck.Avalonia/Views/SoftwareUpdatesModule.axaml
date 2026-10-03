@@ -179,6 +179,9 @@
           <Button Name="CancelXferButton" Content="Cancel"
                   Theme="{StaticResource JbStatusBarButton}" />
         </Border>
+        <!-- Brings an install sent to the background back to the front. -->
+        <Button Name="ShowXferButton" DockPanel.Dock="Right" Content="Show" IsVisible="False"
+                Theme="{StaticResource JbStatusBarButton}" Margin="8,0,0,0" />
         <ProgressBar Name="XferProgress" DockPanel.Dock="Right" Width="160" Height="6"
                      Minimum="0" Maximum="1000" IsIndeterminate="True"
                      VerticalAlignment="Center" Margin="8,0,0,0" />

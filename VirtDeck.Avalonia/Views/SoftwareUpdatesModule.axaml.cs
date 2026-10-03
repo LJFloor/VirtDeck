@@ -134,6 +134,19 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// </summary>
     private readonly Stopwatch _paintSince = Stopwatch.StartNew();
 
+    /// <summary>
+    /// Whether a command is on show, in the strip or the window. What a late report from a command
+    /// that has already ended checks, since the strip is hidden while the window is up.
+    /// </summary>
+    private bool _xferShown;
+
+    /// <summary>Whether the command in flight is an install, which runs in front by default.</summary>
+    private bool _xferForeground;
+    private string _xferTitle = "";
+
+    /// <summary>The front view of an install, null while it is in the background or nothing runs.</summary>
+    private UpgradeProgressWindow? _xferWindow;
+
     public SoftwareUpdatesModule()
     {
         InitializeComponent();
@@ -162,14 +175,8 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         // Issued off the UI thread: the streaming runner disconnects its own SSH client inline on
         // whoever calls Cancel, and doing that here would stall the strip that is showing it.
-        CancelXferButton.Click += (_, _) =>
-        {
-            var cts = _opCts;
-            if (cts is null) return;
-            XferText.Text = "Cancelling…";
-            CancelXferButton.IsEnabled = false;
-            Task.Run(() => { try { cts.Cancel(); } catch { } });
-        };
+        CancelXferButton.Click += (_, _) => CancelOp();
+        ShowXferButton.Click += (_, _) => ToForeground();
 
         // Only the page coming into view reads anything, the services module's rule: the other table
         // is not on screen and its round trip would buy nothing.
@@ -337,6 +344,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         Deactivate();
         if (_packages is not null) _packages.Changed -= OnPackagesChanged;
         try { _opCts?.Cancel(); } catch { }
+        CloseXferWindow();
     }
 
     // ---- Reading -------------------------------------------------------
@@ -717,7 +725,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         // on a host that has nothing to sync.
         if (!Packages.Manager.RefreshScript.IsEmpty)
         {
-            var ok = await RunOpAsync("Check for updates", "Reading repositories",
+            var ok = await RunOpAsync("Check for updates", "Reading repositories", foreground: false,
                 ct => Packages.RefreshAsync(line => ReportLine("Reading repositories", line), ct));
             if (!ok) return;
         }
@@ -753,7 +761,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         var verb = securityOnly ? "Installing security updates" : "Installing updates";
 
-        var ok = await RunOpAsync("Install updates", verb,
+        var ok = await RunOpAsync("Install updates", verb, foreground: true,
             ct => Packages.UpgradeAsync(securityOnly,
                 p => ReportProgress(p),
                 line => ReportLine(verb, line),
@@ -801,14 +809,15 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     /// containers module's <c>RunOpAsync</c> and the file explorer's <c>RunTransferAsync</c>. False
     /// means it was cancelled, or it failed and the failure has already been reported.
     /// </summary>
-    private async Task<bool> RunOpAsync(string title, string verb, Func<CancellationToken, Task> run)
+    private async Task<bool> RunOpAsync(
+        string title, string verb, bool foreground, Func<CancellationToken, Task> run)
     {
         _busy = true;
         UpdateCommands();
 
         using var cts = new CancellationTokenSource();
         _opCts = cts;
-        ShowXfer(verb);
+        ShowXfer(title, verb, foreground);
 
         Exception? error = null;
         var cancelled = false;
@@ -849,7 +858,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         return false;
     }
 
-    private void ShowXfer(string verb)
+    private void ShowXfer(string title, string verb, bool foreground)
     {
         _phase = UpgradePhase.Preparing;
 
@@ -861,9 +870,68 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
         XferText.Text = verb + "…";
         XferProgress.IsIndeterminate = true;
         XferProgress.Value = 0;
-        XferPanel.IsVisible = true;
+        _xferShown = true;
+        _xferForeground = foreground;
+        _xferTitle = title;
         _paintSince.Restart();
         UpdateCancel();
+
+        // An install runs in front by default; Background moves it down to the strip.
+        if (foreground) ToForeground();
+        else XferPanel.IsVisible = true;
+    }
+
+    /// <summary>Opens the front view of the install in flight and hides the strip under it.</summary>
+    private void ToForeground()
+    {
+        if (!_xferShown || !_xferForeground || _xferWindow is not null) return;
+
+        var window = new UpgradeProgressWindow { Title = _xferTitle };
+        window.BackgroundRequested += () => window.Close();
+        window.CancelRequested += CancelOp;
+        window.Closed += (_, _) => ToBackground(window);
+        _xferWindow = window;
+        RenderXferWindow();
+
+        XferPanel.IsVisible = false;
+        _ = window.ShowDialog(Owner);
+    }
+
+    /// <summary>The window closed by Background or its title bar: the install carries on in the strip.</summary>
+    private void ToBackground(UpgradeProgressWindow window)
+    {
+        if (_xferWindow != window) return;
+        _xferWindow = null;
+        if (!_xferShown) return;
+        ShowXferButton.IsVisible = _xferForeground;
+        XferPanel.IsVisible = true;
+    }
+
+    /// <summary>Closes the front view without it reading as Background.</summary>
+    private void CloseXferWindow()
+    {
+        var window = _xferWindow;
+        _xferWindow = null;
+        window?.Close();
+    }
+
+    /// <summary>Copies the strip into the front view, which shows exactly what the strip would.</summary>
+    private void RenderXferWindow() =>
+        _xferWindow?.Render(XferText.Text ?? "", XferProgress.IsIndeterminate, XferProgress.Value,
+            CancelXferButton.IsEnabled, CancelXferButton.Tag as string ?? "");
+
+    /// <summary>
+    /// Issued off the UI thread: the streaming runner disconnects its own SSH client inline on
+    /// whoever calls Cancel, and doing that here would stall the strip that is showing it.
+    /// </summary>
+    private void CancelOp()
+    {
+        var cts = _opCts;
+        if (cts is null || !CancelXferButton.IsEnabled) return;
+        XferText.Text = "Cancelling…";
+        CancelXferButton.IsEnabled = false;
+        RenderXferWindow();
+        Task.Run(() => { try { cts.Cancel(); } catch { } });
     }
 
     /// <summary>
@@ -890,7 +958,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (!XferPanel.IsVisible) return;   // a late report from something that has already ended
+            if (!_xferShown) return;   // a late report from something that has already ended
 
             if (phase != _phase)
             {
@@ -906,6 +974,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
             var label = Label(phase);
             XferText.Text = p.Line.Length > 0 ? $"{label} · {p.Line}" : label;
+            RenderXferWindow();
         });
     }
 
@@ -923,8 +992,9 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (!XferPanel.IsVisible) return;
+            if (!_xferShown) return;
             XferText.Text = $"{verb} · {text}";
+            RenderXferWindow();
         });
     }
 
@@ -952,10 +1022,14 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
             ? "The packages are being installed now. Stopping part way through would leave the host " +
               "with half-configured packages, which nothing here could undo, so this has to finish."
             : "Stop what is running";
+        RenderXferWindow();
     }
 
     private void HideXfer()
     {
+        _xferShown = false;
+        CloseXferWindow();
+        ShowXferButton.IsVisible = false;
         XferPanel.IsVisible = false;
         XferProgress.Value = 0;
         XferProgress.IsIndeterminate = true;
@@ -1144,7 +1218,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
     private async Task WriteSettingsAsync(
         IReadOnlyList<PackageSettingChange> changes, PackageSettingCatalog asRead)
     {
-        var ok = await RunOpAsync("Save settings", "Saving settings", async ct =>
+        var ok = await RunOpAsync("Save settings", "Saving settings", foreground: false, async ct =>
         {
             try
             {
@@ -1218,7 +1292,7 @@ public partial class SoftwareUpdatesModule : UserControl, IModule
 
         var verb = $"Installing {package}";
 
-        var ok = await RunOpAsync("Install package", verb,
+        var ok = await RunOpAsync("Install package", verb, foreground: true,
             ct => Packages.InstallAsync([package],
                 p => ReportProgress(p),
                 line => ReportLine(verb, line),
