@@ -87,6 +87,15 @@ public partial class StorageModule : UserControl, IModule
     /// </summary>
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Datasets already given their default fold, so it is applied once per key and opening one
+    /// afterwards sticks. Today that is only Docker's root: its zfs storage driver puts a clone per
+    /// image layer and container under it, and those bury the rest of the tree.
+    /// </summary>
+    private readonly HashSet<string> _defaultFolded = new(StringComparer.Ordinal);
+
+    private const string DockerRoot = "/var/lib/docker";
+
     /// <summary>Open pool details windows, keyed by pool name, exactly as <see cref="_details"/> is by kname.</summary>
     private readonly Dictionary<string, PoolDetailsWindow> _poolDetails = new(StringComparer.Ordinal);
 
@@ -1077,6 +1086,7 @@ public partial class StorageModule : UserControl, IModule
     private void PopulateZfs()
     {
         var roots = BuildTree(_reading);
+        ApplyDefaultFolds(roots);
         var keep = MatchingKeys(roots);
 
         var flat = new List<(ZfsNode Node, int Depth, bool HasChildren)>();
@@ -1105,6 +1115,20 @@ public partial class StorageModule : UserControl, IModule
         DrawZfsEmpty();
         UpdateZfsMenu();
         if (Current == Tab.Zfs) PaintZfsStatus();
+    }
+
+    /// <summary>Folds a newly seen Docker root shut, once. See <see cref="_defaultFolded"/>.</summary>
+    private void ApplyDefaultFolds(IEnumerable<ZfsNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Children.Count > 0 &&
+                string.Equals(node.Dataset?.Mountpoint.TrimEnd('/'), DockerRoot, StringComparison.Ordinal) &&
+                _defaultFolded.Add(node.Key))
+                _collapsed.Add(node.Key);
+
+            ApplyDefaultFolds(node.Children);
+        }
     }
 
     private void OnZfsRowButtonClicked(object? sender, RoutedEventArgs e)

@@ -64,7 +64,9 @@ places, which is the one thing this shape is best at avoiding.
   the size at which libvirt and docker networks are told to go without one; a host with a dataset per
   VM, per share and per backup target is the size at which the services and users tables have theirs.
 - **Collapsed is the set that is kept, not expanded**, so the default is open and an empty set says
-  it. Session state on the module, exactly as the sort and the needle are.
+  it. Session state on the module, exactly as the sort and the needle are. The one exception is a
+  dataset mounted at `/var/lib/docker`, folded shut the first time it is seen: Docker's zfs storage
+  driver puts a clone per layer and container under it. Opening it afterwards sticks.
 - **A command is enabled against the kind of row it is about**, not against the count. A scrub is a
   pool's, a quota is a dataset's, Copy name is neither. A mixed selection disables everything but
   Copy name, because a command that quietly applied to the half of a selection it understood is worse
