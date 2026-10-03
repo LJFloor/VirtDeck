@@ -227,6 +227,11 @@ public sealed class UsbDeviceManager
     {
         if (rc == LibUsb.LIBUSB_ERROR_ACCESS && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
+            // Installed by the .deb/.rpm, or by hand from the command below: then the device only
+            // predates the rule, or the session is not the one at the seat.
+            if (File.Exists("/usr/lib/udev/rules.d/" + UdevRuleName) || File.Exists("/etc/udev/rules.d/" + UdevRuleName))
+                return "Permission denied opening the device. The VirtDeck udev rule is installed; unplug and replug the device.";
+
             var rule = FindUdevRule();
             return "Permission denied opening the device. Your user needs read/write access to it " +
                    "under /dev/bus/usb; install the VirtDeck udev rule, then unplug and replug the device." +
@@ -246,9 +251,11 @@ public sealed class UsbDeviceManager
     /// the copy inside the mounted image lives is the whole fix. Returns null if it isn't found;
     /// the advice above still stands, just without the command.
     /// </summary>
+    private const string UdevRuleName = "70-virtdeck-usb.rules";
+
     private static string? FindUdevRule()
     {
-        const string name = "70-virtdeck-usb.rules";
+        const string name = UdevRuleName;
         var appDir = Environment.GetEnvironmentVariable("VIRTDECK_APPDIR");
         string?[] candidates =
         {

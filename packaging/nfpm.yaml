@@ -1,0 +1,92 @@
+# nfpm config for the .deb and .rpm, built by packaging/build-packages.sh. Paths are relative to
+# the repository root; the script exports VERSION and stages the publish tree in publish/linuxpkg/root.
+name: virtdeck
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: admin
+priority: optional
+maintainer: LJFloor <LJFloor@users.noreply.github.com>
+homepage: https://github.com/LJFloor/VirtDeck
+license: GPL-2.0-only
+# Normalise modes whatever the build machine's umask was (a 002 one leaves files group-writable).
+umask: 0o022
+description: |
+  Manage a remote Linux host over SSH.
+  libvirt/KVM virtual machines with a native SPICE console, Docker containers, services,
+  packages, accounts, storage, files and a terminal, all over one SSH connection.
+
+# The .NET runtime is bundled (self-contained), so these are only what the apphost, SkiaSharp
+# (fontconfig) and Avalonia's X11 backend need from the distro. libusb, usbredir, libpulse and
+# udisks2 are recommended, not required: every feature that uses them degrades gracefully (see
+# packaging/README.md).
+# Debian names ICU by version, so it is a list of alternatives: 70 is Ubuntu 22.04, 72 Debian 12,
+# 74 Ubuntu 24.04, 76 Debian 13. A release past the newest name here will refuse the install until
+# the list is extended. Without ICU the runtime aborts at startup.
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libstdc++6
+      - libgcc-s1
+      - libfontconfig1
+      - libx11-6
+      - libice6
+      - libsm6
+      - libicu80 | libicu79 | libicu78 | libicu77 | libicu76 | libicu75 | libicu74 | libicu73 | libicu72 | libicu71 | libicu70
+    recommends:
+      - libusb-1.0-0
+      - libusbredirhost1t64 | libusbredirhost1
+      - libpulse0
+      - udisks2
+  rpm:
+    depends:
+      - glibc
+      - libstdc++
+      - libicu
+      - fontconfig
+      - libX11
+      - libICE
+      - libSM
+    recommends:
+      - libusb1
+      - usbredir
+      - pulseaudio-libs
+      - udisks2
+
+contents:
+  - src: publish/linuxpkg/root/usr/lib/virtdeck
+    dst: /usr/lib/virtdeck
+    type: tree
+  # The apphost resolves its own real path, so the runtime is found next to the symlink's target.
+  - src: /usr/lib/virtdeck/virtdeck
+    dst: /usr/bin/virtdeck
+    type: symlink
+
+  - src: packaging/virtdeck.desktop
+    dst: /usr/share/applications/virtdeck.desktop
+  - src: packaging/io.github.ljfloor.VirtDeck.metainfo.xml
+    dst: /usr/share/metainfo/io.github.ljfloor.VirtDeck.metainfo.xml
+  - src: packaging/icons/hicolor
+    dst: /usr/share/icons/hicolor
+    type: tree
+
+  # The vendor rules directory, so a same-named file in /etc/udev/rules.d/ still overrides it.
+  - src: packaging/70-virtdeck-usb.rules
+    dst: /usr/lib/udev/rules.d/70-virtdeck-usb.rules
+
+  - src: LICENSE.txt
+    dst: /usr/share/doc/virtdeck/LICENSE.txt
+  - src: SpiceClient/COPYING.LESSER
+    dst: /usr/share/doc/virtdeck/licenses/LGPL-3.0.txt
+  - src: SpiceClient/COPYING
+    dst: /usr/share/doc/virtdeck/licenses/GPL-3.0.txt
+  - src: THIRD-PARTY-NOTICES.md
+    dst: /usr/share/doc/virtdeck/THIRD-PARTY-NOTICES.md
+  - src: publish/linuxpkg/root/SpiceClient-src.tar.gz
+    dst: /usr/share/doc/virtdeck/SpiceClient-src.tar.gz
+
+scripts:
+  postinstall: packaging/udev-reload.sh
+  postremove: packaging/udev-reload.sh

@@ -18,14 +18,15 @@ No tests yet. `dotnet run --project VirtDeck.Avalonia` is the fastest smoke test
 
 ## Packaging
 
-Two self-contained release artifacts (the .NET runtime is bundled; libusb/usbredir/libpulse deliberately are not, see `packaging/README.md`):
+Self-contained release artifacts (the .NET runtime is bundled; libusb/usbredir/libpulse deliberately are not, see `packaging/README.md`):
 
 ```bash
 packaging/build-appimage.sh 1.2.3   # Linux   -> publish/VirtDeck-1.2.3-x86_64.AppImage
+packaging/build-packages.sh 1.2.3   # Linux   -> publish/virtdeck_1.2.3-1_amd64.deb, virtdeck-1.2.3-1.x86_64.rpm
 publish.bat                         # Windows -> installer\output\VirtDeckSetup-*.exe
 ```
 
-`.github/workflows/publish.yml` builds both on every push to `main` and uploads nothing: that is the no-regression gate, and both halves are built because ISCC and appimagetool are part of what can regress. Pushing a `v*` tag runs the same builds at the tag's version and attaches the installer and the AppImage to a GitHub release:
+`.github/workflows/publish.yml` builds all of them on every push to `main` and uploads nothing: that is the no-regression gate, and every format is built because ISCC, appimagetool and nfpm are part of what can regress. Pushing a `v*` tag runs the same builds at the tag's version and attaches the installer, the AppImage, the .deb and the .rpm to a GitHub release:
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3

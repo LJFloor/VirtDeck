@@ -1,9 +1,9 @@
 name: Build & Publish
 
-# Build the app on every merge to main: the Windows installer and the Linux AppImage, mirroring
-# publish.bat and packaging/build-appimage.sh respectively. A push to main uploads nothing, so it
-# is the no-regression gate. A pushed v* tag builds the same pair at the tag's version and
-# attaches both to a GitHub release.
+# Build the app on every merge to main: the Windows installer, and the Linux AppImage, .deb and
+# .rpm, mirroring publish.bat, packaging/build-appimage.sh and packaging/build-packages.sh. A push
+# to main uploads nothing, so it is the no-regression gate. A pushed v* tag builds the same set at
+# the tag's version and attaches all of it to a GitHub release.
 on:
   push:
     branches: [main]
@@ -91,12 +91,19 @@ jobs:
       - name: Build AppImage
         run: packaging/build-appimage.sh "${{ steps.ver.outputs.version }}"
 
-      - name: Upload AppImage
+      # nfpm builds both formats, so the runner needs no rpmbuild.
+      - name: Build .deb and .rpm
+        run: packaging/build-packages.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Upload Linux packages
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: publish/VirtDeck-${{ steps.ver.outputs.version }}-x86_64.AppImage
+          path: |
+            publish/VirtDeck-${{ steps.ver.outputs.version }}-x86_64.AppImage
+            publish/virtdeck_${{ steps.ver.outputs.version }}-1_amd64.deb
+            publish/virtdeck-${{ steps.ver.outputs.version }}-1.x86_64.rpm
 
   release:
     if: github.ref_type == 'tag'
