@@ -22,6 +22,9 @@ namespace VirtDeck.Agent.X11
         public required bool LittleEndianImages { get; init; }
         public required string Vendor { get; init; }
 
+        /// <summary>The longest request the server takes, in bytes. Without BIG-REQUESTS that is 256 KiB at most.</summary>
+        public required int MaxRequestBytes { get; init; }
+
         public required uint Root { get; init; }
         public required int Width { get; init; }
         public required int Height { get; init; }
@@ -56,6 +59,7 @@ namespace VirtDeck.Agent.X11
                 MaxKeycode = body[27],
                 LittleEndianImages = body[22] == 0,
                 Vendor = Encoding.ASCII.GetString(body, 32, vendorLength),
+                MaxRequestBytes = BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(18)) * 4,
                 Root = root,
                 Width = width,
                 Height = height,
@@ -64,7 +68,7 @@ namespace VirtDeck.Agent.X11
             };
         }
 
-        /// <summary>A resource id of our own, for the damage object.</summary>
+        /// <summary>A resource id of our own, for the damage object or the clipboard's window.</summary>
         public uint NextResourceId()
         {
             var step = ResourceIdMask & (~ResourceIdMask + 1); // the mask's lowest set bit

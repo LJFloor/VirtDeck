@@ -11,7 +11,8 @@ namespace VirtDeck.Agent.Rfb
     /// <para><b>It serves one client, and that client is ours</b>, so it offers exactly what
     /// <see cref="RfbSession"/> decodes and nothing else: RFB 3.8 with security type None (the SSH
     /// channel is the authentication), one pixel format, and the Tight, DesktopSize and RichCursor
-    /// rectangles. There is no password, no colour map, no bell, and no clipboard.</para>
+    /// rectangles, plus cut text both ways for the clipboard (UTF-8, see <see cref="XClipboard"/>).
+    /// There is no password, no colour map and no bell.</para>
     ///
     /// <para><b>Pull, not push.</b> Nothing is sent until the viewer asks, so a module that is not on
     /// screen stops asking and the agent stops reading the display. When the viewer has asked and
@@ -20,10 +21,11 @@ namespace VirtDeck.Agent.Rfb
     ///
     /// <para><b>One writer.</b> Client messages are read on their own thread and go straight to
     /// <see cref="XInput"/>; only the update loop writes to the channel, so the two never interleave
-    /// a rectangle with anything else.</para>
+    /// a rectangle with anything else. Text copied on the host is handed to that loop too.</para>
     /// </summary>
     internal sealed class RfbServer(Stream input, Stream output, XCapture capture, XCursor cursor,
-                                    XRandr randr, XInput keyboard, bool damagePresent, string name)
+                                    XRandr randr, XInput keyboard, XClipboard clipboard,
+                                    bool damagePresent, string name)
     {
         private readonly TightEncoder _tight = new();
         private readonly ManualResetEventSlim _wake = new(true);
@@ -51,6 +53,9 @@ namespace VirtDeck.Agent.Rfb
         /// <summary>The last size a resize was refused for, so a dragged window says it once.</summary>
         private int _refused;
 
+        /// <summary>Text copied on the host, waiting for the update loop to send. Only the latest counts.</summary>
+        private string? _cutText;
+
         private volatile bool _stopped;
 
         /// <summary>Why the session ended, for the caller to put on stderr.</summary>
@@ -58,6 +63,13 @@ namespace VirtDeck.Agent.Rfb
 
         /// <summary>Called from the X connection's reader thread for every event.</summary>
         public void Wake() => _wake.Set();
+
+        /// <summary>Text copied on the host, for the viewer. Any thread.</summary>
+        public void QueueCutText(string text)
+        {
+            Interlocked.Exchange(ref _cutText, text);
+            _wake.Set();
+        }
 
         /// <summary>The far end went away, or the display did. Ends the loop.</summary>
         public void Stop(string? reason = null)
@@ -189,7 +201,12 @@ namespace VirtDeck.Agent.Rfb
 
                         case RfbProtocol.ClientCutText:
                             input.ReadExactly(message[..7]);
-                            Discard(BinaryPrimitives.ReadUInt32BigEndian(message[3..]));
+                            var length = BinaryPrimitives.ReadUInt32BigEndian(message[3..]);
+                            if (length > XClipboard.MaxText)
+                                throw new IOException("The viewer sent a clipboard too large to be one.");
+                            var text = new byte[length];
+                            input.ReadExactly(text);
+                            clipboard.SetText(Encoding.UTF8.GetString(text));
                             break;
 
                         // A pad, the size, how many screens follow, and another pad. The screens are
@@ -253,7 +270,7 @@ namespace VirtDeck.Agent.Rfb
             }
         }
 
-        /// <summary>Clipboard text from the viewer. The agent has no clipboard, so it is read and dropped.</summary>
+        /// <summary>Reads and drops what the agent has no use for.</summary>
         private void Discard(uint length)
         {
             Span<byte> sink = stackalloc byte[1024];
@@ -272,6 +289,9 @@ namespace VirtDeck.Agent.Rfb
             while (!_stopped)
             {
                 _wake.Reset();
+
+                // Not an answer to anything, so it goes whether or not an update was asked for.
+                if (Interlocked.Exchange(ref _cutText, null) is { } cut) SendCutText(cut);
 
                 if (Volatile.Read(ref _pending) <= 0)
                 {
@@ -354,6 +374,17 @@ namespace VirtDeck.Agent.Rfb
                     split.Add(new XCapture.Rect(rect.X, rect.Y + y, rect.Width, Math.Min(rows, rect.Height - y)));
             }
             return split;
+        }
+
+        private void SendCutText(string text)
+        {
+            var bytes = Encoding.UTF8.GetBytes(text);
+            Span<byte> header = stackalloc byte[8];
+            header[0] = RfbProtocol.ServerCutText;
+            BinaryPrimitives.WriteUInt32BigEndian(header[4..], (uint)bytes.Length);
+            output.Write(header);
+            output.Write(bytes);
+            output.Flush();
         }
 
         private void SendResize(int width, int height)

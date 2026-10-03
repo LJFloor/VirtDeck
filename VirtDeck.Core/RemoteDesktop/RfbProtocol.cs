@@ -16,6 +16,12 @@ namespace VirtDeck.RemoteDesktop
         public const byte FramebufferUpdateRequest = 3;
         public const byte KeyEvent = 4;
         public const byte PointerEvent = 5;
+
+        /// <summary>
+        /// Cut text, this one and <see cref="ServerCutText"/>, is <b>UTF-8 between these two ends</b>,
+        /// not RFC 6143's Latin-1. The agent is uploaded from the viewer's own bundle, so the two
+        /// always match and there is nothing to negotiate.
+        /// </summary>
         public const byte ClientCutText = 6;
 
         /// <summary>

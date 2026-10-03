@@ -18,7 +18,7 @@ namespace VirtDeck.Agent
     /// </summary>
     internal static class Program
     {
-        public const string Version = "1.0";
+        public const string Version = "1.1";
 
         private static int Main(string[] args)
         {
@@ -54,6 +54,7 @@ namespace VirtDeck.Agent
 
             XConnection? x = null;
             XInput? keyboard = null;
+            XClipboard? clipboard = null;
             try
             {
                 x = XConnection.Open(number, auth);
@@ -76,13 +77,14 @@ namespace VirtDeck.Agent
                 var cursor = new XCursor(x, extensions);
                 var randr = new XRandr(x, extensions) { Resizable = resizable };
                 keyboard = new XInput(x, extensions);
+                clipboard = new XClipboard(x, extensions);
 
-                if (selftest) return SelfTest(x, extensions, capture, randr, benchmark);
+                if (selftest) return SelfTest(x, extensions, capture, randr, clipboard, benchmark);
 
                 var server = new RfbServer(
                     new BufferedStream(Console.OpenStandardInput(), 8 * 1024),
                     new BufferedStream(Console.OpenStandardOutput(), 512 * 1024),
-                    capture, cursor, randr, keyboard, extensions.Damage.Present,
+                    capture, cursor, randr, keyboard, clipboard, extensions.Damage.Present,
                     $"{Environment.MachineName}{display}");
 
                 // One reader thread in the X connection feeds everything that watches the display, and
@@ -93,9 +95,12 @@ namespace VirtDeck.Agent
                     cursor.OnEvent(packet);
                     randr.OnEvent(packet);
                     keyboard.OnEvent(packet);
+                    clipboard.OnEvent(packet);
                     server.Wake();
                 };
                 x.Closed += reason => server.Stop(reason);
+                clipboard.TextFromHost += server.QueueCutText;
+                clipboard.Start();
 
                 server.Run();
 
@@ -126,6 +131,7 @@ namespace VirtDeck.Agent
                 // whatever happened.
                 Trace.Write("exit: restoring the keyboard");
                 keyboard?.Dispose();
+                clipboard?.Dispose();
                 Trace.Write("exit: closing the display");
                 x?.Dispose();
                 Trace.Write("exit: done");
@@ -144,7 +150,7 @@ namespace VirtDeck.Agent
 
         /// <summary>What the agent can see, for working out why a host will not show its desktop.</summary>
         private static int SelfTest(XConnection x, XExtensions extensions, XCapture capture, XRandr randr,
-                                    bool benchmark = false)
+                                    XClipboard clipboard, bool benchmark = false)
         {
             Console.WriteLine($"virtdeck-agent {Version}");
             Console.WriteLine($"server:     {x.Setup.Vendor}");
@@ -153,6 +159,7 @@ namespace VirtDeck.Agent
             Console.WriteLine($"keycodes:   {x.Setup.MinKeycode} to {x.Setup.MaxKeycode}");
             foreach (var extension in new[] { extensions.Damage, extensions.Fixes, extensions.Test, extensions.Randr })
                 Console.WriteLine($"{extension.Name,-11} {(extension.Present ? "present" : "ABSENT")}");
+            Console.WriteLine($"clipboard:  {(clipboard.Watching ? "both ways" : "to the host only (no XFIXES)")}");
 
             // The size range is the answer to "why will my virtual desktop not grow": an Xvfb's
             // -screen size is its maximum, and nothing can push the screen past it.

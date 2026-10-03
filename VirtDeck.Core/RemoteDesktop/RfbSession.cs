@@ -45,7 +45,7 @@ namespace VirtDeck.RemoteDesktop
         private const int CompressLevel6 = RfbProtocol.CompressLevel6;
         private const int QualityLevel6 = RfbProtocol.QualityLevel6;
 
-        /// <summary>A server cut text this long is not a clipboard, it is a broken stream.</summary>
+        /// <summary>A cut text this long is not a clipboard, it is a broken stream. The agent's limit too.</summary>
         private const int MaxCutText = 16 * 1024 * 1024;
 
         private readonly RfbInput _in;
@@ -151,17 +151,17 @@ namespace VirtDeck.RemoteDesktop
         }
 
         /// <summary>
-        /// Puts text on the far end's clipboard. The base protocol carries Latin-1 only, so anything
-        /// outside it goes as '?', and line breaks go as the bare newline the protocol specifies.
+        /// Puts text on the far end's clipboard, as UTF-8 (see <see cref="RfbProtocol.ClientCutText"/>),
+        /// with line breaks as the bare newline the protocol specifies.
         /// </summary>
         public void SendClipboardText(string text)
         {
-            text = text.Replace("\r\n", "\n");
-            var m = new byte[8 + text.Length];
-            m[0] = 6; // ClientCutText
-            BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(4), (uint)text.Length);
-            for (int i = 0; i < text.Length; i++)
-                m[8 + i] = text[i] <= 0xFF ? (byte)text[i] : (byte)'?';
+            var bytes = Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n"));
+            if (bytes.Length > MaxCutText) return;
+            var m = new byte[8 + bytes.Length];
+            m[0] = RfbProtocol.ClientCutText;
+            BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(4), (uint)bytes.Length);
+            bytes.CopyTo(m, 8);
             _out.Enqueue(m);
         }
 
@@ -465,7 +465,7 @@ namespace VirtDeck.RemoteDesktop
             var length = _in.ReadU32();
             if (length > MaxCutText) throw new InvalidDataException("The server sent a clipboard too large to be one.");
             var bytes = _in.ReadBytes((int)length);
-            ClipboardText?.Invoke(Encoding.Latin1.GetString(bytes));
+            ClipboardText?.Invoke(Encoding.UTF8.GetString(bytes));
         }
 
         /// <summary>

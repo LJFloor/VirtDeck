@@ -44,10 +44,12 @@ namespace VirtDeck.Avalonia.Views;
 /// desktop is always shown one host pixel to one of ours, which leaves <b>Fit to window</b> nothing
 /// to do, and the box is taken away while one is on screen.</para>
 ///
-/// <para><b>There is no shared clipboard.</b> The agent does not own an X selection, so nothing is
-/// copied either way. <b>Type clipboard</b> in the Keys menu stays, and is the answer where a paste
-/// could not reach anyway: it types this computer's clipboard as keystrokes, into a login screen's
-/// password box or anywhere else.</para>
+/// <para><b>The clipboard is shared, text only.</b> Text copied on the host arrives as cut text and
+/// goes on this computer's clipboard. This computer's text goes the other way when it changes while
+/// the module is on screen and the window active, and once on every entry (connect, switching to
+/// the module, activating the window), since copying over there and pasting here is the usual
+/// order. The poll is the VM console's: formats first, text only when they changed. <b>Type
+/// clipboard</b> stays, for where a paste cannot reach: a login screen's password box.</para>
 /// </summary>
 public partial class RemoteControlModule : UserControl, IModule
 {
@@ -93,10 +95,20 @@ public partial class RemoteControlModule : UserControl, IModule
     private bool _windowActive = true;
     private long _lastGrabAttempt;
 
+    // Clipboard
+    private readonly DispatcherTimer _clipboardPoll;
+    private string _lastFormatSignature = "";
+    private string _lastFingerprint = "";
+    private bool _clipboardForce;
+
 
     public RemoteControlModule()
     {
         InitializeComponent();
+
+        _clipboardPoll = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background,
+            async (_, _) => await PollClipboardAsync());
+        _clipboardPoll.Stop();
 
         FitBox.IsChecked = AppSettings.Current.RemoteControlFit;
         ApplyFit();
@@ -201,6 +213,7 @@ public partial class RemoteControlModule : UserControl, IModule
             live.Session.Paused = false;
             UpdateConnectedStatus();
             UpdateGrab();
+            SendClipboardOnEntry();
             // The window may have been resized while this tab was not the one on screen, where the
             // stage has no size to report and nothing was scheduled.
             ScheduleDesktopSize();
@@ -228,6 +241,7 @@ public partial class RemoteControlModule : UserControl, IModule
         Display.ReleaseButtons();
         _grab.Release();
         if (_connection is { } live) live.Session.Paused = true;
+        UpdateClipboardPoll();
     }
 
     /// <summary>The shell disposes the shared connection straight after this, so the session goes now.</summary>
@@ -502,6 +516,7 @@ public partial class RemoteControlModule : UserControl, IModule
         _connection = connection;
         var session = connection.Session;
         session.Disconnected += reason => Dispatcher.UIThread.Post(() => OnEnded(connection, reason));
+        session.ClipboardText += text => Dispatcher.UIThread.Post(async () => await OnClipboardFromHostAsync(connection, text));
         session.Paused = !_active;
 
         _autoSize = connection.Target.Kind == X11SessionKind.Virtual;
@@ -515,6 +530,7 @@ public partial class RemoteControlModule : UserControl, IModule
 
         FocusDisplay();
         UpdateGrab();
+        SendClipboardOnEntry();
 
         // Belt and braces for the size sent before the session started: on the very first activation
         // the stage may not have been laid out yet, and then there was nothing to send.
@@ -557,6 +573,7 @@ public partial class RemoteControlModule : UserControl, IModule
 
         var connection = _connection;
         _connection = null;
+        UpdateClipboardPoll();
         Display.ClearFramebuffer();
         Display.Detach();
         Scroller.IsVisible = false;
@@ -762,6 +779,7 @@ public partial class RemoteControlModule : UserControl, IModule
     {
         _windowActive = true;
         UpdateGrab();
+        SendClipboardOnEntry();
     }
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
@@ -770,6 +788,7 @@ public partial class RemoteControlModule : UserControl, IModule
         ReleaseKeys();
         Display.ReleaseButtons();
         UpdateGrab();
+        UpdateClipboardPoll();
     }
 
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
@@ -902,6 +921,64 @@ public partial class RemoteControlModule : UserControl, IModule
     }
 
     private IClipboard? Clipboard => TopLevel.GetTopLevel(this)?.Clipboard;
+
+    // ---- Clipboard ----------------------------------------------------
+
+    /// <summary>Polls only while a session is on screen in the active window.</summary>
+    private void UpdateClipboardPoll()
+    {
+        bool run = _active && _windowActive && _connection is not null && !_shutdown;
+        if (run) _clipboardPoll.Start();
+        else _clipboardPoll.Stop();
+    }
+
+    /// <summary>Connected, switched to, or the window activated: the host gets this computer's text now.</summary>
+    private void SendClipboardOnEntry()
+    {
+        UpdateClipboardPoll();
+        if (!_clipboardPoll.IsEnabled) return;
+        _clipboardForce = true;
+        _ = PollClipboardAsync();
+    }
+
+    private async Task PollClipboardAsync()
+    {
+        if (_connection is not { } c || Clipboard is not { } cb) return;
+        try
+        {
+            var signature = await HostClipboard.FormatSignatureAsync(cb);
+            bool forced = _clipboardForce;
+            if (!forced && signature == _lastFormatSignature) return;
+            _clipboardForce = false;
+            _lastFormatSignature = signature;
+
+            var snapshot = await HostClipboard.ReadAsync(cb);
+            if (!ReferenceEquals(_connection, c)) return;
+            if (!forced && snapshot.Fingerprint == _lastFingerprint) return;
+            _lastFingerprint = snapshot.Fingerprint;
+
+            if (snapshot is { Kind: HostClipboardKind.Text, Text: { Length: > 0 } text })
+                c.Session.SendClipboardText(text);
+        }
+        catch { /* clipboard busy or owned by a dying app */ }
+    }
+
+    /// <summary>
+    /// Text copied on the host. The baseline is re-read afterwards rather than taken from the text,
+    /// so the next poll sees what is really there and does not send it straight back.
+    /// </summary>
+    private async Task OnClipboardFromHostAsync(RemoteDesktopConnection connection, string text)
+    {
+        if (_shutdown || !ReferenceEquals(_connection, connection) || Clipboard is not { } cb) return;
+        try
+        {
+            await cb.SetTextAsync(text);
+            _lastFingerprint = (await HostClipboard.ReadAsync(cb)).Fingerprint;
+            _lastFormatSignature = await HostClipboard.FormatSignatureAsync(cb);
+            _clipboardForce = false;
+        }
+        catch { /* clipboard busy */ }
+    }
 
     /// <summary>
     /// Types the clipboard as keystrokes, for where a paste cannot reach: the login screen, a

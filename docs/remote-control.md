@@ -43,6 +43,16 @@ and everything fatal on stderr.
   This is not hypothetical: it is how the keyboard first hung, on a MappingNotify that arrived
   moments after the first keystroke. `XConnection.Request` now throws when called from that thread,
   so the same mistake is an error with a message rather than a session that goes quiet.
+- **The clipboard is CLIPBOARD, text only, and owned rather than polled** (`X11/XClipboard.cs`).
+  Text from the viewer is claimed with `SetSelectionOwner` on an unmapped InputOnly window and
+  served as TARGETS, UTF8_STRING, TEXT or STRING. Large text is written onto the asker's window as
+  a Replace and then Appends of one request each before it is told, so sending needs no INCR. The
+  host's copies are seen through XFIXES selection events, fetched as UTF8_STRING (STRING if not),
+  and read piece by piece when the owner answers INCR, as GTK and xclip do for large text. Text
+  equal to the last that crossed either way is dropped, which is what keeps a host clipboard
+  manager re-owning our text from echoing it back. Its own `x11-clipboard` thread makes the
+  requests, under the rule below. The selection dies with the agent, so text pasted from this
+  computer is gone from the host when the session ends unless a clipboard manager kept it.
 - **Uploaded once per version, by hash.** `AgentBundle` derives everything from the embedded bytes:
   the cache directory is `~/.cache/virtdeck/agent-<12 hex of the tarball's sha256>/` in the login
   user's home, and the binary's own hash is what the host checks. The upload is a plain tar (the
@@ -192,6 +202,9 @@ cross-check and is not ported (it is MPL).
   host's resolution is all DesktopSize is needed for, and resizing somebody's real monitor is not
   ours to do). The client still asks for Raw and CopyRect, which costs nothing and would let it
   drive a stock VNC server.
+- **Cut text is UTF-8**, both ways, not RFC 6143's Latin-1, and capped at 16 MiB. The agent always
+  comes from the viewer's own bundle, so there is nothing to negotiate. The agent sends a host copy
+  from its update loop whether or not an update was asked for, keeping that loop the only writer.
 - **Tight, one rectangle at a time.** The protocol lets a server keep four deflaters alive for the
   session and end each rectangle's share with a sync flush; .NET has no public way to sync flush a
   deflater and keep it, but the protocol also has a per-rectangle reset bit, and the decoder honours
@@ -381,10 +394,12 @@ that survives a local and a remote layout that differ.
   they are about the list and not about this connection. The flyout is the host's own session menu;
   End is enabled only for a display VirtDeck started, and confirms, because what is running in one
   goes with it. See "A desktop of our own".
-- **No clipboard.** The agent owns no X selection, so nothing is copied either way and nothing is
-  polled for. **Type clipboard** in the Keys menu stays, and is the answer where a paste could not
-  have reached anyway: it types this computer's clipboard as keystrokes, into a login screen's
-  password box or anywhere else.
+- **The clipboard is shared, text only.** A copy on the host lands on this computer's clipboard.
+  This computer's text goes to the host when it changes while the module is on screen in the active
+  window (the VM console's poll: formats every 500 ms, the text only when they changed), and once on
+  every entry: connecting, switching to the module, activating the window. That makes the agent
+  the host's clipboard owner, replacing what was copied there. **Type clipboard** in the Keys menu
+  stays, for where a paste cannot reach: a login screen's password box.
 - Fit is one setting for every host (`AppSettings.RemoteControlFit`): it is about this screen. It is
   hidden, and the picture is fitted, while a virtual desktop is on screen, because that one is made
   the size of the space it has and the two settings would draw the same thing. The saved setting is
@@ -394,8 +409,8 @@ that survives a local and a remote layout that differ.
 ## What it does not do
 
 Wayland sessions (nothing to attach to without the compositor's cooperation, and the portal path is
-a second agent with a consent dialog on the host's screen, not a flag on this one), the clipboard in
-either direction, resizing a display that is not one of ours (somebody's real monitor is theirs),
+a second agent with a consent dialog on the host's screen, not a flag on this one), images on the
+clipboard and the PRIMARY selection, resizing a display that is not one of ours (somebody's real monitor is theirs),
 growing a virtual desktop past the 4K its Xvfb was started with, one
 monitor at a time (the whole X screen is shown,
 all monitors), JPEG for photographic rectangles (zlib only, so a busy full-screen video is
