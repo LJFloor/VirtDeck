@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.vbs text eol=crlf
+*.iss text eol=crlf
+*.png binary
+*.ico binary
+*.dll binary
+*.msi binary
+*.gz binary
