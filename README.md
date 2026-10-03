@@ -35,8 +35,10 @@ Download the latest release from the [Releases](https://github.com/LJFloor/VirtD
 page:
 
 - **Windows**: `VirtDeckSetup-*.exe`
-- **Linux**: `VirtDeck-*-x86_64.AppImage`. For USB redirection, also install the udev rule from
-  [`packaging/`](packaging/README.md).
+- **Debian/Ubuntu**: `virtdeck_*_amd64.deb`, installed with `sudo apt install ./virtdeck_*_amd64.deb`
+- **Fedora**: `virtdeck-*.x86_64.rpm`, installed with `sudo dnf install ./virtdeck-*.x86_64.rpm`
+- **Other Linux**: `VirtDeck-*-x86_64.AppImage`. For USB redirection, also install the udev rule
+  from [`packaging/`](packaging/README.md); the packages above do this for you.
 
 The server only needs SSH with a sudo-capable account.
 
