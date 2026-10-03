@@ -13,7 +13,7 @@ namespace VirtDeck.Avalonia.Controls;
 ///
 /// <para>The repaint is the point. An <c>.xshd</c> can only carry fixed colours, and a fixed syntax
 /// colour reads as syntax on one face and as noise on the other, which is exactly why
-/// <c>JbLinkForeground</c> and the sixteen terminal colours are themed rather than hardcoded. So
+/// <c>JbLinkForeground</c> is themed rather than hardcoded. So
 /// every colour a definition names is looked up in <see cref="Keys"/> and replaced from
 /// <c>JetBrainsClassic.axaml</c>. A definition is built per language and theme variant and cached,
 /// because an <see cref="IHighlightingDefinition"/> is shared by every editor that holds it and

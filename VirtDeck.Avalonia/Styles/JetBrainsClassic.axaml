@@ -175,31 +175,6 @@
            grey: dimmer than the comment colour on purpose, so the numbers stay countable without
            competing with the code beside them. AvaloniaEdit's default is a flat Brushes.Gray. -->
       <SolidColorBrush x:Key="JbCodeLineNumber" Color="#FF606366" />
-
-      <!-- The container console's own surface and the sixteen colours an escape sequence can name.
-           Darcula's terminal palette. The other 240 of the 256 are computed (a 6x6x6 cube and 24
-           greys) and are the same on either face, because they are absolute colours; only these
-           sixteen and the two defaults are a matter of taste, so only these are themed. -->
-      <SolidColorBrush x:Key="JbTerminalBackground" Color="#FF1E1F22" />
-      <SolidColorBrush x:Key="JbTerminalForeground" Color="#FFBCBEC4" />
-      <SolidColorBrush x:Key="JbTerminalSelection" Color="#FF2E436E" />
-      <SolidColorBrush x:Key="JbTerminalCursor" Color="#FFBCBEC4" />
-      <Color x:Key="JbTerminal0">#FF000000</Color>
-      <Color x:Key="JbTerminal1">#FFCD3131</Color>
-      <Color x:Key="JbTerminal2">#FF0DBC79</Color>
-      <Color x:Key="JbTerminal3">#FFE5E510</Color>
-      <Color x:Key="JbTerminal4">#FF3B8EEA</Color>
-      <Color x:Key="JbTerminal5">#FFBC3FBC</Color>
-      <Color x:Key="JbTerminal6">#FF11A8CD</Color>
-      <Color x:Key="JbTerminal7">#FFE5E5E5</Color>
-      <Color x:Key="JbTerminal8">#FF666666</Color>
-      <Color x:Key="JbTerminal9">#FFF14C4C</Color>
-      <Color x:Key="JbTerminal10">#FF23D18B</Color>
-      <Color x:Key="JbTerminal11">#FFF5F543</Color>
-      <Color x:Key="JbTerminal12">#FF3B8EEA</Color>
-      <Color x:Key="JbTerminal13">#FFD670D6</Color>
-      <Color x:Key="JbTerminal14">#FF29B8DB</Color>
-      <Color x:Key="JbTerminal15">#FFFFFFFF</Color>
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Light">
@@ -343,33 +318,33 @@
       <SolidColorBrush x:Key="JbCodeConstant" Color="#FF0033B3" />
       <SolidColorBrush x:Key="JbCodeAnchor" Color="#FF9E880D" />
       <SolidColorBrush x:Key="JbCodeLineNumber" Color="#FF999999" />
-
-      <!-- The console on the light face; see the Dark dictionary. The sixteen are darkened rather
-           than swapped, because a terminal colour has to keep its identity (red is red) while
-           gaining enough contrast to be read on white. -->
-      <SolidColorBrush x:Key="JbTerminalBackground" Color="#FFFFFFFF" />
-      <SolidColorBrush x:Key="JbTerminalForeground" Color="#FF2B2B2B" />
-      <SolidColorBrush x:Key="JbTerminalSelection" Color="#FFA6D2FF" />
-      <SolidColorBrush x:Key="JbTerminalCursor" Color="#FF2B2B2B" />
-      <Color x:Key="JbTerminal0">#FF000000</Color>
-      <Color x:Key="JbTerminal1">#FFCD3131</Color>
-      <Color x:Key="JbTerminal2">#FF00A000</Color>
-      <Color x:Key="JbTerminal3">#FF949800</Color>
-      <Color x:Key="JbTerminal4">#FF0451A5</Color>
-      <Color x:Key="JbTerminal5">#FFBC05BC</Color>
-      <Color x:Key="JbTerminal6">#FF0598BC</Color>
-      <Color x:Key="JbTerminal7">#FF555555</Color>
-      <Color x:Key="JbTerminal8">#FF666666</Color>
-      <Color x:Key="JbTerminal9">#FFCD3131</Color>
-      <Color x:Key="JbTerminal10">#FF14CE14</Color>
-      <Color x:Key="JbTerminal11">#FFB5BA00</Color>
-      <Color x:Key="JbTerminal12">#FF0451A5</Color>
-      <Color x:Key="JbTerminal13">#FFBC05BC</Color>
-      <Color x:Key="JbTerminal14">#FF0598BC</Color>
-      <Color x:Key="JbTerminal15">#FF000000</Color>
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>
+
+  <!-- The console's surface and the sixteen colours an escape sequence can name. Darcula's
+       terminal palette, outside the theme dictionaries on purpose: a terminal stays dark on the
+       light face too. The other 240 of the 256 are computed (a 6x6x6 cube and 24 greys). -->
+  <SolidColorBrush x:Key="JbTerminalBackground" Color="#FF1E1F22" />
+  <SolidColorBrush x:Key="JbTerminalForeground" Color="#FFBCBEC4" />
+  <SolidColorBrush x:Key="JbTerminalSelection" Color="#FF2E436E" />
+  <SolidColorBrush x:Key="JbTerminalCursor" Color="#FFBCBEC4" />
+  <Color x:Key="JbTerminal0">#FF000000</Color>
+  <Color x:Key="JbTerminal1">#FFCD3131</Color>
+  <Color x:Key="JbTerminal2">#FF0DBC79</Color>
+  <Color x:Key="JbTerminal3">#FFE5E510</Color>
+  <Color x:Key="JbTerminal4">#FF3B8EEA</Color>
+  <Color x:Key="JbTerminal5">#FFBC3FBC</Color>
+  <Color x:Key="JbTerminal6">#FF11A8CD</Color>
+  <Color x:Key="JbTerminal7">#FFE5E5E5</Color>
+  <Color x:Key="JbTerminal8">#FF666666</Color>
+  <Color x:Key="JbTerminal9">#FFF14C4C</Color>
+  <Color x:Key="JbTerminal10">#FF23D18B</Color>
+  <Color x:Key="JbTerminal11">#FFF5F543</Color>
+  <Color x:Key="JbTerminal12">#FF3B8EEA</Color>
+  <Color x:Key="JbTerminal13">#FFD670D6</Color>
+  <Color x:Key="JbTerminal14">#FF29B8DB</Color>
+  <Color x:Key="JbTerminal15">#FFFFFFFF</Color>
 
   <!-- Group box. Deliberately outside the theme dictionaries: both are grey with an alpha channel,
        so one pair of values reads correctly on the light and the dark face alike, which is why this

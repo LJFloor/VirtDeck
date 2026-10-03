@@ -326,13 +326,6 @@ public sealed class TerminalControl : Control
         {
             Relayout();
         }
-        else if (change.Property == ThemeVariantScope.ActualThemeVariantProperty)
-        {
-            // The palette's sixteen and the two defaults are themed, so Darcula and IntelliJ Light
-            // do not share them.
-            ResolveBrushes();
-            InvalidateVisual();
-        }
     }
 
     // ---- Font and colours -----------------------------------------------
