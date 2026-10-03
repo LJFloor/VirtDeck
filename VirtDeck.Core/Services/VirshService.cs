@@ -249,8 +249,48 @@ namespace VirtDeck.Services
 
         public async Task StartVmAsync(string name)
         {
-            await Task.Run(() => RunArgv("virsh", "start", RequireName(name, VmName)));
+            await Task.Run(() =>
+            {
+                EjectDeadStreams(name);
+                RunArgv("virsh", "start", RequireName(name, VmName));
+            });
             await RefreshAsync();
+        }
+
+        /// <summary>
+        /// Ejects, from the saved config, every CD-ROM or floppy streamed from this PC by an earlier
+        /// session. Its SSH reverse-forward died with that session, and libvirt allows no startupPolicy
+        /// on a network source, so the domain would refuse to start. Streams this process still serves
+        /// are left alone. Best effort: a failure here is logged and the start goes ahead.
+        /// </summary>
+        private void EjectDeadStreams(string vm)
+        {
+            try
+            {
+                var xml = RunArgv("virsh", "dumpxml", "--inactive", RequireName(vm, VmName));
+                var disks = XDocument.Parse(xml).Root?.Element("devices")?.Elements("disk") ?? [];
+                foreach (var d in disks)
+                {
+                    // The shape BuildNetworkMediaXml writes: an http or nbd source on our loopback forward.
+                    var device = (string?)d.Attribute("device");
+                    var src = d.Element("source");
+                    var host = src?.Element("host");
+                    var target = (string?)d.Element("target")?.Attribute("dev");
+                    if ((string?)d.Attribute("type") != "network" || device is not ("cdrom" or "floppy") ||
+                        (string?)src?.Attribute("protocol") is not ("http" or "nbd") ||
+                        (string?)host?.Attribute("name") != "127.0.0.1" ||
+                        !int.TryParse((string?)host?.Attribute("port"), out var port) ||
+                        MediaServer.IsLive(port) || string.IsNullOrEmpty(target))
+                        continue;
+
+                    EjectMedia(vm, target, live: false);
+                    Diagnostics.SpiceLog.Log($"Media: ejected stale stream on {vm}/{target} (port {port})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.SpiceLog.Log($"Media: stale stream check for {vm} failed: {ex.Message}");
+            }
         }
 
         public async Task StopVmAsync(string name)
@@ -734,7 +774,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Attaches a network CD-ROM (HTTP or NBD URL) so QEMU streams the ISO through its curl or NBD client.
         /// Note: libvirt does not allow startupPolicy on network sources, so once the source goes away the
-        /// install CD must be ejected/removed or the domain won't start; the caller surfaces that to the user.
+        /// domain won't start with it; StartVmAsync ejects such a stale stream first.
         /// </summary>
         public void AttachNetworkCdrom(string vm, string url, string target, string bus = "sata") =>
             RunDeviceXml("attach-device", vm, BuildNetworkMediaXml(url, target, bus, "cdrom", readOnly: true));

@@ -166,6 +166,7 @@ namespace VirtDeck.Services
 
             if (_forwardedPort != null)
             {
+                MediaServer.Release(RemoteUrl);
                 try { _forwardedPort.Stop(); } catch { }
                 try { _forwardedPort.Dispose(); } catch { }
                 _forwardedPort = null;

@@ -383,8 +383,8 @@ public partial class VmEditWindow : Window
     }
 
     // Stream a local image over the SSH tunnel (like the console). The saved config points at the
-    // tunnelled URL, so it's only reachable while VirtDeck stays open; fine to install during this
-    // session; copy the image to the server for a permanent attachment.
+    // tunnelled URL, so it's only reachable while VirtDeck stays open; the next start after that
+    // ejects it. Copy the image to the server for a permanent attachment.
     private async Task ChangeMediaLocalAsync()
     {
         if (SelectedRemovable() is not { } d) { await Warn("Select a CD-ROM or floppy drive."); return; }
