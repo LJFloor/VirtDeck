@@ -52,7 +52,7 @@ use it.
 
 **Does it run on macOS?**
 
-Not at the moment.
+Not at the moment, I don’t have Mac hardware to test on
 
 # Building
 
