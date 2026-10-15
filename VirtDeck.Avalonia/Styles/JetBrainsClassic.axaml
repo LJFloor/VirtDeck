@@ -902,7 +902,7 @@
                 BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="{TemplateBinding BorderThickness}">
           <DockPanel>
-            <Border DockPanel.Dock="Left"
+            <Border Name="Strip" DockPanel.Dock="Left"
                     MinWidth="160"
                     Background="{DynamicResource JbTabStripBackground}"
                     BorderBrush="{DynamicResource JbToolBarBorder}"
@@ -938,6 +938,12 @@
 
   <ControlTheme x:Key="JbModuleTabControl" TargetType="TabControl" BasedOn="{StaticResource JbSideTabControl}">
     <Setter Property="ItemContainerTheme" Value="{StaticResource JbModuleTabItem}" />
+
+    <!-- A module that has taken the whole screen (IFullScreenModule) leaves the strip nothing to
+         show. A class rather than hiding the tabs, which would move the selection. -->
+    <Style Selector="^.chromeless /template/ Border#Strip">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
   </ControlTheme>
 
   <!--

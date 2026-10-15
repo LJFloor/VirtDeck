@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using VirtDeck.Avalonia.Services;
 using VirtDeck.Avalonia.Views.Hosts;
 using VirtDeck.Services;
@@ -27,12 +29,32 @@ public partial class MainWindow : Window
     /// <summary>The connect window this window opened, kept so a second click focuses it rather than opening another.</summary>
     private HostManagerWindow? _manager;
 
+    /// <summary>A module has the whole screen. See <see cref="SetFullScreen"/>.</summary>
+    private bool _fullScreen;
+
+    /// <summary>What full screen goes back to: Normal or Maximized, whichever the window was.</summary>
+    private WindowState _windowedState = WindowState.Normal;
+
+    /// <summary>
+    /// Waits for the window state to settle before taking a change out of full screen as the window
+    /// manager's. See <see cref="OnPropertyChanged"/>.
+    /// </summary>
+    private readonly DispatcherTimer _stateSettle = new() { Interval = TimeSpan.FromMilliseconds(500) };
+
     /// <summary>Design-time only; the app always constructs this with a live SSH connection.</summary>
     public MainWindow() : this(new SshConnectionManager()) { }
 
     public MainWindow(SshConnectionManager ssh)
     {
         InitializeComponent();
+
+        _stateSettle.Tick += (_, _) =>
+        {
+            _stateSettle.Stop();
+            if (!_fullScreen || WindowState is not (WindowState.Normal or WindowState.Maximized)) return;
+            _fullScreen = false;
+            _shell.LeaveFullScreen();
+        };
 
         // Registered by the window itself, so a shell can never be shown without counting towards
         // the process staying alive. See ShellRegistry for why that is no longer a hardcoded rule.
@@ -42,7 +64,13 @@ public partial class MainWindow : Window
         Install(_shell);
 
         Opened += async (_, _) => await _shell.StartAsync();
-        Closed += (_, _) => _shell.Shutdown();
+        Closed += (_, _) =>
+        {
+            // The modules give the screen back as they shut down, and a closed window has no state to restore.
+            _fullScreen = false;
+            _stateSettle.Stop();
+            _shell.Shutdown();
+        };
     }
 
     /// <summary>
@@ -60,6 +88,7 @@ public partial class MainWindow : Window
         shell.ConnectionReplaced += ssh => { if (Current(shell)) Replace(ssh); };
         shell.ManageHostsRequested += prefill => { if (Current(shell)) OpenManager(prefill); };
         shell.ProfileChanged += () => { if (Current(shell)) Retitle(); };
+        shell.FullScreenChanged += on => { if (Current(shell)) SetFullScreen(on); };
 
         Content = shell;
         Retitle();
@@ -88,10 +117,52 @@ public partial class MainWindow : Window
     /// </summary>
     private void Replace(SshConnectionManager ssh)
     {
+        // The outgoing shell's modules give the screen back as they shut down, but by then that
+        // shell is no longer listened to. A reconnect after the link dropped arrives here from
+        // full screen.
+        SetFullScreen(false);
+
         var old = _shell;
         Install(new ShellView(ssh, old.CurrentModuleType));
         old.Shutdown();
         _ = _shell.StartAsync();
+    }
+
+    /// <summary>
+    /// Takes the window to full screen for a module that asked for it, or brings it back to the
+    /// state it was in before, maximized included.
+    /// </summary>
+    private void SetFullScreen(bool on)
+    {
+        if (on == _fullScreen) return;
+        _fullScreen = on;
+        if (on)
+        {
+            _windowedState = WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
+            WindowState = WindowState.FullScreen;
+        }
+        else if (WindowState != WindowState.Minimized)
+        {
+            WindowState = _windowedState;
+        }
+    }
+
+    /// <summary>
+    /// The window manager can take a window out of full screen by itself. The module that asked for
+    /// it is told, or the window would be left without its side menu and status bar. Minimizing is
+    /// not leaving: the window comes back full screen.
+    ///
+    /// <para><b>Not on the first report.</b> On X11 the way in from maximized passes through
+    /// Maximized: Avalonia adds the full screen atom before it removes the two maximized ones, and
+    /// reads both together as maximized. So a change is only believed once the state has stayed
+    /// put for a moment.</para>
+    /// </summary>
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property != WindowStateProperty || !_fullScreen) return;
+        _stateSettle.Stop();
+        if (WindowState is WindowState.Normal or WindowState.Maximized) _stateSettle.Start();
     }
 
     /// <summary>

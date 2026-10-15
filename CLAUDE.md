@@ -47,7 +47,7 @@ in this index.
 | File | What is in it |
 |---|---|
 | [architecture.md](docs/architecture.md) | SpiceClient (protocol, imaging, audio, interop), VirtDeck.Core (services, SSH auth, settings, secrets), VirtDeck.Avalonia (controls, views, input), and the JetBrains Classic style dictionary that is the app's single source of visual scale. |
-| [modules.md](docs/modules.md) | The shell rather than a screen: `IModule`, `Attach`, the two status bar slots plus `StatusWidget`, `BusyReason`, and which modules a host gets from one `command -v` probe. |
+| [modules.md](docs/modules.md) | The shell rather than a screen: `IModule`, `Attach`, the two status bar slots plus `StatusWidget`, `BusyReason`, which modules a host gets from one `command -v` probe, and a module taking the whole screen. |
 | [saved-hosts.md](docs/saved-hosts.md) | Remembering passwords in the OS secret store, the saved host list, switching host by replacing the shell, and `HostManagerWindow`, the app's only way in. |
 | [file-icons.md](docs/file-icons.md) | The host desktop's icon per file type: SHGetFileInfoW on Windows, shared-mime-info plus the icon theme on Linux. |
 

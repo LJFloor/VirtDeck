@@ -365,7 +365,12 @@ that survives a local and a remote layout that differ.
   active, a session is live, the module is on screen and the pointer is over the picture, so Alt+Tab
   and Super reach the far end but the window's chrome still works. The Keys menu sends Ctrl+Alt+Del,
   Alt+Tab, Alt+F4 and Super for when there is no grab (Windows), and Type clipboard types text as
-  keysyms, for the login screen's password box.
+  keysyms, for the login screen's password box. The strip and the full screen bar each have one,
+  built in code from one list, because a flyout has one placement target.
+- **Ctrl+Alt+Enter is caught before all of that**: it toggles full screen and never reaches the far
+  end, view only or not, focused or not. It is VMware's chord, and nothing on a Linux desktop
+  wants it. Ctrl and Alt have already gone down on the far end by then and come up as usual; Enter
+  is never sent, so its key up has nothing to release, and a held Enter toggles once.
 
 ## The module
 
@@ -400,6 +405,25 @@ that survives a local and a remote layout that differ.
   every entry: connecting, switching to the module, activating the window. That makes the agent
   the host's clipboard owner, replacing what was copied there. **Type clipboard** in the Keys menu
   stays, for where a paste cannot reach: a login screen's password box.
+- **View only sends nothing**: no pointer, no buttons, no wheel, no keys, and this computer's
+  clipboard stays here (the host's still arrives). The keyboard is this computer's again, so there
+  is no grab and Alt+Tab is local. It is the viewer holding back rather than the agent being told,
+  which is what lets it be turned on and off during a session; turning it on lets go of what is
+  held first, and turning it off is an entry, so the clipboard goes over then. The cursor over the
+  picture is the plain arrow, because the far end's shape drawn at this pointer would pass for the
+  host's own pointer, which is somewhere else. The wheel is left unhandled, so at 1:1 it scrolls.
+  The Keys menu is disabled, and the status says so. One setting for every host, like Fit
+  (`AppSettings.RemoteControlViewOnly`).
+- **Full screen** is the window's, not a second one: the module hides its strip and raises
+  `IFullScreenModule.FullScreenChanged`, the shell hides its side menu and status bar, and
+  `MainWindow` goes `WindowState.FullScreen` and back to Normal or Maximized, whichever it was (see
+  "Taking the whole screen"). Only a live session can take it; everything that ends one gives it
+  back, as does switching module. The way out is a bar over the picture, top centre, with View only,
+  Keys and Exit full screen: it shows for a moment on the way in, so it is seen where it lives, and
+  comes back when the pointer rests on the top edge for 300 ms, a dwell that keeps a click on the
+  host's own top panel from being taken. It goes again once it is neither under the pointer nor
+  holding an open menu. Pointer events over it never reach the host, and the grab is let go there
+  as it is anywhere off the picture. A virtual desktop follows the screen as it follows the window.
 - Fit is one setting for every host (`AppSettings.RemoteControlFit`): it is about this screen. It is
   hidden, and the picture is fitted, while a virtual desktop is on screen, because that one is made
   the size of the space it has and the two settings would draw the same thing. The saved setting is
@@ -410,7 +434,8 @@ that survives a local and a remote layout that differ.
 
 Wayland sessions (nothing to attach to without the compositor's cooperation, and the portal path is
 a second agent with a consent dialog on the host's screen, not a flag on this one), images on the
-clipboard and the PRIMARY selection, resizing a display that is not one of ours (somebody's real monitor is theirs),
+clipboard and the PRIMARY selection, the host's own pointer while view only (the cursor is this
+computer's, and the agent would need RFB's PointerPos to say where the host's is), resizing a display that is not one of ours (somebody's real monitor is theirs),
 growing a virtual desktop past the 4K its Xvfb was started with, one
 monitor at a time (the whole X screen is shown,
 all monitors), JPEG for photographic rectangles (zlib only, so a busy full-screen video is

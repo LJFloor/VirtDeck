@@ -96,7 +96,7 @@
          as its own Padding, which lands **inside** the hover; the separator beside it drops its
          margin on that side, because the cell's padding is now that gap. Nothing moves a pixel;
          the highlight simply covers what was already there. -->
-    <Border DockPanel.Dock="Bottom" Padding="10,0" BorderThickness="0,1,0,0" BorderBrush="#22808080">
+    <Border Name="StatusBar" DockPanel.Dock="Bottom" Padding="10,0" BorderThickness="0,1,0,0" BorderBrush="#22808080">
       <DockPanel MinHeight="26">
         <ContentControl Name="ModuleWidget" DockPanel.Dock="Right" VerticalAlignment="Stretch"
                         Margin="0,0,-10,0" />

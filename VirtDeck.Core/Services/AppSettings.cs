@@ -141,6 +141,12 @@ namespace VirtDeck.Services
         public bool RemoteControlFit { get; set; } = true;
 
         /// <summary>
+        /// Whether the Remote Control module only watches: this computer's mouse, keyboard and
+        /// clipboard go nowhere. One answer for every host, like <see cref="RemoteControlFit"/>.
+        /// </summary>
+        public bool RemoteControlViewOnly { get; set; }
+
+        /// <summary>
         /// Whether the cron module's Jobs table shows the lines that are a host's own wiring: the
         /// ones that run the <c>/etc/cron.&lt;period&gt;</c> directories, and the package lines
         /// guarded so they do nothing while systemd is running. Off by default, because on a stock

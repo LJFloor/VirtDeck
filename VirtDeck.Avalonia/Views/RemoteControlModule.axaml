@@ -7,13 +7,19 @@
 
     <!-- Terminal's strip. Nothing is accented, since nothing here creates anything, and no button
          is IsDefault or IsCancel: Enter and Escape belong to the remote desktop. -->
-    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+    <Border Name="Strip" DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
       <DockPanel>
+        <!-- How the desktop is looked at, docked from the outside in. -->
+        <Button DockPanel.Dock="Right" Name="FullScreenButton" Content="Full screen" MinWidth="72"
+                Margin="10,0,0,0" ToolTip.Tip="Ctrl+Alt+Enter" />
         <!-- Hidden while a virtual desktop is on screen: that one is made the size of this
              space, so there is nothing left to scale and nothing to choose. -->
         <CheckBox DockPanel.Dock="Right" Name="FitBox" Content="Fit to window" Margin="10,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="Scale the desktop to the space it has. Off shows it one pixel per screen pixel, with scroll bars." />
+        <CheckBox DockPanel.Dock="Right" Name="ViewOnlyBox" Content="View only" Margin="10,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Watch without sending this computer's mouse, keyboard or clipboard" />
         <StackPanel Orientation="Horizontal" Spacing="6">
           <ComboBox Name="SessionBox" Width="240" VerticalAlignment="Center"
                     ToolTip.Tip="The X displays on the host: somebody's desktop, the login screen, or a virtual desktop VirtDeck started." />
@@ -35,18 +41,12 @@
           <Button Name="DisconnectButton" Content="Disconnect" MinWidth="72"
                   ToolTip.Tip="Stop controlling the session. Nothing on the host changes." />
           <!-- The combinations the local desktop would keep for itself, and typing the clipboard
-               for where a paste cannot reach (the login screen's password box). -->
+               for where a paste cannot reach (the login screen's password box). Filled in code,
+               because the full screen bar offers the same menu. -->
           <Button Name="KeysButton" Content="Keys" MinWidth="72"
                   ToolTip.Tip="Send a key combination this computer would otherwise keep, or type the clipboard">
             <Button.Flyout>
-              <MenuFlyout>
-                <MenuItem Name="CtrlAltDelItem" Header="Ctrl+Alt+Del" />
-                <MenuItem Name="AltTabItem" Header="Alt+Tab" />
-                <MenuItem Name="AltF4Item" Header="Alt+F4" />
-                <MenuItem Name="SuperItem" Header="Super" />
-                <Separator />
-                <MenuItem Name="TypeClipboardItem" Header="Type clipboard" />
-              </MenuFlyout>
+              <MenuFlyout />
             </Button.Flyout>
           </Button>
         </StackPanel>
@@ -86,6 +86,25 @@
           </Border>
         </StackPanel>
       </StackPanel>
+
+      <!-- Full screen's way out, over the picture: it slides in when the pointer rests on the top
+           edge. Pointer events over it never reach the host. -->
+      <Border Name="FullScreenBar" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Top"
+              Padding="8,6" BorderThickness="1,0,1,1" CornerRadius="0,0,4,4"
+              Background="{DynamicResource JbToolBarBackground}" BorderBrush="{DynamicResource JbToolBarBorder}">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <CheckBox Content="View only" VerticalAlignment="Center" Margin="0,0,4,0"
+                    IsChecked="{Binding #ViewOnlyBox.IsChecked, Mode=TwoWay}"
+                    ToolTip.Tip="Watch without sending this computer's mouse, keyboard or clipboard" />
+          <Button Name="BarKeysButton" Content="Keys" MinWidth="72"
+                  ToolTip.Tip="Send a key combination this computer would otherwise keep, or type the clipboard">
+            <Button.Flyout>
+              <MenuFlyout />
+            </Button.Flyout>
+          </Button>
+          <Button Name="ExitFullScreenButton" Content="Exit full screen" ToolTip.Tip="Ctrl+Alt+Enter" />
+        </StackPanel>
+      </Border>
     </Panel>
 
   </DockPanel>

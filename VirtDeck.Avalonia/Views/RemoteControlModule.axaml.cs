@@ -50,8 +50,14 @@ namespace VirtDeck.Avalonia.Views;
 /// the module, activating the window), since copying over there and pasting here is the usual
 /// order. The poll is the VM console's: formats first, text only when they changed. <b>Type
 /// clipboard</b> stays, for where a paste cannot reach: a login screen's password box.</para>
+///
+/// <para><b>View only</b> sends nothing: no pointer, no keys, no clipboard, and the keyboard stays
+/// this computer's. It is the viewer holding back rather than the agent being told, so it can be
+/// turned on and off during a session. <b>Full screen</b> hides this strip, and the shell hides its
+/// side menu and status bar (see <see cref="IFullScreenModule"/>); the way out is a bar that slides
+/// in from the top edge, or Ctrl+Alt+Enter, which is never sent to the host.</para>
 /// </summary>
-public partial class RemoteControlModule : UserControl, IModule
+public partial class RemoteControlModule : UserControl, IModule, IFullScreenModule
 {
     private SshConnectionManager? _ssh;
     private RemoteDesktopService? _service;
@@ -84,6 +90,21 @@ public partial class RemoteControlModule : UserControl, IModule
     /// </summary>
     private readonly DispatcherTimer _resizeDebounce =
         new() { Interval = TimeSpan.FromMilliseconds(400) };
+
+    // Full screen
+    private bool _fullScreen;
+
+    /// <summary>Ctrl+Alt+Enter is down, so a held Enter toggles once rather than on every repeat.</summary>
+    private bool _chordDown;
+
+    /// <summary>
+    /// How long the pointer rests on the top edge before the bar comes in. Long enough that a click
+    /// on the host's own top panel is not taken from it, short enough to feel like a reveal.
+    /// </summary>
+    private readonly DispatcherTimer _barReveal = new() { Interval = TimeSpan.FromMilliseconds(300) };
+
+    /// <summary>Takes the bar away once nothing is using it: not under the pointer, no menu open.</summary>
+    private readonly DispatcherTimer _barHide = new() { Interval = TimeSpan.FromSeconds(2) };
 
     // Keyboard
     private TopLevel? _root;
@@ -120,6 +141,19 @@ public partial class RemoteControlModule : UserControl, IModule
             FocusDisplay();
         };
 
+        ViewOnlyBox.IsChecked = AppSettings.Current.RemoteControlViewOnly;
+        ApplyViewOnly();
+        ViewOnlyBox.IsCheckedChanged += (_, _) =>
+        {
+            ApplyViewOnly();
+            AppSettings.Current.RemoteControlViewOnly = ViewOnly;
+            AppSettings.Current.Save();
+            FocusDisplay();
+        };
+
+        FullScreenButton.Click += (_, _) => SetFullScreen(true);
+        ExitFullScreenButton.Click += (_, _) => SetFullScreen(false);
+
         RefreshButton.Click += async (_, _) => await RefreshAsync();
         ConnectButton.Click += async (_, _) =>
         {
@@ -142,16 +176,22 @@ public partial class RemoteControlModule : UserControl, IModule
             if (SessionBox.SelectedItem is X11Session target) await ConnectAsync(target);
         };
 
-        CtrlAltDelItem.Click += (_, _) => SendCombo(X11Keysyms.ControlL, X11Keysyms.AltL, X11Keysyms.Delete);
-        AltTabItem.Click += (_, _) => SendCombo(X11Keysyms.AltL, X11Keysyms.Tab);
-        AltF4Item.Click += (_, _) => SendCombo(X11Keysyms.AltL, X11Keysyms.F4);
-        SuperItem.Click += (_, _) => SendCombo(X11Keysyms.SuperL);
-        TypeClipboardItem.Click += async (_, _) => await TypeClipboardAsync();
+        // Reached through the buttons for the reason FillDesktopMenu gives.
+        FillKeysMenu((MenuFlyout)KeysButton.Flyout!);
+        FillKeysMenu((MenuFlyout)BarKeysButton.Flyout!);
 
         Display.LostFocus += (_, _) => ReleaseKeys();
         Display.PointerEntered += (_, _) => UpdateGrab();
-        Display.PointerExited += (_, _) => UpdateGrab();
-        Display.PointerMoved += (_, _) => { if (!_grab.IsActive) RetryGrab(); };
+        Display.PointerExited += (_, _) =>
+        {
+            _barReveal.Stop();
+            UpdateGrab();
+        };
+        Display.PointerMoved += (_, e) =>
+        {
+            if (!_grab.IsActive) RetryGrab();
+            CheckBarReveal(e);
+        };
         Display.ResolutionChanged += (_, _) => UpdateConnectedStatus();
         Display.SizeChanged += (_, _) => UpdateConnectedStatus();
 
@@ -164,6 +204,18 @@ public partial class RemoteControlModule : UserControl, IModule
             SendDesktopSize();
         };
 
+        _barReveal.Tick += (_, _) =>
+        {
+            _barReveal.Stop();
+            ShowBar();
+        };
+        _barHide.Tick += (_, _) =>
+        {
+            if (FullScreenBar.IsPointerOver || BarKeysButton.Flyout is { IsOpen: true }) return;
+            _barHide.Stop();
+            FullScreenBar.IsVisible = false;
+        };
+
 
         ShowIdle();
         UpdateButtons();
@@ -174,6 +226,7 @@ public partial class RemoteControlModule : UserControl, IModule
     public string Status { get; private set; } = "";
     public string HostCapabilities { get; private set; } = "";
     public event Action? StatusChanged;
+    public event Action<bool>? FullScreenChanged;
 
     /// <summary>A host with no X server installed has no desktop to control. See <see cref="HostToolset.HasXServer"/>.</summary>
     public bool IsRelevant(HostToolset host) => host.HasXServer;
@@ -236,6 +289,7 @@ public partial class RemoteControlModule : UserControl, IModule
     /// </summary>
     public void Deactivate()
     {
+        SetFullScreen(false);
         _active = false;
         ReleaseKeys();
         Display.ReleaseButtons();
@@ -563,6 +617,7 @@ public partial class RemoteControlModule : UserControl, IModule
 
         ReleaseKeys();
         Display.ReleaseButtons();
+        SetFullScreen(false);
 
         _resizeDebounce.Stop();
         if (_autoSize)
@@ -659,6 +714,7 @@ public partial class RemoteControlModule : UserControl, IModule
                 text += $" at {scale:P0}";
             }
         }
+        if (ViewOnly) text += ", view only";
         if (Status != text) SetStatus(text);
     }
 
@@ -669,7 +725,9 @@ public partial class RemoteControlModule : UserControl, IModule
         ConnectButton.IsEnabled = !_busy && SessionBox.SelectedItem is X11Session;
         ConnectButton.Content = connected ? "Reconnect" : "Connect";
         DisconnectButton.IsEnabled = connected || _busy;
-        KeysButton.IsEnabled = connected;
+        KeysButton.IsEnabled = connected && !ViewOnly;
+        BarKeysButton.IsEnabled = KeysButton.IsEnabled;
+        FullScreenButton.IsEnabled = connected;
 
         // A host that cannot be given a desktop keeps the button and says why, rather than losing it.
         var blocked = _probe is null ? "Looking at the host..." : _probe.StartBlockedReason;
@@ -699,6 +757,78 @@ public partial class RemoteControlModule : UserControl, IModule
         Scroller.HorizontalScrollBarVisibility = bars;
         Scroller.VerticalScrollBarVisibility = bars;
         UpdateConnectedStatus();
+    }
+
+    // ---- View only ----------------------------------------------------
+
+    private bool ViewOnly => ViewOnlyBox.IsChecked == true;
+
+    /// <summary>
+    /// Puts the module on the box's answer. Held keys are let go before the flag stops key ups
+    /// going out; the display lets go of its own buttons. Turning it off is an entry like any
+    /// other, so this computer's clipboard goes over then.
+    /// </summary>
+    private void ApplyViewOnly()
+    {
+        if (ViewOnly) ReleaseKeys();
+        Display.ViewOnly = ViewOnly;
+        UpdateGrab();
+        UpdateButtons();
+        UpdateConnectedStatus();
+        if (ViewOnly) UpdateClipboardPoll();
+        else SendClipboardOnEntry();
+    }
+
+    // ---- Full screen --------------------------------------------------
+
+    /// <summary>
+    /// Takes the whole screen for the live session, or gives it back. The strip is this module's to
+    /// hide; the side menu, the status bar and the window state are the shell's and the window's,
+    /// told through <see cref="FullScreenChanged"/>. Only a live session on screen can take it, and
+    /// everything that ends one gives it back.
+    /// </summary>
+    private void SetFullScreen(bool on)
+    {
+        if (on == _fullScreen) return;
+        if (on && (_connection is null || !_active || _shutdown)) return;
+        _fullScreen = on;
+
+        Strip.IsVisible = !on;
+        _barReveal.Stop();
+        _barHide.Stop();
+        FullScreenBar.IsVisible = false;
+        if (on) ShowBar(); // once, so it is seen where it lives
+
+        FullScreenChanged?.Invoke(on);
+        FocusDisplay();
+    }
+
+    public void LeaveFullScreen() => SetFullScreen(false);
+
+    private static bool IsFullScreenChord(KeyEventArgs e) =>
+        e.Key == Key.Enter &&
+        (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt)) == (KeyModifiers.Control | KeyModifiers.Alt);
+
+    /// <summary>
+    /// In full screen, the pointer resting on the top edge brings the bar in. Not during a drag,
+    /// which is the far end's.
+    /// </summary>
+    private void CheckBarReveal(PointerEventArgs e)
+    {
+        if (!_fullScreen || FullScreenBar.IsVisible) return;
+        var point = e.GetCurrentPoint(Stage);
+        var buttons = point.Properties;
+        bool atEdge = point.Position.Y < 2 &&
+                      !buttons.IsLeftButtonPressed && !buttons.IsMiddleButtonPressed && !buttons.IsRightButtonPressed;
+        if (!atEdge) _barReveal.Stop();
+        else if (!_barReveal.IsEnabled) _barReveal.Start();
+    }
+
+    private void ShowBar()
+    {
+        FullScreenBar.IsVisible = true;
+        _barHide.Stop();
+        _barHide.Start();
     }
 
     // ---- A desktop the size of the window ------------------------------
@@ -793,7 +923,20 @@ public partial class RemoteControlModule : UserControl, IModule
 
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        if (!Display.IsFocused || _connection is not { } c) return;
+        if (_connection is not { } c) return;
+
+        // Before every other gate: it is how full screen is left, view only or not, and it is
+        // never the far end's.
+        if (IsFullScreenChord(e))
+        {
+            e.Handled = true;
+            if (_chordDown) return;
+            _chordDown = true;
+            SetFullScreen(!_fullScreen);
+            return;
+        }
+
+        if (ViewOnly || !Display.IsFocused) return;
         e.Handled = true;
         var session = c.Session;
 
@@ -836,6 +979,7 @@ public partial class RemoteControlModule : UserControl, IModule
 
     private void OnKeyUpTunnel(object? sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Enter) _chordDown = false;
         if (_connection is not { } c) return;
         if (!_pressed.Remove(e.PhysicalKey, out var keysym)) return;
         c.Session.SendKey(keysym, false);
@@ -849,7 +993,7 @@ public partial class RemoteControlModule : UserControl, IModule
     /// </summary>
     private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
     {
-        if (!Display.IsFocused || _connection is not { } c) return;
+        if (ViewOnly || !Display.IsFocused || _connection is not { } c) return;
         e.Handled = true;
         var text = e.Text;
         if (string.IsNullOrEmpty(text)) return;
@@ -885,6 +1029,31 @@ public partial class RemoteControlModule : UserControl, IModule
         _pressed.Clear();
     }
 
+    /// <summary>
+    /// The Keys menu: the combinations this computer would keep for itself, then typing the
+    /// clipboard. Built once per button, since the strip and the full screen bar both offer it.
+    /// </summary>
+    private void FillKeysMenu(MenuFlyout menu)
+    {
+        (string Header, uint[] Keysyms)[] combos =
+        [
+            ("Ctrl+Alt+Del", [X11Keysyms.ControlL, X11Keysyms.AltL, X11Keysyms.Delete]),
+            ("Alt+Tab", [X11Keysyms.AltL, X11Keysyms.Tab]),
+            ("Alt+F4", [X11Keysyms.AltL, X11Keysyms.F4]),
+            ("Super", [X11Keysyms.SuperL]),
+        ];
+        foreach (var (header, keysyms) in combos)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => SendCombo(keysyms);
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator());
+        var type = new MenuItem { Header = "Type clipboard" };
+        type.Click += async (_, _) => await TypeClipboardAsync();
+        menu.Items.Add(type);
+    }
+
     /// <summary>Presses the keys in order and releases them in reverse, for the Keys menu.</summary>
     private void SendCombo(params uint[] keysyms)
     {
@@ -901,7 +1070,7 @@ public partial class RemoteControlModule : UserControl, IModule
     /// </summary>
     private void UpdateGrab()
     {
-        if (_active && _windowActive && _connection is not null && !_shutdown &&
+        if (_active && _windowActive && _connection is not null && !_shutdown && !ViewOnly &&
             Display.IsPointerOver && TopLevel.GetTopLevel(this) is Window window)
         {
             if (!_grab.IsActive) _grab.Grab(window);
@@ -927,7 +1096,7 @@ public partial class RemoteControlModule : UserControl, IModule
     /// <summary>Polls only while a session is on screen in the active window.</summary>
     private void UpdateClipboardPoll()
     {
-        bool run = _active && _windowActive && _connection is not null && !_shutdown;
+        bool run = _active && _windowActive && _connection is not null && !_shutdown && !ViewOnly;
         if (run) _clipboardPoll.Start();
         else _clipboardPoll.Stop();
     }

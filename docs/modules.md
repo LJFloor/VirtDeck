@@ -119,3 +119,25 @@ being absent is an ordinary host. See "Network".
 
 - **`IModule.BusyReason` is the one thing that can refuse a host switch**, and it is not a busy flag. A module in the middle of a refresh is fine to close, because teardown cancels reads and closes windows for a living; this is for what a teardown would destroy with no way back. Only `SoftwareUpdatesModule` answers, and only past the download phase, reusing the predicate that already disables its own Cancel button there: doing from the host cell what a module refuses to do from its own button would be a hole in the same rule. Defaulted to null, so adding a module stays a `TabItem` plus a `UserControl`. Closing the **window** still cuts a transaction off exactly as it always did, because quitting is unambiguous and there is nowhere left to report to.
 
+
+## Taking the whole screen
+
+- **`IFullScreenModule` is a second interface, like `IModuleNavigator`**, because one module does
+  this and an event cannot be defaulted on `IModule`. The shell subscribes to whichever modules
+  implement it, so adding a module is still a `TabItem` plus a `UserControl`. Remote Control is the
+  one (see "The module" in [remote-control.md](remote-control.md)).
+- **Three owners, three pieces.** The module hides its own strip and raises `FullScreenChanged`.
+  The shell hides the status bar and puts a `chromeless` class on the module strip, which
+  `JbModuleTabControl` answers by hiding the template's `Strip`; a class rather than hiding the
+  tabs, which would move the selection. `MainWindow` owns the OS window, so it is the one that goes
+  `WindowState.FullScreen` and back to Normal or Maximized, whichever the window was.
+- **Only the module on screen can take it, and giving it back is always honoured**, so the chrome
+  cannot stay hidden behind a module that has gone. A host switch restores the window itself,
+  since the outgoing shell's teardown is no longer listened to by then; a reconnect after the link
+  dropped is a real way to arrive there from full screen.
+- **The window manager can leave full screen by itself**, and then `MainWindow` calls the shell's
+  `LeaveFullScreen`, which calls the module's, which puts its strip back and gives the screen back
+  in the ordinary way. Minimizing is not leaving. **The change is believed only once it has stayed
+  put for 500 ms**, because on X11 the way in from maximized passes through Maximized: Avalonia
+  adds the full screen atom before it removes the two maximized ones, and reads both together as
+  maximized.

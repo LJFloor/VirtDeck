@@ -144,6 +144,12 @@ public partial class ShellView : UserControl
     /// <summary>The profile this shell is on was renamed or re-keyed; the window retitles.</summary>
     public event Action? ProfileChanged;
 
+    /// <summary>
+    /// The module on screen took the whole screen (true) or gave it back (false). The shell has
+    /// already hidden or restored its own chrome; the window state is <see cref="MainWindow"/>'s.
+    /// </summary>
+    public event Action<bool>? FullScreenChanged;
+
     /// <summary>Which host this shell is on. The window titles itself from it.</summary>
     public HostProfile Profile => _profile;
 
@@ -197,6 +203,7 @@ public partial class ShellView : UserControl
             // Subscribed here rather than named anywhere, so this loop is still the whole of what
             // the shell knows about its module set.
             if (module is IModuleNavigator navigator) navigator.ModuleRequested += ShowModule;
+            if (module is IFullScreenModule full) full.FullScreenChanged += on => OnModuleFullScreen(module, on);
         }
 
         // Every conditional module starts hidden and the probe in StartAsync puts back the ones this
@@ -435,6 +442,22 @@ public partial class ShellView : UserControl
         PaintStatus();
         if (next != null) await next.ActivateAsync();
     }
+
+    /// <summary>
+    /// A module taking the whole screen or giving it back. Only the module on screen may take it;
+    /// giving it back is always honoured, so the chrome can never stay hidden behind a module that
+    /// has gone.
+    /// </summary>
+    private void OnModuleFullScreen(IModule module, bool on)
+    {
+        if (on && !ReferenceEquals(module, _current)) return;
+        StatusBar.IsVisible = !on;
+        Modules.Classes.Set("chromeless", on);
+        FullScreenChanged?.Invoke(on);
+    }
+
+    /// <summary>The window left full screen by other means; the module on screen puts its chrome back.</summary>
+    public void LeaveFullScreen() => (_current as IFullScreenModule)?.LeaveFullScreen();
 
     private void OnModuleStatusChanged(IModule module)
     {

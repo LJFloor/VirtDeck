@@ -149,3 +149,24 @@ public interface IModuleNavigator
     /// </summary>
     event Action<Type>? ModuleRequested;
 }
+
+/// <summary>
+/// A module that can take the whole screen: Remote Control's Full screen, where the host's desktop
+/// is the only thing showing.
+///
+/// <para>A second interface for the reason <see cref="IModuleNavigator"/> is one: most modules
+/// never do this, and an event cannot be defaulted on <see cref="IModule"/>. The shell subscribes
+/// to whichever modules implement it, hides its own side menu and status bar, and hands the window
+/// state to <see cref="MainWindow"/>, which owns the OS window. The module hides its own strip.</para>
+/// </summary>
+public interface IFullScreenModule
+{
+    /// <summary>True when the module wants the whole screen, false when it gives it back.</summary>
+    event Action<bool>? FullScreenChanged;
+
+    /// <summary>
+    /// The window left full screen without the module asking, which is the window manager doing it:
+    /// the module puts its own chrome back and raises <see cref="FullScreenChanged"/> with false.
+    /// </summary>
+    void LeaveFullScreen();
+}

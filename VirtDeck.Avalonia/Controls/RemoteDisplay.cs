@@ -14,6 +14,9 @@ namespace VirtDeck.Avalonia.Controls;
 /// the wheel as buttons 4 to 7, each notch a press and a release. The pointer is captured on a
 /// press, so a drag that leaves the control still ends where the user let go; losing the capture
 /// any other way lets every button go, so nothing stays held on the far end.</para>
+///
+/// <para><see cref="ViewOnly"/> sends none of it. A click still focuses the control, and the wheel
+/// is left unhandled, so at one to one it scrolls the picture instead.</para>
 /// </summary>
 public sealed class RemoteDisplay : FramebufferView
 {
@@ -24,6 +27,23 @@ public sealed class RemoteDisplay : FramebufferView
     private byte _buttons;
     private int _lastX, _lastY;
     private double _wheelX, _wheelY;
+    private bool _viewOnly;
+
+    /// <summary>
+    /// Nothing goes to the far end: no pointer, no buttons, no wheel. The cursor is this computer's
+    /// arrow, because the far end's shape drawn at this pointer would pass for the host's own
+    /// pointer, which is somewhere else entirely. Whatever is held is let go first.
+    /// </summary>
+    public bool ViewOnly
+    {
+        get => _viewOnly;
+        set
+        {
+            if (value) ReleaseButtons();
+            _viewOnly = value;
+            Policy = value ? CursorPolicy.HostCursor : CursorPolicy.SpiceCursor;
+        }
+    }
 
     public void Attach(RfbSession session)
     {
@@ -50,7 +70,7 @@ public sealed class RemoteDisplay : FramebufferView
 
     private void Send(PointerEventArgs e)
     {
-        if (_session is null || !TryMapToImage(e.GetPosition(this), out _lastX, out _lastY)) return;
+        if (_session is null || _viewOnly || !TryMapToImage(e.GetPosition(this), out _lastX, out _lastY)) return;
         _session.SendPointer(_lastX, _lastY, _buttons);
     }
 
@@ -59,7 +79,7 @@ public sealed class RemoteDisplay : FramebufferView
         base.OnPointerPressed(e);
         Focus();
         var bit = ButtonFor(e.GetCurrentPoint(this).Properties.PointerUpdateKind);
-        if (bit == 0 || _session is null) return;
+        if (bit == 0 || _session is null || _viewOnly) return;
         _buttons |= bit;
         e.Pointer.Capture(this);
         Send(e);
@@ -70,7 +90,7 @@ public sealed class RemoteDisplay : FramebufferView
     {
         base.OnPointerReleased(e);
         var bit = ButtonFor(e.GetCurrentPoint(this).Properties.PointerUpdateKind);
-        if (bit == 0 || _session is null) return;
+        if (bit == 0 || _session is null || _viewOnly) return;
         _buttons &= (byte)~bit;
         Send(e);
         if (_buttons == 0) e.Pointer.Capture(null);
@@ -96,7 +116,7 @@ public sealed class RemoteDisplay : FramebufferView
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        if (_session is null) return;
+        if (_session is null || _viewOnly) return;
         if (!TryMapToImage(e.GetPosition(this), out _lastX, out _lastY)) return;
 
         _wheelY += e.Delta.Y;
