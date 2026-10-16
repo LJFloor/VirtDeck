@@ -181,6 +181,7 @@ public partial class RemoteControlModule : UserControl, IModule, IFullScreenModu
         FillKeysMenu((MenuFlyout)BarKeysButton.Flyout!);
 
         Display.LostFocus += (_, _) => ReleaseKeys();
+        _grab.KeyCaptured += (e, down) => { if (down) OnKeyDownTunnel(this, e); else OnKeyUpTunnel(this, e); };
         Display.PointerEntered += (_, _) => UpdateGrab();
         Display.PointerExited += (_, _) =>
         {

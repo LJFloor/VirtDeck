@@ -47,6 +47,7 @@ public partial class ConsoleWindow : Window
     private static readonly PixelSize OffSize = new(640, 480);
     private bool _windowActive;
     private long _lastGrabAttempt;
+    private readonly HashSet<uint> _heldKeys = new();
 
     // Devices discovered after connect (bus is always fdc for a floppy).
     private string? _cdromTarget;
@@ -120,6 +121,7 @@ public partial class ConsoleWindow : Window
         // toolbar can't steal Tab, Space or the arrow keys from the guest.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyUpEvent, OnKeyUpTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        _grab.KeyCaptured += ForwardKey;   // the Windows key and Alt+Tab, taken from the shell
 
         // Polling only while focused: an unfocused console has no business grabbing the SPICE
         // clipboard away from whatever the user is actually working in.
@@ -1384,6 +1386,20 @@ public partial class ConsoleWindow : Window
         }
 
         GrabText.Text = _grab.IsActive ? "Keyboard grabbed" : "";
+
+        // The same gate ForwardKey applies: past it a key up would be dropped and the guest would
+        // keep the key held (the Start menu or Win+L taking focus with the Windows key down).
+        if (!_windowActive || !_connected || _closing || (!Display.IsFocused && !Display.IsPointerOver))
+            ReleaseHeldKeys();
+    }
+
+    /// <summary>Lets go, in the guest, of every key it still has down.</summary>
+    private void ReleaseHeldKeys()
+    {
+        if (_heldKeys.Count == 0) return;
+        if (_session?.Inputs is { } inputs)
+            foreach (var scancode in _heldKeys) inputs.SendKey(scancode, false);
+        _heldKeys.Clear();
     }
 
     /// <summary>
@@ -1414,6 +1430,8 @@ public partial class ConsoleWindow : Window
 
         if (!PhysicalKeyMap.TryMap(e.PhysicalKey, out uint scancode)) return;
         inputs.SendKey(scancode, down);
+        if (down) _heldKeys.Add(scancode);
+        else _heldKeys.Remove(scancode);
 
         // Swallow it so Avalonia doesn't also act on it (Tab moving focus, Space pressing a button).
         e.Handled = true;

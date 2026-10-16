@@ -361,12 +361,14 @@ that survives a local and a remote layout that differ.
   key that completes a composition is not sent itself. This is the part most in need of checking on
   each platform and layout (US-International on Linux and Windows).
 - Routing is Terminal's: tunnelled, handled-too, on the top level, added with the visual tree and
-  gated on the display having focus, plus the VM console's X11 keyboard grab while the window is
+  gated on the display having focus, plus the VM console's keyboard grab while the window is
   active, a session is live, the module is on screen and the pointer is over the picture, so Alt+Tab
-  and Super reach the far end but the window's chrome still works. The Keys menu sends Ctrl+Alt+Del,
-  Alt+Tab, Alt+F4 and Super for when there is no grab (Windows), and Type clipboard types text as
-  keysyms, for the login screen's password box. The strip and the full screen bar each have one,
-  built in code from one list, because a flyout has one placement target.
+  and Super reach the far end but the window's chrome still works. On Windows the keys the grab
+  captures come back through `KeyCaptured` into the same key handlers. The Keys menu sends
+  Ctrl+Alt+Del, Alt+Tab, Alt+F4 and Super for when there is no grab (Wayland, or what no hook can
+  catch), and Type clipboard types text as keysyms, for the login screen's password box. The strip
+  and the full screen bar each have one, built in code from one list, because a flyout has one
+  placement target.
 - **Ctrl+Alt+Enter is caught before all of that**: it toggles full screen and never reaches the far
   end, view only or not, focused or not. It is VMware's chord, and nothing on a Linux desktop
   wants it. Ctrl and Alt have already gone down on the far end by then and come up as usual; Enter

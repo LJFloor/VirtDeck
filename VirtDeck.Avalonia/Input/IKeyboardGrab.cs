@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 
 namespace VirtDeck.Avalonia.Input;
 
@@ -23,18 +24,26 @@ public interface IKeyboardGrab : IDisposable
 
     /// <summary>Releases the keyboard. Safe to call when not grabbed.</summary>
     void Release();
+
+    /// <summary>
+    /// A key the grab took away from the platform instead of letting it arrive as an ordinary key
+    /// event (true for down). Raised on the UI thread. Only the Windows grab raises it; under
+    /// X11 the grabbed keys arrive as normal Avalonia key events.
+    /// </summary>
+    event Action<KeyEventArgs, bool>? KeyCaptured;
 }
 
 /// <summary>Selects the grab implementation for the current platform.</summary>
 public static class KeyboardGrab
 {
     /// <summary>
-    /// Returns a grab for this platform. Linux/X11 gets a real one; everything else gets a no-op
-    /// until the Windows low-level-hook implementation is ported from the WinForms console.
+    /// Returns a grab for this platform: <c>XGrabKeyboard</c> on Linux, a low-level keyboard hook
+    /// on Windows, a no-op elsewhere.
     /// </summary>
     public static IKeyboardGrab Create()
     {
         if (OperatingSystem.IsLinux()) return new X11KeyboardGrab();
+        if (OperatingSystem.IsWindows()) return new WindowsKeyboardGrab();
         return new NullKeyboardGrab();
     }
 }
@@ -47,4 +56,5 @@ public sealed class NullKeyboardGrab : IKeyboardGrab
     public bool Grab(Window window) => false;
     public void Release() { }
     public void Dispose() { }
+    public event Action<KeyEventArgs, bool>? KeyCaptured { add { } remove { } }
 }

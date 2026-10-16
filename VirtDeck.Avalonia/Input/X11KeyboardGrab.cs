@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Threading;
 using VirtDeck.Diagnostics;
 
@@ -52,6 +53,9 @@ public sealed class X11KeyboardGrab : IKeyboardGrab
     private bool _disposed;
 
     public bool IsActive { get; private set; }
+
+    /// <summary>Never raised: during an X grab the keys arrive as ordinary Avalonia key events.</summary>
+    public event Action<KeyEventArgs, bool>? KeyCaptured { add { } remove { } }
 
     /// <summary>
     /// True until we have actually tried and failed to reach the X11 backend; the display can only
