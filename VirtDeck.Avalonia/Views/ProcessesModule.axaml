@@ -1,0 +1,152 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+             xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+             x:Class="VirtDeck.Avalonia.Views.ProcessesModule"
+             x:DataType="vm:ProcessRow">
+
+  <UserControl.Resources>
+    <!-- One column layout shared by the header strip and the rows, so they stay aligned. -->
+    <x:Double x:Key="ColName">250</x:Double>
+    <x:Double x:Key="ColPid">72</x:Double>
+    <x:Double x:Key="ColUser">110</x:Double>
+    <x:Double x:Key="ColCpu">64</x:Double>
+    <x:Double x:Key="ColMemory">90</x:Double>
+    <x:Double x:Key="ColState">110</x:Double>
+    <x:Double x:Key="ColNice">52</x:Double>
+    <x:Double x:Key="ColThreads">68</x:Double>
+    <x:Double x:Key="ColStarted">100</x:Double>
+  </UserControl.Resources>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="12">
+          <ComboBox Name="ShowBox" Width="160" VerticalAlignment="Center" />
+          <CheckBox Name="KernelBox" Content="Kernel threads" VerticalAlignment="Center" />
+          <CheckBox Name="TreeBox" Content="Tree" VerticalAlignment="Center"
+                    ToolTip.Tip="Show each process under its parent" />
+        </StackPanel>
+        <!-- Pause holds the table still; the sampler keeps running, so Resume is instant. -->
+        <Button Name="PauseButton" DockPanel.Dock="Right" Content="Pause" MinWidth="78"
+                Margin="10,0,0,0" ToolTip.Tip="Hold the table still" />
+        <c:FilterBox DockPanel.Dock="Right" Name="Search" Width="220" Margin="10,0,0,0"
+                     PlaceholderText="Search name, user, PID or command"
+                     ToolTip.Tip="Narrows the table in hand (Ctrl+F)" />
+        <Panel />
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+            BorderThickness="0,0,0,1" BorderBrush="#22808080">
+      <DockPanel Name="HeaderStrip">
+        <!-- A third click returns to the table's own order: by name in the list, by PID in the
+             tree. Indent puts the heading over the rows' icon slot. -->
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Name"    SortKey="name"    Indent="22" Width="{StaticResource ColName}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="PID"     SortKey="pid"     Width="{StaticResource ColPid}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="User"    SortKey="user"    Width="{StaticResource ColUser}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="CPU %"   SortKey="cpu"     Width="{StaticResource ColCpu}"
+                        Tip="Share of the whole machine" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Memory"  SortKey="memory"  Width="{StaticResource ColMemory}"
+                        Tip="Resident memory (RSS)" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="State"   SortKey="state"   Width="{StaticResource ColState}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Nice"    SortKey="nice"    Width="{StaticResource ColNice}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Threads" SortKey="threads" Width="{StaticResource ColThreads}" />
+        <c:ColumnHeader DockPanel.Dock="Left" Text="Uptime" SortKey="started" Width="{StaticResource ColStarted}"
+                        Tip="How long the process has been running" />
+        <c:ColumnHeader Text="Command" SortKey="command" />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <ListBox Name="List" SelectionMode="Multiple" Background="Transparent" Padding="0"
+               ItemContainerTheme="{StaticResource JbTableRow}">
+        <ListBox.ContextMenu>
+          <ContextMenu Name="Menu">
+            <MenuItem Name="MenuEnd" Header="End" InputGesture="Delete" />
+            <MenuItem Name="MenuKill" Header="Kill" InputGesture="Shift+Delete" />
+            <Separator />
+            <MenuItem Name="MenuStop" Header="Stop" />
+            <MenuItem Name="MenuContinue" Header="Continue" />
+            <MenuItem Name="MenuSignal" Header="Send signal">
+              <MenuItem Name="MenuSigHup" Header="HUP" />
+              <MenuItem Name="MenuSigInt" Header="INT" />
+              <MenuItem Name="MenuSigQuit" Header="QUIT" />
+              <MenuItem Name="MenuSigUsr1" Header="USR1" />
+              <MenuItem Name="MenuSigUsr2" Header="USR2" />
+            </MenuItem>
+            <MenuItem Name="MenuPriority" Header="Change priority">
+              <MenuItem Name="MenuNiceVeryHigh" Header="Very high (-15)" />
+              <MenuItem Name="MenuNiceHigh" Header="High (-5)" />
+              <MenuItem Name="MenuNiceNormal" Header="Normal (0)" />
+              <MenuItem Name="MenuNiceLow" Header="Low (5)" />
+              <MenuItem Name="MenuNiceVeryLow" Header="Very low (19)" />
+              <Separator />
+              <MenuItem Name="MenuNiceCustom" Header="Custom..." />
+            </MenuItem>
+            <Separator />
+            <MenuItem Name="MenuExpandAll" Header="Expand all" />
+            <MenuItem Name="MenuCollapseAll" Header="Collapse all" />
+            <Separator Name="TreeSeparator" />
+            <MenuItem Name="MenuCopy" Header="Copy command line" />
+            <MenuItem Name="MenuProperties" Header="Properties" InputGesture="Enter" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:ProcessRow">
+            <!-- A DockPanel, so the Command cell is the fill and its trimming fires. -->
+            <DockPanel Classes="cells" Opacity="{Binding RowOpacity}">
+              <DockPanel DockPanel.Dock="Left" Width="{StaticResource ColName}">
+                <!-- The indent is a Border with a bound Width, never a Margin, so hover and
+                     selection paint the whole row (the ZFS tree's rule). -->
+                <Border DockPanel.Dock="Left" Width="{Binding IndentPixels}" />
+                <Button DockPanel.Dock="Left" Theme="{StaticResource JbToolButton}"
+                        IsVisible="{Binding ShowChevron}" Padding="0" Width="16" Height="16"
+                        MinHeight="0" VerticalAlignment="Center">
+                  <Path Data="{Binding ChevronData}" Width="16" Height="16"
+                        Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.2" />
+                </Button>
+                <Border DockPanel.Dock="Left" Width="16" IsVisible="{Binding NoChevron}" />
+                <!-- What the process runs under, in the side menu's glyphs. The slot keeps its
+                     width when there is no icon, so every name at one depth starts in one place. -->
+                <Border DockPanel.Dock="Left" Width="16" Height="16" Margin="0,0,6,0"
+                        Background="Transparent" VerticalAlignment="Center" ToolTip.Tip="{Binding KindTip}">
+                  <Path Data="{Binding KindIcon}" Width="16" Height="16" Opacity="0.8"
+                        Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2" />
+                </Border>
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+              </DockPanel>
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Pid}" Width="{StaticResource ColPid}"
+                         VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding User}" Width="{StaticResource ColUser}"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding User}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding CpuText}" Width="{StaticResource ColCpu}"
+                         VerticalAlignment="Center" ToolTip.Tip="{Binding TotalsTip}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding MemoryText}" Width="{StaticResource ColMemory}"
+                         VerticalAlignment="Center" ToolTip.Tip="{Binding TotalsTip}" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding StateText}" Width="{StaticResource ColState}"
+                         Foreground="{Binding StateBrush}" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Nice}" Width="{StaticResource ColNice}"
+                         VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Threads}" Width="{StaticResource ColThreads}"
+                         VerticalAlignment="Center" />
+              <TextBlock DockPanel.Dock="Left" Text="{Binding Started}" Width="{StaticResource ColStarted}"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="{Binding Command}" Opacity="0.75" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Command}" />
+            </DockPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <TextBlock Name="Empty" Opacity="0.6" IsVisible="False"
+                 TextAlignment="Center" TextWrapping="Wrap" MaxWidth="380"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+
+  </DockPanel>
+</UserControl>

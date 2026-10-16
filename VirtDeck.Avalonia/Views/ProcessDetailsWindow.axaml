@@ -1,0 +1,159 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VirtDeck.Avalonia.Views"
+        xmlns:m="clr-namespace:VirtDeck.Models;assembly=VirtDeck.Core"
+        xmlns:c="clr-namespace:VirtDeck.Avalonia.Controls"
+        x:Class="VirtDeck.Avalonia.Views.ProcessDetailsWindow"
+        x:DataType="vm:ProcessFact"
+        Title="Process"
+        Width="860" Height="560" MinWidth="640" MinHeight="420">
+
+  <Window.Resources>
+    <x:Double x:Key="ColFd">80</x:Double>
+    <x:Double x:Key="ColVar">240</x:Double>
+  </Window.Resources>
+
+  <!-- The disk and interface details windows' fact pair, so a fact looks the same in all three. -->
+  <Window.Styles>
+    <Style Selector="TextBlock.factlabel">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Width" Value="128" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+    <Style Selector="TextBlock.factvalue">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+  </Window.Styles>
+
+  <Window.DataTemplates>
+    <DataTemplate DataType="vm:ProcessFact">
+      <DockPanel Margin="0,0,0,3" ToolTip.Tip="{Binding Value}">
+        <TextBlock DockPanel.Dock="Left" Classes="factlabel" Text="{Binding Label}" />
+        <TextBlock Classes="factvalue" Text="{Binding Value}" />
+      </DockPanel>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel>
+
+    <Border DockPanel.Dock="Bottom" Theme="{StaticResource JbDialogFooter}">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Name="StatusText" Grid.Column="0" Opacity="0.7"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Margin="0,0,12,0" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Name="RefreshButton" Content="Refresh" MinWidth="88" />
+          <Button Name="CloseButton" Content="Close" IsCancel="True" MinWidth="88" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <TabControl Name="SectionTabs">
+
+      <TabItem Header="General">
+        <DockPanel Margin="16,14,16,14">
+
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <TextBlock Name="TitleName" DockPanel.Dock="Left" FontWeight="SemiBold"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Ellipse Name="TitleDot" DockPanel.Dock="Left" Width="9" Height="9"
+                     Margin="12,0,5,0" VerticalAlignment="Center" />
+            <TextBlock Name="TitleState" VerticalAlignment="Center" />
+          </DockPanel>
+
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,24,*" Margin="0,0,0,14">
+            <ItemsControl Name="LeftFacts" Grid.Column="0" />
+            <ItemsControl Name="RightFacts" Grid.Column="2" />
+          </Grid>
+
+          <TextBlock DockPanel.Dock="Top" Text="Command line" Opacity="0.7" Margin="0,0,0,4" />
+          <TextBox Name="CommandBox" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="False"
+                   VerticalAlignment="Stretch" VerticalContentAlignment="Top" />
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Open files">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="FileSearch" Width="220"
+                           PlaceholderText="Search descriptors" />
+              <TextBlock Name="FileNote" Opacity="0.7" VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+          </Border>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="FileHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="FD" SortKey="fd" Width="{StaticResource ColFd}" />
+              <c:ColumnHeader Text="Target" SortKey="target" />
+            </DockPanel>
+          </Border>
+          <Panel>
+            <ListBox Name="FileList" Background="Transparent" Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="m:ProcessFile">
+                  <DockPanel Classes="cells">
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Fd}" Width="{StaticResource ColFd}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Target}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Target}" />
+                  </DockPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Name="FilePrivate" IsVisible="False" Spacing="12"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380">
+              <TextBlock Name="FileEmpty" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" />
+              <Button Name="FileRootButton" Content="Read as root" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Panel>
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Environment">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel>
+              <c:FilterBox DockPanel.Dock="Right" Name="EnvSearch" Width="220"
+                           PlaceholderText="Search variables" />
+              <Panel />
+            </DockPanel>
+          </Border>
+          <Border DockPanel.Dock="Top" Padding="12,3" Background="#11808080"
+                  BorderThickness="0,0,0,1" BorderBrush="#22808080">
+            <DockPanel Name="EnvHeaderStrip">
+              <c:ColumnHeader DockPanel.Dock="Left" Text="Name" SortKey="name" Width="{StaticResource ColVar}" />
+              <c:ColumnHeader Text="Value" SortKey="value" />
+            </DockPanel>
+          </Border>
+          <Panel>
+            <ListBox Name="EnvList" Background="Transparent" Padding="0"
+                     ItemContainerTheme="{StaticResource JbTableRow}">
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="m:ProcessVariable">
+                  <DockPanel Classes="cells">
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Name}" Width="{StaticResource ColVar}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding Name}" />
+                    <TextBlock Text="{Binding Value}" Opacity="0.75" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Value}" />
+                  </DockPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Name="EnvPrivate" IsVisible="False" Spacing="12"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380">
+              <TextBlock Name="EnvEmpty" Opacity="0.6" TextAlignment="Center" TextWrapping="Wrap" />
+              <Button Name="EnvRootButton" Content="Read as root" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Panel>
+        </DockPanel>
+      </TabItem>
+
+    </TabControl>
+
+  </DockPanel>
+</Window>

@@ -64,6 +64,7 @@ in this index.
 | File | What is in it |
 |---|---|
 | [host-overview.md](docs/host-overview.md) | The host itself in two tabs: a Summary over live CPU, memory, network, disk IO and GPU graphs fed by one long-lived sampling tail, and a Hardware page with the machine, its memory slots and its PCI and USB devices. |
+| [processes.md](docs/processes.md) | The host's processes as a list or a tree: the one-awk-per-tick sampler that sends a command line once, CPU % as a share of the machine, the start-time guard on every command, when sudo is needed, and the details window with its cgroup owner. |
 | [logs.md](docs/logs.md) | The host's journal: the three dropdowns that are a query rather than a filter, cursor paging, the live tail and Pause, and why every read is elevated. |
 | [containers.md](docs/containers.md) | The five tabs over one docker host, `DockerService`, the listing and the event tail, and the Docker Hub account cell in the status bar. |
 | [containers-images.md](docs/containers-images.md) | Listing, pulling, tagging, removing, pruning, and moving an image to and from this PC. |

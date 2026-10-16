@@ -11,6 +11,9 @@
          IconUserAccounts below gives: a single half-circle leaves the renderer no way to tell
          which of the two semicircles was meant. -->
     <StreamGeometry x:Key="IconOverview">M2,12 A6,6 0 0 1 8,6 A6,6 0 0 1 14,12 M8,12 L11.5,8</StreamGeometry>
+    <!-- A pulse trace: flat, a spike up and down, flat again. What is busy right now, rather than
+         the gauge's how busy overall. No arcs, so the two-sweep rule does not arise. -->
+    <StreamGeometry x:Key="IconProcesses">M1,8.5 H4.5 L6.5,3 L9.5,13 L11.5,8.5 H15</StreamGeometry>
     <StreamGeometry x:Key="IconVirtualMachines">M1,2 H15 V11 H1 Z M6,14 H10 M8,11 V14</StreamGeometry>
     <StreamGeometry x:Key="IconContainers">M1,4 H15 V13 H1 Z M1,4 L3.5,1 H12.5 L15,4 M6,4 V13 M10,4 V13</StreamGeometry>
     <StreamGeometry x:Key="IconFileExplorer">M1,3 H6 L7.5,5 H15 V13 H1 Z</StreamGeometry>
@@ -132,6 +135,18 @@
           </StackPanel>
         </TabItem.Header>
         <vm:OverviewModule />
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Data="{StaticResource IconProcesses}" Width="16" Height="16"
+                  Stroke="{DynamicResource JbButtonForeground}" StrokeThickness="1.2"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Processes" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <vm:ProcessesModule />
       </TabItem>
 
       <!-- Second, under the page about the host itself, which is where Cockpit puts it and for the
