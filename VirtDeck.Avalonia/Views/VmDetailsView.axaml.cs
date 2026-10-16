@@ -284,9 +284,10 @@ public partial class VmDetailsView : UserControl
         {
             // "bridge br0" and "network default" are different things wearing the same name, so the
             // kind is spelled out rather than left to be guessed from the source alone.
+            string source = NicEditRow.SourceText(n.SourceType, n.Source, n.Mode);
             string value = Blank(n.Source)
                 ? (Blank(n.SourceType) ? "-" : n.SourceType)
-                : Blank(n.SourceType) ? n.Source : $"{n.SourceType} {n.Source}";
+                : Blank(n.SourceType) ? source : $"{n.SourceType} {source}";
 
             rows.Add(new DetailRow
             {

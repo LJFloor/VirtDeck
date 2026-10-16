@@ -80,10 +80,14 @@ public sealed class NicEditRow
     }
 
     public static NicEditRow ForExisting(NicInfo n) =>
-        new(n, null, n.Model, n.SourceType, n.Source, n.Mac, added: false);
+        new(n, null, n.Model, n.SourceType, SourceText(n.SourceType, n.Source, n.Mode), n.Mac, added: false);
 
     public static NicEditRow ForAdd(NicAddOp op) =>
-        new(null, op, op.Model, op.Type, op.Source, "(auto)", added: true);
+        new(null, op, op.Model, op.Type, SourceText(op.Type, op.Source, op.Mode), "(auto)", added: true);
+
+    /// <summary>The source, with the macvtap mode after it for a direct adapter: "enp3s0 (bridge)".</summary>
+    public static string SourceText(string type, string source, string mode) =>
+        type == "direct" && mode.Length > 0 ? $"{source} ({mode})" : source;
 
     public string Model { get; }
     public string Type { get; }

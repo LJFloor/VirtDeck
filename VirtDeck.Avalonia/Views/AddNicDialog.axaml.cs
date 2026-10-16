@@ -4,12 +4,13 @@ using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
 
-/// <summary>Builds a <see cref="NicAddOp"/> for a bridge or virtual-network adapter.</summary>
+/// <summary>Builds a <see cref="NicAddOp"/> for a bridge, virtual-network or direct (macvtap) adapter.</summary>
 public partial class AddNicDialog : Window
 {
     private readonly VirshService _virsh;
     private List<string> _bridges = new();
     private List<string> _networks = new();
+    private List<string> _directs = new();
 
     public NicAddOp? Result { get; private set; }
 
@@ -23,9 +24,12 @@ public partial class AddNicDialog : Window
 
         ModelBox.ItemsSource = new[] { "virtio", "e1000e", "rtl8139" };
         ModelBox.SelectedIndex = 0;
+        ModeBox.ItemsSource = VirshService.DirectModes;
+        ModeBox.SelectedIndex = 0;
 
         BridgeRadio.IsCheckedChanged += (_, _) => PopulateSource();
         NetworkRadio.IsCheckedChanged += (_, _) => PopulateSource();
+        DirectRadio.IsCheckedChanged += (_, _) => PopulateSource();
 
         OkButton.Click += async (_, _) => await AcceptAsync();
         CancelButton.Click += (_, _) => Close();
@@ -34,21 +38,31 @@ public partial class AddNicDialog : Window
         {
             try
             {
-                var (bridges, networks) = await Task.Run(() => (_virsh.ListBridges(), _virsh.ListNetworks()));
+                var (bridges, networks, directs) = await Task.Run(() =>
+                    (_virsh.ListBridges(), _virsh.ListNetworks(), _virsh.ListDirectSources()));
                 _bridges = bridges;
                 _networks = networks;
+                _directs = directs;
             }
             catch { /* leave the box free-text */ }
             PopulateSource();
         };
     }
 
+    private string Kind => BridgeRadio.IsChecked == true ? "bridge"
+                         : DirectRadio.IsChecked == true ? "direct" : "network";
+
     private void PopulateSource()
     {
-        bool bridge = BridgeRadio.IsChecked == true;
-        var items = bridge ? _bridges : _networks;
+        var (items, fallback) = Kind switch
+        {
+            "bridge" => (_bridges, "br0"),
+            "direct" => (_directs, "eth0"),
+            _ => (_networks, "default"),
+        };
         SourceBox.ItemsSource = items;
-        SourceBox.Text = items.Count > 0 ? items[0] : (bridge ? "br0" : "default");
+        SourceBox.Text = items.Count > 0 ? items[0] : fallback;
+        ModePanel.IsVisible = Kind == "direct";
     }
 
     private async Task AcceptAsync()
@@ -61,9 +75,10 @@ public partial class AddNicDialog : Window
         }
         Result = new NicAddOp
         {
-            Type = BridgeRadio.IsChecked == true ? "bridge" : "network",
+            Type = Kind,
             Source = source,
             Model = (string)ModelBox.SelectedItem!,
+            Mode = (string)ModeBox.SelectedItem!,
         };
         Close(true);
     }

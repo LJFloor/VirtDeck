@@ -45,9 +45,10 @@ namespace VirtDeck.Models
     /// <summary>A pending NIC addition built by AddNicDialog.</summary>
     public class NicAddOp
     {
-        public string Type { get; set; } = "network";  // bridge | network
-        public string Source { get; set; } = string.Empty; // br0 | default
+        public string Type { get; set; } = "network";  // bridge | network | direct
+        public string Source { get; set; } = string.Empty; // br0 | default | enp3s0
         public string Model { get; set; } = "virtio";
+        public string Mode { get; set; } = "bridge";   // macvtap mode, direct only
     }
 
     public class ZvolEntry

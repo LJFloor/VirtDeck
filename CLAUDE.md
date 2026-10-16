@@ -55,7 +55,7 @@ in this index.
 
 | File | What is in it |
 |---|---|
-| [virtual-machines.md](docs/virtual-machines.md) | Host capability probes, ISO identification and guest device defaults, Export VM, clipboard sharing both ways, the one-cursor rule, image compression and QUIC, and removable ISO/floppy media over NBD. |
+| [virtual-machines.md](docs/virtual-machines.md) | Host capability probes, ISO identification and guest device defaults, network adapters including direct attachment, Export VM, clipboard sharing both ways, the one-cursor rule, image compression and QUIC, and removable ISO/floppy media over NBD. |
 | [usb-redirection.md](docs/usb-redirection.md) | The native usbredir stack, why a channel that cannot be driven is never linked, mass storage preparation per platform, and host provisioning. |
 | [unattend.md](docs/unattend.md) | The answer file window over the vendored unattend-generator: the page vocabulary, the code boxes, the answer disc, the flat model and its two typing rules, and validation. |
 

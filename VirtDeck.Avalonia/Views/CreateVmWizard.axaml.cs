@@ -711,7 +711,7 @@ public partial class CreateVmWizard : Window
 
         Header("Network");
         if (_nics.Count == 0) Item("", "(none)");
-        foreach (var nic in _nics) Item(nic.Model, $"{nic.Type}: {nic.Source}");
+        foreach (var nic in _nics) Item(nic.Model, $"{nic.Type}: {NicEditRow.SourceText(nic.Type, nic.Source, nic.Mode)}");
 
         Header("Storage");
         if (_disks.Count == 0) Item("", "(none)");
@@ -789,7 +789,7 @@ public partial class CreateVmWizard : Window
         foreach (var op in _disks)
             Try($"Attach disk {op.Target}", () => ApplyDiskAdd(op));
         foreach (var nic in _nics)
-            Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic.Type, nic.Source, nic.Model));
+            Try($"Attach NIC ({nic.Source})", () => _virsh.AttachNic(_name, nic));
 
         bool answerDisc = false;
         if (_unattendToWrite is { } unattend)

@@ -645,7 +645,7 @@ public partial class VmEditWindow : Window
         foreach (var n in _nicRemoves)
             Try($"Remove NIC {n.Mac}", () => _virsh.DetachNic(_vmName, n.SourceType, n.Mac));
         foreach (var op in _nicAdds)
-            Try($"Add NIC ({op.Source})", () => _virsh.AttachNic(_vmName, op.Type, op.Source, op.Model));
+            Try($"Add NIC ({op.Source})", () => _virsh.AttachNic(_vmName, op));
 
         // Rename last so the prior commands use the current name.
         if (newName != o.Name) Try("Rename", () => _virsh.RenameVm(_vmName, newName));

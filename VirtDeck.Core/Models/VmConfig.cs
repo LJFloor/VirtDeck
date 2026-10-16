@@ -44,8 +44,9 @@ namespace VirtDeck.Models
     {
         public string Mac { get; set; } = string.Empty;
         public string Model { get; set; } = string.Empty;       // virtio, e1000e
-        public string SourceType { get; set; } = string.Empty;  // bridge | network
-        public string Source { get; set; } = string.Empty;      // br0 | default
+        public string SourceType { get; set; } = string.Empty;  // bridge | network | direct
+        public string Source { get; set; } = string.Empty;      // br0 | default | enp3s0
+        public string Mode { get; set; } = string.Empty;        // macvtap mode, direct only
     }
 
     /// <summary>An installable OS profile from `osinfo-query os`; its short-id feeds virt-install --os-variant.</summary>

@@ -439,6 +439,7 @@ namespace VirtDeck.Services
                         Source = (string?)src?.Attribute("bridge")
                                  ?? (string?)src?.Attribute("network")
                                  ?? (string?)src?.Attribute("dev") ?? string.Empty,
+                        Mode = (string?)src?.Attribute("mode") ?? string.Empty,
                     });
                 }
 
@@ -1120,9 +1121,27 @@ namespace VirtDeck.Services
 
         // ---- Network -------------------------------------------------------
 
-        public void AttachNic(string vm, string type, string source, string model) =>
-            RunArgv("virsh", "attach-interface", RequireName(vm, VmName), "--type", type,
-                    "--source", RequireName(source, "network source"), "--model", model, "--config");
+        public static readonly string[] DirectModes = { "bridge", "vepa", "private", "passthrough" };
+
+        /// <summary>
+        /// Adds a NIC, persistent-only. A direct (macvtap) one goes in as device XML rather than
+        /// `attach-interface --source-mode`: older virsh has no such flag, and without a mode libvirt
+        /// picks vepa, which only works behind a switch that hairpins.
+        /// </summary>
+        public void AttachNic(string vm, NicAddOp nic)
+        {
+            if (nic.Type != "direct")
+            {
+                RunArgv("virsh", "attach-interface", RequireName(vm, VmName), "--type", nic.Type,
+                        "--source", RequireName(nic.Source, "network source"), "--model", nic.Model, "--config");
+                return;
+            }
+            if (!DirectModes.Contains(nic.Mode))
+                throw new ArgumentException($"Unknown direct attachment mode '{nic.Mode}'.");
+            RunDeviceXml("attach-device", vm,
+                $"<interface type='direct'><source dev='{XmlAttr(RequireName(nic.Source, "network source"))}' " +
+                $"mode='{nic.Mode}'/><model type='{XmlAttr(nic.Model)}'/></interface>");
+        }
 
         public void DetachNic(string vm, string type, string mac) =>
             RunArgv("virsh", "detach-interface", RequireName(vm, VmName), "--type", type,
@@ -1297,6 +1316,27 @@ namespace VirtDeck.Services
         public void SetNetworkAutostart(string name, bool on) =>
             RunArgv(on ? new[] { "virsh", "net-autostart", RequireName(name, NetName) }
                       : new[] { "virsh", "net-autostart", RequireName(name, NetName), "--disable" });
+
+        /// <summary>
+        /// Host links a direct (macvtap) adapter can sit on: physical NICs, bonds, VLANs and bridges.
+        /// Skips loopback, ports already enslaved to a bridge or bond, taps, libvirt's and docker's own
+        /// bridges, other guests' links, wifi (an access point drops frames from a second MAC) and
+        /// anything that is not Ethernet.
+        /// </summary>
+        public List<string> ListDirectSources()
+        {
+            try
+            {
+                var o = _ssh.RunCommand(
+                    "for d in /sys/class/net/*; do n=${d##*/}; " +
+                    "case $n in lo|virbr*|vnet*|macvtap*|veth*|docker*|br-????????????) continue;; esac; " +
+                    "[ -e \"$d/master\" ] && continue; [ -e \"$d/tun_flags\" ] && continue; [ -e \"$d/wireless\" ] && continue; " +
+                    "[ \"$(cat \"$d/type\" 2>/dev/null)\" = 1 ] || continue; echo \"$n\"; done");
+                return o.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            }
+            catch { return new(); }
+        }
 
         public List<string> ListBridges()
         {

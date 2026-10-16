@@ -31,6 +31,14 @@ All default to available on SSH error, **except `VirtSparseAvailable`** which de
 - **Page order follows the dependency:** install media sits directly under the name, *above* vCPUs/memory/OS type/firmware, because identifying the media fills the OS type in. The mode defaults to **stream from this PC**. The one thing below firmware is the Windows setup row, for the reason in "Unattended Windows setup" below.
 - **The last page is a summary**, built fresh on every entry (`BuildSummary`) by reading the pages themselves, not the fields `FinishAsync` captures, so Back-and-change is reflected. Its **"Start the VM after creation"** checkbox is on by default and is the only thing that decides whether Finish calls `StartVmAsync`; `VmStarted` reports what happened, and the module opens the console only when it is true, because a defined-but-shut-off VM has no console.
 
+## Network adapters
+
+`AddNicDialog` offers three kinds, shared by the Create VM wizard and the editor. All are persistent-only (`--config`).
+
+- **Bridge** and **Virtual network** go through `virsh attach-interface`, sourced from the sysfs bridge walk and `virsh net-list`.
+- **Direct attachment** is Cockpit's macvtap on a host link (`<interface type='direct'>`). It is attached as device XML, not `attach-interface --source-mode`, because older virsh lacks that flag and libvirt's default mode without it is `vepa`, which needs a hairpinning switch. The dialog defaults to `bridge`. `ListDirectSources` offers Ethernet links that are not bridge or bond ports, taps, guest links, wifi, or libvirt's and docker's own bridges.
+- **Trap:** with macvtap the host itself cannot reach the guest over that adapter, only the rest of the LAN can. A guest the host must talk to needs a bridge.
+
 ## Export VM (`Views/ExportVmDialog.axaml.cs`)
 
 Right-click -> Export VM -> a `.tar` containing `domain.xml` + `disks/`.

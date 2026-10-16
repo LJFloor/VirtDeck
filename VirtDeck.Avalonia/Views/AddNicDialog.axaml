@@ -17,6 +17,7 @@
       <StackPanel Grid.Column="0" Spacing="10" Margin="0,4,12,0">
         <RadioButton Name="BridgeRadio" GroupName="Kind" Content="Bridge" IsChecked="True" />
         <RadioButton Name="NetworkRadio" GroupName="Kind" Content="Virtual network" />
+        <RadioButton Name="DirectRadio" GroupName="Kind" Content="Direct attachment" />
       </StackPanel>
 
       <StackPanel Grid.Column="1" Spacing="4">
@@ -28,6 +29,11 @@
 
         <TextBlock Text="Model:" Margin="0,8,0,0" />
         <ComboBox Name="ModelBox" Width="160" HorizontalAlignment="Left" />
+
+        <StackPanel Name="ModePanel" Spacing="4" IsVisible="False">
+          <TextBlock Text="Mode:" Margin="0,8,0,0" />
+          <ComboBox Name="ModeBox" Width="160" HorizontalAlignment="Left" />
+        </StackPanel>
       </StackPanel>
     </Grid>
   </DockPanel>
