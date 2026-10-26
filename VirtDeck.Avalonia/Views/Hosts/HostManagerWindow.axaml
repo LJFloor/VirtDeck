@@ -107,6 +107,11 @@
                 <TextBox Name="PasswordBox" PasswordChar="•" />
                 <TextBlock Classes="note" TextWrapping="Wrap"
                            Text="Used for the login and for sudo, which is what this host's one password is." />
+                <!-- In a Border so the reason it is unavailable can still be read on hover. -->
+                <Border Name="SetUpKeyButtonHost" HorizontalAlignment="Left" Margin="0,4,0,0">
+                  <Button Name="SetUpKeyButton" Content="Set up SSH key"
+                          ToolTip.Tip="Create an SSH key on this PC if needed, and add it to this host." />
+                </Border>
               </StackPanel>
 
               <!-- A key file can be dropped anywhere on this panel. It is hidden in password mode,

@@ -192,6 +192,7 @@ public partial class ShellView : UserControl
         HostSwitcher.ManageHostsClicked += () => ManageHostsRequested?.Invoke(_profile);
         HostSwitcher.PowerRequested += restart => _ = PowerAsync(restart);
         HostSwitcher.CancelPowerRequested += () => _ = CancelPowerAsync();
+        HostSwitcher.KeySetupRequested += () => _ = SetUpKeyAsync();
         PaintHosts();
 
         foreach (var module in AllModules())
@@ -656,6 +657,87 @@ public partial class ShellView : UserControl
 
         if (ssh != null) ConnectionReplaced?.Invoke(ssh);
         else ManageHostsRequested?.Invoke(_profile);
+    }
+
+    // ---- Setting up an SSH key ------------------------------------------
+
+    /// <summary>
+    /// "Set up SSH key" from the host cell: this PC's default key put on the host over the live
+    /// connection, a login with it tried, and only then the saved host switched to it, with the
+    /// password this connection logged in with kept as its sudo password. <see cref="SshKeySetup"/>
+    /// has the steps; the connect window's button is the way in for a host not connected to.
+    ///
+    /// <para>Refused while the connect window is open. It edits a copy of the saved hosts taken when
+    /// it opened, so its next Save would put this host back on its password, whose saved copy this
+    /// has just deleted. The cell is disabled for the run, which keeps a second click, a host switch
+    /// and Manage hosts out of the way until it is done.</para>
+    ///
+    /// <para>An encrypted key of the user's own is added but not switched to: it cannot be tried
+    /// without its passphrase, and switching to an untested key is what the test is there to stop.
+    /// The live connection keeps its password either way; the next one uses the key.</para>
+    /// </summary>
+    private async Task SetUpKeyAsync()
+    {
+        const string title = "Set up SSH key";
+        if (ShellRegistry.AnyOpen<Hosts.HostManagerWindow>())
+        {
+            await MessageDialog.Info(Owner, title, "Close the connect window first.");
+            return;
+        }
+
+        string host = _ssh.Host, user = _ssh.Username, profileKey = _ssh.ProfileKey;
+        int port = _ssh.Port;
+        string keyPath = SshKeySetup.DefaultKeyPath;
+        bool exists = File.Exists(keyPath);
+        if (!await MessageDialog.Confirm(Owner, title,
+                exists ? $"Add {keyPath} to {user}@{host}?" : $"Create {keyPath} and add it to {user}@{host}?"))
+            return;
+        if (_shutDown) return;
+
+        PaintHosts("Setting up SSH key…");
+        bool encrypted = false;
+        string? failure = null;
+        try
+        {
+            StatusText.Text = exists ? "Reading SSH key…" : "Creating SSH key…";
+            var (publicKey, _) = await Task.Run(SshKeySetup.EnsureDefaultKey);
+            if (_shutDown) return;
+
+            StatusText.Text = "Adding the key…";
+            await SshKeySetup.InstallAsync(_ssh, publicKey);
+            if (_shutDown) return;
+
+            encrypted = await Task.Run(() => SshKeyDiscovery.NeedsPassphrase(keyPath));
+            if (!encrypted)
+            {
+                StatusText.Text = "Testing key login…";
+                await Task.Run(() => SshKeySetup.TestLogin(host, port, user, keyPath));
+                if (_shutDown) return;
+
+                if (SshKeySetup.AdoptKey(profileKey, keyPath))
+                    await Capped(() => { SshKeySetup.SaveSudoSecret(_ssh, keyPath); return true; }, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            failure = ex.Message;
+        }
+        finally
+        {
+            if (!_shutDown)
+            {
+                RefreshProfile();
+                PaintStatus();
+                PaintHosts();
+            }
+        }
+        if (_shutDown) return;
+
+        await MessageDialog.Info(Owner, title,
+            failure
+            ?? (encrypted
+                ? $"Key added. {Path.GetFileName(keyPath)} has a passphrase, so VirtDeck keeps logging in to this host with its password."
+                : $"Done. {SshKeySetup.TerminalCommand(host, port, user)} now logs in with {keyPath}."));
     }
 
     // ---- Switching host -------------------------------------------------

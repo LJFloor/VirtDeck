@@ -73,6 +73,9 @@ public partial class HostSwitcherMenu : UserControl
     /// <summary>The scheduled restart or shutdown should be called off.</summary>
     public event Action? CancelPowerRequested;
 
+    /// <summary>"Set up SSH key" was picked: the caller asks, then does it over the live connection.</summary>
+    public event Action? KeySetupRequested;
+
     /// <summary>
     /// Whether this instance hangs in the shell's status bar (the default) or sits in an ordinary
     /// form. The three things that make a toolbar cell a status bar cell are the popup opening
@@ -121,8 +124,8 @@ public partial class HostSwitcherMenu : UserControl
     /// <summary>
     /// Draws the menu, with <paramref name="current"/> as the label and ticked in the list.
     ///
-    /// Four sections, separated: what this machine is, what to do to it, which host to be on, and
-    /// the one host-list command.
+    /// Five sections, separated: what this machine is, what to do to it, how to log in to it, which
+    /// host to be on, and the one host-list command.
     /// The first is one <b>disabled item used as a fact rather than a command</b>, which is what a
     /// menu has instead of a heading: this is the one cell in the shell that is about the machine
     /// at the far end, so what it is running belongs in it, and it is the thing the cell's own
@@ -192,6 +195,17 @@ public partial class HostSwitcherMenu : UserControl
                 _scheduledFact = Fact(scheduled.Summary());
                 sections.Add([_scheduledFact, cancel]);
             }
+
+            // A shortcut into what the manager owns, and the one this menu allows itself: here it
+            // runs over the live connection with no password typed, which the manager cannot do.
+            // Absent rather than disabled on a host that already uses a key, for the Cancel row's
+            // reason, and because a disabled row's tip is never read.
+            if (!current.UsesKey)
+            {
+                var key = Command("Set up SSH key", () => KeySetupRequested?.Invoke());
+                ToolTip.SetTip(key, "Log in to this host with an SSH key from now on, here and from a terminal.");
+                sections.Add([key]);
+            }
         }
 
         var saved = new List<Control>();
@@ -222,10 +236,11 @@ public partial class HostSwitcherMenu : UserControl
         }
         if (saved.Count != 0) sections.Add(saved);
 
-        // The one command, and it is the only one: adding a host, renaming one, repointing one at
-        // a different key and forgetting one are all things the manager window does, and it is the
-        // window that owns the whole story of each. Offering shortcuts to two of them from here was
-        // two more routes into the same window and a menu that grew a row per host management verb.
+        // The one host-list command: adding a host, renaming one, repointing one at a different key
+        // and forgetting one are all things the manager window does, and it is the window that owns
+        // the whole story of each. Offering shortcuts to two of them from here was two more routes
+        // into the same window and a menu that grew a row per host management verb. Set up SSH key
+        // above is the exception, for the reason given there.
         var manage = Command("Manage hosts", () => ManageHostsClicked?.Invoke());
         ToolTip.SetTip(manage, "Add, name, edit, reorder and remove the saved hosts.");
         sections.Add([manage]);
@@ -268,9 +283,8 @@ public partial class HostSwitcherMenu : UserControl
     /// <summary>
     /// The two power glyphs, and the only colour in this menu: the app's refresh glyph in amber for
     /// restart, the power symbol in red for shut down. Colour rather than the row's own foreground,
-    /// which is what the tick below binds to, because these two are the only rows here that do
-    /// something to the machine rather than to what this window is looking at, and the pair reads
-    /// as a pair at a glance.
+    /// which is what the tick below binds to, because these two are the only rows here that take the
+    /// machine away, and the pair reads as a pair at a glance.
     ///
     /// <para>Drawn in the app's 16x16 stroked house style like every other piece of vector art
     /// here, and resolved from <c>JbIconRestart</c> and <c>JbIconRemove</c> with a literal fallback,

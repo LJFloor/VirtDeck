@@ -51,6 +51,9 @@ public static class ShellRegistry
         };
     }
 
+    /// <summary>Whether a registered window of this type is open, such as a connect window with its own copy of the saved hosts.</summary>
+    public static bool AnyOpen<T>() where T : Window => Open.OfType<T>().Any();
+
     private static IClassicDesktopStyleApplicationLifetime? Lifetime =>
         global::Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
 

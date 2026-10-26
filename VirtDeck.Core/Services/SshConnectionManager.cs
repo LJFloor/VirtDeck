@@ -47,6 +47,12 @@ namespace VirtDeck.Services
 
         public SshClient Client => _client ?? throw new InvalidOperationException("Not connected.");
 
+        /// <summary>
+        /// The sudo password, for <see cref="SshKeySetup.SaveSudoSecret"/> to keep when a password host
+        /// moves to key auth. Internal so the secret never leaves this assembly.
+        /// </summary>
+        internal string SudoPassword => _sudoPassword;
+
         /// <summary>Connects with a password, which is also used for sudo.</summary>
         public void ConnectWithPassword(string host, int port, string username, string password)
         {

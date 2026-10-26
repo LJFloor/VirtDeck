@@ -59,6 +59,9 @@ public partial class HostManagerWindow : Window
     /// </summary>
     private bool _busy;
 
+    /// <summary>What the disabled buttons say while <see cref="_busy"/>, which is not always a connect.</summary>
+    private string _busyWhy = "Connecting.";
+
     /// <summary>
     /// Cancels a secret read whose row is no longer selected: the store blocks, so an answer can
     /// arrive long after the user has clicked elsewhere and must not land in somebody else's boxes.
@@ -128,6 +131,7 @@ public partial class HostManagerWindow : Window
             if (ticked) await LoadKeysAsync(ask: true);
         };
         BrowseKeyButton.Click += async (_, _) => await BrowseForKeyAsync();
+        SetUpKeyButton.Click += async (_, _) => await SetUpKeyAsync();
         KeyCombo.SelectionChanged += (_, _) => WriteThrough();
         RememberCheck.IsCheckedChanged += (_, _) => OnRememberChanged();
         ForgetButton.Click += async (_, _) => await ForgetAsync();
@@ -223,7 +227,7 @@ public partial class HostManagerWindow : Window
         bool busy = _busy;
 
         string? loginWhy =
-            busy ? "Connecting."
+            busy ? _busyWhy
             : _current == null ? "Select a host to connect to it."
             : _current.IsConnected ? "You are already connected to this host."
             : _current.IsBlank ? "Fill this host in first."
@@ -232,11 +236,20 @@ public partial class HostManagerWindow : Window
         LoginButton.IsEnabled = loginWhy == null;
         ToolTip.SetTip(LoginButtonHost, loginWhy);
 
-        string? saveWhy = busy ? "Connecting." : _rows.Count == 0 && _originals.Count == 0
+        string? saveWhy = busy ? _busyWhy : _rows.Count == 0 && _originals.Count == 0
             ? "There is nothing to save yet."
             : null;
         SaveButton.IsEnabled = saveWhy == null;
         ToolTip.SetTip(SaveButtonHost, saveWhy);
+
+        // Login's split: disabled only for what the form cannot fix. A missing host, username or
+        // password is said on the click, with the box focused, as Login does.
+        string? keyWhy =
+            busy ? _busyWhy
+            : _current == null || _current.IsBlank ? "Fill this host in first."
+            : null;
+        SetUpKeyButton.IsEnabled = keyWhy == null;
+        ToolTip.SetTip(SetUpKeyButtonHost, keyWhy);
 
         CloseButton.IsEnabled = !busy;
         HostTools.IsEnabled = FormScroll.IsEnabled && !busy;
@@ -926,6 +939,118 @@ public partial class HostManagerWindow : Window
                 : SudoPasswordBox;
         box.Focus();
         box.SelectAll();
+    }
+
+    // ---- Setting up a key ------------------------------------------------
+
+    /// <summary>
+    /// "Set up SSH key": puts this PC's default key on the selected host with the password typed
+    /// here, logs in with the key to prove it took, and then switches the row to key auth with that
+    /// password as its sudo password. <see cref="SshKeySetup"/> has the steps.
+    ///
+    /// The row is captured before the first await and written through its model afterwards, never
+    /// through the form: the list and the form stay live while this runs, so whatever is on screen
+    /// by the end may be another host. Nothing is committed, for the reason nothing else here is:
+    /// the window edits a working copy, and Save or Login is what keeps it. The confirmation naming
+    /// the file is the consent to touch it; only its existence is looked at before that.
+    /// </summary>
+    private async Task SetUpKeyAsync()
+    {
+        await SettleAsync();
+        Apply();
+        if (_current is not { } row) return;
+
+        var p = row.Profile;
+        string host = p.Host, user = p.Username, address = p.Address, password = row.LoginPassword;
+        int port = p.Port;
+
+        (string Text, TextBox Box)? problem =
+            host.Length == 0 ? ("Please fill in the host.", HostBox)
+            : user.Length == 0 ? ("Please fill in the username.", UserBox)
+            : port is < 1 or > 65535 ? ("Please use a port between 1 and 65535.", PortBox)
+            : password.Length == 0 ? ("Please fill in the password.", PasswordBox)
+            : null;
+        if (problem is { } shown)
+        {
+            SetStatus(shown.Text, isError: true);
+            shown.Box.Focus();
+            return;
+        }
+
+        string keyPath = SshKeySetup.DefaultKeyPath;
+        bool exists = File.Exists(keyPath);
+        if (!await MessageDialog.Confirm(this, "Set up SSH key",
+                exists ? $"Add {keyPath} to {user}@{host}?" : $"Create {keyPath} and add it to {user}@{host}?"))
+            return;
+
+        _busyWhy = "Setting up SSH key.";
+        PaintButtons(setBusy: true);
+        bool encrypted;
+        // Said in front of a failure that would otherwise read as a bare library message.
+        const string connectFailed = "Connection failed: ";
+        string failed = exists ? "" : "The key could not be created: ";
+        try
+        {
+            SetStatus(exists ? "Reading SSH key…" : "Creating SSH key…", isError: false);
+            var (publicKey, _) = await Task.Run(SshKeySetup.EnsureDefaultKey);
+
+            failed = connectFailed;
+            SetStatus($"Connecting to {address}…", isError: false);
+            using (var ssh = new SshConnectionManager())
+            {
+                await Task.Run(() => ssh.ConnectWithPassword(host, port, user, password));
+                failed = "";
+                SetStatus("Adding the key…", isError: false);
+                await SshKeySetup.InstallAsync(ssh, publicKey);
+            }
+
+            // An encrypted key of the user's own cannot be tried without its passphrase, so the
+            // Login after this is its test.
+            encrypted = await Task.Run(() => SshKeyDiscovery.NeedsPassphrase(keyPath));
+            if (!encrypted)
+            {
+                SetStatus("Testing key login…", isError: false);
+                await Task.Run(() => SshKeySetup.TestLogin(host, port, user, keyPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus(failed + ex.Message, isError: true);
+            // A refused password is the usual reason, and the box to retype it in is selected,
+            // as after a failed Login.
+            if (failed == connectFailed && _current == row) SelectLikelyStaleSecret();
+            return;
+        }
+        finally
+        {
+            _busyWhy = "Connecting.";
+            PaintButtons(setBusy: false);
+        }
+
+        // Re-pointed at another account while this ran: the key went to the one captured above,
+        // and switching the row would claim it for the one it names now.
+        if (p.Host != host || p.Port != port || p.Username != user)
+        {
+            SetStatus($"Key added to {user}@{host}.", isError: false);
+            return;
+        }
+
+        p.AuthMode = HostProfile.KeyAuthMode;
+        p.PrivateKeyPath = keyPath;
+        row.SudoPassword = password;
+        row.KeyPassphrase = "";
+        row.Refresh();
+        // Load is the form's one fill path, and it fills under _loading, so ticking SSH key here is
+        // not taken for the user asking for the ~/.ssh scan.
+        if (_current == row) Load();
+        PaintButtons();
+
+        if (encrypted)
+        {
+            SetStatus("Key added. Enter its passphrase, then Login.", isError: false);
+            if (_current == row) PassphraseBox.Focus();
+        }
+        else SetStatus("Key login works. Save to keep it.", isError: false);
     }
 
     // ---- Closing ---------------------------------------------------------
