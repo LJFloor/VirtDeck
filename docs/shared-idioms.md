@@ -43,5 +43,5 @@ A filter box goes only where lists run long: VMs, containers, images, volumes, u
 
 **Icons are decided once per listing.** `FileIcons.Available(size)` decides whether a whole listing gets icons or the fallback badges, so the two never appear mixed; icons are cached by (type, size), **shared by every row so no caller may dispose one**, and warmed inside the same `Task.Run` as the directory fetch so building rows is pure cache hits and an SVG theme never rasterises on the UI thread.
 
-**Reflection into a private is best-effort and fails soft** (`X11KeyboardGrab` digging out Avalonia's display connection, `SshPtySession` reaching `ShellStream._channel` to resize). Never throws, latches its failure so a drag does not retry per frame, and the fallback is a **stated outcome** rather than an improvisation.
+**Reflection into a private is best-effort and fails soft** (`X11KeyboardGrab` digging out Avalonia's display connection). Never throws, latches its failure so a drag does not retry per frame, and the fallback is a **stated outcome** rather than an improvisation.
 

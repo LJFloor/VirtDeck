@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Common;
@@ -402,17 +401,10 @@ namespace VirtDeck.Services
 
         // ---- Resize ---------------------------------------------------------
 
-        // SSH.NET 2024.2.0 exposes no way to resize a ShellStream after it is created: the window
-        // change request lives on the channel, and ShellStream keeps its channel private. So the
-        // field is reached by reflection, which this app already does once (X11KeyboardGrab digs
-        // Avalonia's own display connection out of Window.PlatformImpl) and under the same rule: it
-        // is best effort, it is not allowed to throw, and the fallback is a stated outcome rather
-        // than an improvisation. Here that outcome is a terminal stuck at the size it opened with,
-        // which is a full-screen program drawing in a corner of a resized window, not a broken
-        // session.
-        private static bool _resizeChecked;
-        private static FieldInfo? _channelField;
-        private static MethodInfo? _windowChange;
+        // A resize happens on every drag frame, so it never throws: the stream throws once it is
+        // closed, and a failure is latched rather than retried per frame. What is left is a terminal
+        // stuck at its last size, which is a full-screen program drawing in a corner of a resized
+        // window, not a broken session.
         private bool _resizeDead;
 
         /// <summary>Tells the far end the window changed, so the shell and anything full-screen redraw.</summary>
@@ -421,30 +413,10 @@ namespace VirtDeck.Services
             if (_closed || _resizeDead || cols <= 0 || rows <= 0) return;
             try
             {
-                if (!_resizeChecked)
-                {
-                    _resizeChecked = true;
-                    _channelField = typeof(ShellStream).GetField(
-                        "_channel", BindingFlags.Instance | BindingFlags.NonPublic);
-                    _windowChange = _channelField?.FieldType.GetMethod("SendWindowChangeRequest");
-                    if (_channelField is null || _windowChange is null)
-                        SpiceLog.Log("[pty] no window-change request on this SSH.NET; size is fixed");
-                }
-
-                if (_channelField is null || _windowChange is null)
-                {
-                    _resizeDead = true;
-                    return;
-                }
-
-                var channel = _channelField.GetValue(_stream);
-                if (channel is null) return;
-
-                _windowChange.Invoke(channel, new object[] { (uint)cols, (uint)rows, 0u, 0u });
+                _stream.ChangeWindowSize((uint)cols, (uint)rows, 0, 0);
             }
             catch (Exception ex)
             {
-                // Once it has failed it will keep failing, and a resize happens on every drag frame.
                 _resizeDead = true;
                 SpiceLog.Log($"[pty] resize unavailable: {ex.Message}");
             }
