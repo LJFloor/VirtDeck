@@ -22,7 +22,7 @@ It runs on **Windows and Linux**.
 - **Network**: interfaces, bridges, bonds, VLANs and the firewall, with automatic rollback if a
   change cuts you off
 - **Software updates**: apt, dnf and pacman
-- **Users, Samba shares and printers**
+- **Users and printers**
 - **File explorer and terminal**, with drag and drop between your PC and the server
 - **Remote control**: the server's own desktop, inline
 

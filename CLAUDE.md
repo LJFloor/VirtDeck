@@ -82,7 +82,6 @@ in this index.
 | [storage-disk-details.md](docs/storage-disk-details.md) | One disk in two pages: what it is and what is stacked on it, the full SMART reading, and mounting, unmounting and unlocking what is on it. |
 | [storage-zfs.md](docs/storage-zfs.md) | The host's pools: listing, status, topology, create, scrub, import, export and destroy. |
 | [storage-zfs-datasets.md](docs/storage-zfs-datasets.md) | What is inside a pool, as a tree under it: filesystems and volumes, their properties, and create, edit, rename and destroy. |
-| [samba.md](docs/samba.md) | Every Samba share on the host, read and written back through smb.conf and its includes byte for byte: the Synology-style editor, permissions written onto the filesystem as POSIX ACLs and why a default ACL alone is not enough, and the Samba users that are not the host's logins. |
 | [network.md](docs/network.md) | The host's interfaces: read with `ip` on every host and attributed to whoever configured them, the event and traffic tails, and the details window. |
 | [network-firewall.md](docs/network-firewall.md) | firewalld and ufw behind one interface, how each is read and changed without re-rendering a rule, and the lockout guard. |
 | [network-editing.md](docs/network-editing.md) | Changing links through NetworkManager or ifupdown: only what changed, argv without `--`, the checkpoint or timer that rolls a change back unless a fresh connection gets through, and bridges, bonds and VLANs. |

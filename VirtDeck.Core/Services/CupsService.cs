@@ -53,7 +53,7 @@ namespace VirtDeck.Services
 
         // ---- Watching --------------------------------------------------------
 
-        // Un-elevated, unlike the samba and cron watches. Those watch root-only trees; /etc/cups and
+        // Un-elevated, unlike the cron watch, which watches root-only trees; /etc/cups and
         // /etc/cups/ppd are 0755 root:lp, so the watch's `ls` answers an ordinary account, and
         // putting a two-second loop through sudo for a directory anybody can read would contradict
         // this service's own rule. Only printers.conf itself is 0600, and nothing here reads it.
@@ -77,7 +77,7 @@ namespace VirtDeck.Services
         /// Watches the directory CUPS keeps its queues in.
         ///
         /// <para>The <b>directories</b> rather than printers.conf alone, for the reason the cron
-        /// and samba watches give: cupsd writes that file by renaming a new one over it, so a watch
+        /// watch gives: cupsd writes that file by renaming a new one over it, so a watch
         /// on the name would follow an inode nothing writes to again. <c>ppd</c> is watched beside
         /// it because adding a queue puts a file there and nowhere else.</para>
         /// </summary>
@@ -87,7 +87,7 @@ namespace VirtDeck.Services
 
         // ---- Reading -------------------------------------------------------
 
-        // One round trip for the lot, in the shape SambaService.LoadScript uses: a tag in field 0,
+        // One round trip for the lot, in the tagged-record shape of "Shared idioms": a tag in field 0,
         // real tab characters, every best-effort half fenced with 2>/dev/null so it cannot take the
         // exit status with it, the unbounded field last, and a closing `exit 0`.
         //
@@ -1209,9 +1209,9 @@ namespace VirtDeck.Services
         /// <summary>
         /// Strips the transfer primitive's framing off a message so the tool's own words lead.
         ///
-        /// <para>Public, unlike the copies in <see cref="SambaService"/> and
-        /// <see cref="SambaUserService"/>, because the printing module's dialogs report failures
-        /// too and a third copy of four lines is the thing that drifts.</para>
+        /// <para>Public, unlike the private copies in the other services, because the printing
+        /// module's dialogs report failures too and one more copy of four lines is the thing that
+        /// drifts.</para>
         /// </summary>
         public static string Reason(string message)
         {

@@ -32,7 +32,7 @@
          outside the TabControl because what it reports is about the host rather than about a
          table: a scheduler that is down makes the Jobs and Server tabs pointless too.
 
-         No action button, unlike the Samba strip's: starting cups.service belongs in the Services
+         No action button: starting cups.service belongs in the Services
          module, where every other unit on the host is started, and doing it from two places would
          be two places to keep honest. -->
     <Border DockPanel.Dock="Top" Name="NoticeStrip" IsVisible="False"
@@ -41,7 +41,7 @@
     </Border>
 
     <!-- No Theme, so this picks up the implicit top-placed JetBrains strip, as the services,
-         accounts, cron and samba modules do.
+         accounts and cron modules do.
 
          Three tabs because they are three kinds of thing: a queue is a destination, a job is
          something passing through one, and the server settings are about cupsd itself. -->
@@ -55,7 +55,7 @@
               <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6">
                 <!-- A watch on /etc/cups and a Refresh button, and no poll: nothing in CUPS
                      announces that a queue changed. See the refresh policy in "Shared idioms";
-                     this is the cron and samba shape. The jobs tab is the one that polls. -->
+                     this is the cron module's shape. The jobs tab is the one that polls. -->
                 <Border Background="Transparent" ToolTip.Tip="{Binding #PrinterRefreshButton.Tag}">
                   <Button Name="PrinterRefreshButton" Theme="{StaticResource JbIconButton}">
                     <Path Data="{StaticResource IconRefresh}" Width="16" Height="16"
@@ -63,7 +63,7 @@
                   </Button>
                 </Border>
                 <!-- Accented because on this page it is the one command that brings something into
-                     being, which is the rule the samba, accounts and storage toolbars follow. -->
+                     being, which is the rule the accounts and storage toolbars follow. -->
                 <Border Background="Transparent" ToolTip.Tip="{Binding #AddPrinterButton.Tag}">
                   <Button Name="AddPrinterButton" Content="Add printer" Classes="accent" />
                 </Border>
@@ -124,7 +124,7 @@
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:PrinterRow">
                   <StackPanel Classes="cells" Orientation="Horizontal" Opacity="{Binding RowOpacity}">
-                    <!-- The same 9px state dot the VM, container, account, cron and samba lists
+                    <!-- The same 9px state dot the VM, container, account and cron lists
                          draw. Here it carries the sentence a one-word State cell cannot: why a
                          stopped queue stopped, in the backend's own words. -->
                     <DockPanel Width="{StaticResource ColPrnName}" ToolTip.Tip="{Binding StateHint}">

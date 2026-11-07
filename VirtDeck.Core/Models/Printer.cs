@@ -134,7 +134,7 @@ namespace VirtDeck.Models
     /// underscore-prefixed pseudo-settings (<c>_share_printers</c>) that cupsctl synthesises out of
     /// several cupsd.conf directives, and the real directive names (<c>WebInterface</c>,
     /// <c>ErrorPolicy</c>). Nothing here rewrites cupsd.conf itself, which is what keeps this page
-    /// off the byte-exact round trip that Samba and cron need.</para>
+    /// off the byte-exact round trip that cron needs.</para>
     /// </summary>
     /// <param name="Key">The key as cupsctl names it, which is also how it is written back.</param>
     /// <param name="Value">The host's own spelling of the value.</param>

@@ -13,13 +13,10 @@ would be a fourth tab empty on every host this app is pointed at.
   the way a stopped dockerd keeps Containers, because this page is where the state of the daemon is
   explained and taking the page away would hide the explanation along with the problem. But
   *starting* a unit belongs in Services, where every other unit on the host is started, so the
-  notice strip names `cups.service` and sends the user there rather than growing a button. That is
-  the one difference from the Samba notice strip, which does carry a Start.
+  notice strip names `cups.service` and sends the user there rather than growing a button.
 - **Reads are un-elevated and writes are not.** `lpstat`, `lpoptions`, `lpinfo -m` and `cupsctl`
   all answer an ordinary account, so looking at this page never raises a sudo prompt; `lpadmin`,
-  `cupsenable` and the rest go through `RunSudoCommand`. That is the split `PackageService` states
-  and the deliberate opposite of `SambaService`, which is elevated throughout because `/etc/samba`
-  is root-owned and CUPS's equivalent is not something this module reads.
+  `cupsenable` and the rest go through `RunSudoCommand`. That is the split `PackageService` states.
 - **`lpinfo -v` is the one read on the far side of that line, and CUPS decides that, not us.**
   Listing devices is `CUPS-Get-Devices`, which the stock `cupsd.conf` puts in the same `Limit` block
   as `CUPS-Add-Modify-Printer` under "all administration operations require an administrator to
@@ -65,7 +62,7 @@ this repo carries file bodies, and it puts the prose parsing in a pure function 
 `cupsd --version` all answer with a usage error; `cups-config` lives in a `-dev` package that is
 normally absent; the number exists only inside the cupsd binary and in cupsd's HTTP `Server:`
 header. So `PrinterCatalog` has **no `ToolVersion`**, which is a deliberate departure from the
-`Installed => ToolVersion.Length > 0` convention `SambaCatalog` and `UnitCatalog` share.
+convention the other catalogs follow (`UnitCatalog.Available => ToolVersion.Length > 0`).
 `Installed` comes off the `t` records instead, and the status slot says what it can stand behind:
 `lpstat not found`, `cups not running`, or `cups, 3 printers`.
 
@@ -74,12 +71,12 @@ This is written down because it looks like an oversight and is not.
 ## A watch and a poll
 
 **What the queues are is a file, so it gets `HostFileWatcher` over `/etc/cups` and `/etc/cups/ppd`
-and a Refresh button and no timer**, which is the cron and samba shape. Directories rather than
+and a Refresh button and no timer**, which is the cron module's shape. Directories rather than
 `printers.conf` alone, because cupsd saves by renaming a new file over the old one, so a watch on
 the name would follow an inode nothing writes to again, and because a new PPD appearing is a change
 worth noticing.
 
-**This watch is un-elevated, unlike the other two.** Cron and Samba watch root-only trees;
+**This watch is un-elevated, unlike the cron one.** Cron watches root-only trees;
 `/etc/cups` and `/etc/cups/ppd` are `0755 root:lp`, so the watch's `ls` answers an ordinary account,
 and putting a two-second loop through sudo for a directory anybody can read would contradict this
 module's own rule. Only `printers.conf` itself is `0600`, and nothing here reads it: everything the
@@ -317,8 +314,8 @@ because `cupsctl`'s vocabulary is fixed and small and six named checkboxes are l
 row-model hierarchy for them.
 
 **Nothing here rewrites cupsd.conf.** `cupsctl` owns that file and restarts the scheduler itself, so
-a byte-exact round trip over it, of the kind Samba and cron need, would be re-implementing the tool
-that ships beside it. That is the reason this module has no equivalent of `SambaConfig`.
+a byte-exact round trip over it, of the kind cron needs, would be re-implementing the tool
+that ships beside it. That is the reason this module has no config parser of its own.
 
 `cupsctl` spells its own two kinds of setting differently and both are passed straight through: the
 synthesised underscore pseudo-settings (`_share_printers`, `_remote_admin`, `_remote_any`,
