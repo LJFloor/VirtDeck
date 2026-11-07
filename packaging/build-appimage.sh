@@ -10,8 +10,8 @@
 # PulseAudio/PipeWire daemon; a sandbox (Flatpak, Snap) has to be punched open for both, while an
 # AppImage is just a mounted directory with the same access as any other program the user runs.
 #
-# Only the .NET runtime is bundled (--self-contained). libusb/usbredirhost/libpulse come from the
-# distro on purpose: they are the parts that must match the host's kernel drivers and sound daemon,
+# The app is one NativeAOT executable plus Skia's two libraries beside it; nothing else is bundled.
+# libusb/usbredirhost/libpulse come from the distro on purpose: they are the parts that must match the host's kernel drivers and sound daemon,
 # and every one of them degrades gracefully when missing (see packaging/README.md).
 set -euo pipefail
 
@@ -27,14 +27,15 @@ OUTPUT="$REPO_ROOT/publish/VirtDeck-$VERSION-$ARCH.AppImage"
 APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage"
 APPIMAGETOOL="${APPIMAGETOOL:-$BUILD_DIR/appimagetool-$ARCH.AppImage}"
 
-echo "=== [1/5] Publishing VirtDeck.Avalonia ($RID, self-contained, $VERSION) ==="
+echo "=== [1/5] Publishing VirtDeck.Avalonia ($RID, NativeAOT, $VERSION) ==="
 rm -rf "$APPDIR"
 dotnet publish "$REPO_ROOT/VirtDeck.Avalonia/VirtDeck.Avalonia.csproj" \
-    -c Release -r "$RID" --self-contained true \
+    -c Release -r "$RID" -p:PublishAot=true \
     -p:Version="$VERSION" \
     -o "$APPDIR/usr/bin"
-# Debug symbols are a third of the payload and nothing reads them from a release AppImage.
-find "$APPDIR/usr/bin" -name '*.pdb' -delete
+# Debug symbols are most of the payload and nothing reads them from a release AppImage. NativeAOT
+# writes the executable's own as virtdeck.dbg, the managed libraries' as .pdb.
+find "$APPDIR/usr/bin" \( -name '*.pdb' -o -name '*.dbg' \) -delete
 
 echo "=== [2/5] Laying out the AppDir ==="
 install -Dm644 "$REPO_ROOT/packaging/virtdeck.desktop" "$APPDIR/usr/share/applications/virtdeck.desktop"
@@ -68,8 +69,8 @@ tar -czf "$APPDIR/usr/share/virtdeck/SpiceClient-src.tar.gz" \
     -C "$REPO_ROOT" --exclude=bin --exclude=obj SpiceClient
 
 echo "=== [3/5] Writing AppRun ==="
-# Deliberately minimal: no LD_LIBRARY_PATH. The self-contained publish resolves its own .NET
-# libraries relative to the apphost, and libusb/libpulse must come from the host; prepending a
+# Deliberately minimal: no LD_LIBRARY_PATH. The executable finds Skia's libraries beside itself,
+# and libusb/libpulse must come from the host; prepending a
 # bundled library path is how AppImages end up with a libusb that can't see the host's devices.
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/sh

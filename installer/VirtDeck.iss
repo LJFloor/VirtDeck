@@ -4,14 +4,14 @@
 ;
 ; Build steps (run from the repo root):
 ;   1) Stage the native x64 DLLs into native\win-x64\  (see native\win-x64\VERSIONS.txt)
-;   2) dotnet publish VirtDeck.Avalonia\VirtDeck.Avalonia.csproj -c Release -r win-x64 --self-contained true -o publish\win-x64
+;   2) dotnet publish VirtDeck.Avalonia\VirtDeck.Avalonia.csproj -c Release -r win-x64 -p:PublishAot=true -o publish\win-x64
 ;   2b) Zip the SpiceClient source to publish\SpiceClient-src.zip (LGPL corresponding source)
 ;   3) Place UsbDk_1.0.22_x64.msi into installer\redist\
 ;   4) iscc installer\VirtDeck.iss
 ;
 ; publish.bat performs steps 2, 2b and 4 automatically.
 ;
-; The app is published self-contained, so the .NET runtime is bundled, no runtime check needed.
+; The app is published as NativeAOT, so there is no .NET runtime to check for.
 
 #define AppName "VirtDeck"
 #define AppPublisher "Leendert-Jan Floor"

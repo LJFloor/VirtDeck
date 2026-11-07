@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using VirtDeck.Services;
 
 namespace VirtDeck.Avalonia.Views;
@@ -340,12 +341,13 @@ public partial class HostSwitcherMenu : UserControl
             Stretch = Stretch.Uniform,
             StrokeThickness = 1.6,
         };
-        tick[!global::Avalonia.Controls.Shapes.Shape.StrokeProperty] = new Binding("Foreground")
+        // Bound to the row once the tick is in its tree, rather than through a RelativeSource
+        // binding, which resolves the property by name and is unavailable in a NativeAOT build.
+        tick.AttachedToVisualTree += (_, _) =>
         {
-            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor)
-            {
-                AncestorType = typeof(MenuItem),
-            },
+            if (tick.FindAncestorOfType<MenuItem>() is { } row)
+                tick.Bind(global::Avalonia.Controls.Shapes.Shape.StrokeProperty,
+                          row.GetObservable(TemplatedControl.ForegroundProperty));
         };
         return tick;
     }

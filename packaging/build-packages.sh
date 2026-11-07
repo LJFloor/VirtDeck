@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Linux .deb and .rpm, self-contained like the AppImage.
+# Build the Linux .deb and .rpm, NativeAOT like the AppImage.
 #
 #   packaging/build-packages.sh [version]
 #
@@ -22,13 +22,13 @@ NFPM_SHA256="0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
 NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
 NFPM="${NFPM:-$BUILD_DIR/nfpm-$NFPM_VERSION/nfpm}"
 
-echo "=== [1/3] Publishing VirtDeck.Avalonia ($RID, self-contained, $VERSION) ==="
+echo "=== [1/3] Publishing VirtDeck.Avalonia ($RID, NativeAOT, $VERSION) ==="
 rm -rf "$PKGROOT"
 dotnet publish "$REPO_ROOT/VirtDeck.Avalonia/VirtDeck.Avalonia.csproj" \
-    -c Release -r "$RID" --self-contained true \
+    -c Release -r "$RID" -p:PublishAot=true \
     -p:Version="$VERSION" \
     -o "$PKGROOT/usr/lib/virtdeck"
-find "$PKGROOT/usr/lib/virtdeck" -name '*.pdb' -delete
+find "$PKGROOT/usr/lib/virtdeck" \( -name '*.pdb' -o -name '*.dbg' \) -delete
 
 # LGPL corresponding source for SpiceClient, as in the AppImage and the Windows installer.
 tar -czf "$PKGROOT/SpiceClient-src.tar.gz" \

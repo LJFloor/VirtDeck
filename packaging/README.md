@@ -6,9 +6,11 @@
 packaging/build-appimage.sh [version]     # -> publish/VirtDeck-<version>-x86_64.AppImage
 ```
 
-Needs `dotnet` and `curl` (it downloads `appimagetool` into `publish/appimage/` on first run;
-set `APPIMAGETOOL=/path/to/appimagetool` to use your own). The AppImage bundles the .NET runtime
-and nothing else; see *Runtime dependencies* below for why.
+Needs `dotnet`, `curl` and clang or gcc to link the NativeAOT build (it downloads `appimagetool`
+into `publish/appimage/` on first run; set `APPIMAGETOOL=/path/to/appimagetool` to use your own).
+The AppImage holds one native executable and Skia's two libraries and nothing else; see *Runtime
+dependencies* below for why. **The glibc it needs is the build machine's**, which is why CI links
+it on Ubuntu 22.04; see "NativeAOT" in `docs/build-and-packaging.md`.
 
 AppImage is the primary Linux artifact because it keeps the app on the **host's** libusb and
 libpulse: USB redirection opens `/dev/bus/usb/*` directly and audio goes to the user's running

@@ -21,23 +21,8 @@ namespace VirtDeck.Unattend
         /// <summary>Bumped only when a change cannot be expressed as added or ignored properties.</summary>
         public const int CurrentVersion = 1;
 
-        /// <summary>
-        /// Enums are written by name, unlike <c>AppSettings</c>, which writes them numerically because a
-        /// settings file that fails to parse must never stop the app launching. The trade is reversed
-        /// here: a preset is user-chosen, so a failure is reportable in a dialog, and it is a file
-        /// somebody may open and edit, where a bare number would be unreadable and would silently change
-        /// meaning if an enum member were ever inserted.
-        /// </summary>
-        internal static readonly JsonSerializerOptions Json = new()
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            PropertyNameCaseInsensitive = true,
-            Converters = { new JsonStringEnumConverter() },
-        };
-
         public static byte[] Serialize(UnattendConfig config) =>
-            JsonSerializer.SerializeToUtf8Bytes(config, Json);
+            JsonSerializer.SerializeToUtf8Bytes(config, UnattendPresetJson.Default.UnattendConfig);
 
         /// <exception cref="InvalidDataException">Not a preset, or one this build cannot read.</exception>
         /// <exception cref="JsonException">Malformed JSON.</exception>
@@ -66,7 +51,7 @@ namespace VirtDeck.Unattend
                     "was not opened.");
             }
 
-            return JsonSerializer.Deserialize<UnattendConfig>(json, Json)
+            return JsonSerializer.Deserialize(json, UnattendPresetJson.Default.UnattendConfig)
                    ?? throw new InvalidDataException("The preset is empty.");
         }
 
@@ -86,4 +71,21 @@ namespace VirtDeck.Unattend
             return false;
         }
     }
+
+    /// <summary>
+    /// The preset serialiser, generated at compile time so it survives a NativeAOT build, which
+    /// turns reflection-based serialisation off.
+    ///
+    /// <para>Enums are written by name, unlike <c>AppSettings</c>, which writes them numerically because a
+    /// settings file that fails to parse must never stop the app launching. The trade is reversed
+    /// here: a preset is user-chosen, so a failure is reportable in a dialog, and it is a file
+    /// somebody may open and edit, where a bare number would be unreadable and would silently change
+    /// meaning if an enum member were ever inserted.</para>
+    /// </summary>
+    [JsonSourceGenerationOptions(WriteIndented = true,
+                                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                                 PropertyNameCaseInsensitive = true,
+                                 UseStringEnumConverter = true)]
+    [JsonSerializable(typeof(UnattendConfig))]
+    internal sealed partial class UnattendPresetJson : JsonSerializerContext;
 }

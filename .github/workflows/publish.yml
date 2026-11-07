@@ -42,10 +42,11 @@ jobs:
       - name: Restore
         run: dotnet restore VirtDeck.sln
 
-      - name: Publish (self-contained win-x64)
+      # NativeAOT links with the MSVC tools windows-latest already carries.
+      - name: Publish (NativeAOT win-x64)
         run: >
           dotnet publish VirtDeck.Avalonia/VirtDeck.Avalonia.csproj
-          -c Release -r win-x64 --self-contained true
+          -c Release -r win-x64 -p:PublishAot=true
           -p:Version=${{ steps.ver.outputs.version }}
           -o publish/win-x64
 
@@ -69,7 +70,9 @@ jobs:
           path: installer/output/VirtDeckSetup-${{ steps.ver.outputs.version }}.exe
 
   linux:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: a NativeAOT binary needs the glibc it was linked against, and 22.04's 2.35
+    # keeps Debian 12 and Ubuntu 22.04 working. See "NativeAOT" in docs/build-and-packaging.md.
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -79,6 +82,9 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Install the NativeAOT linker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
 
       - name: Derive version
         id: ver

@@ -5,6 +5,7 @@ UsbDk kernel driver (required for client-side USB redirection).
 
 ## Prerequisites
 - [Inno Setup 6](https://jrsoftware.org/isdl.php) (`iscc` on PATH)
+- The Visual Studio "Desktop development with C++" workload, which links the NativeAOT build
 - The native x64 DLLs staged in `..\native\win-x64\` (see that folder's `VERSIONS.txt`)
 - `redist\UsbDk_1.0.22_x64.msi` (see `redist\README.txt`)
 - (optional) a code-signing cert for the produced setup EXE
@@ -17,8 +18,8 @@ publish.bat
 That runs the three steps by hand below, in order:
 
 ```cmd
-:: 1. Publish the app (self-contained, x64) -> publish\win-x64\virtdeck.exe
-dotnet publish VirtDeck.Avalonia\VirtDeck.Avalonia.csproj -c Release -r win-x64 --self-contained true -o publish\win-x64
+:: 1. Publish the app (NativeAOT, x64) -> publish\win-x64\virtdeck.exe
+dotnet publish VirtDeck.Avalonia\VirtDeck.Avalonia.csproj -c Release -r win-x64 -p:PublishAot=true -o publish\win-x64
 
 :: 2. Zip the SpiceClient source to publish\SpiceClient-src.zip
 ::    (LGPL corresponding source, shipped beside the binary; ISCC fails without it)
@@ -35,8 +36,8 @@ failing obscurely). `dumpbin /dependents publish\win-x64\libusbredirhost-1.dll` 
 still needs.
 
 ## Notes
-- The app is published **self-contained** (`--self-contained true`), so the .NET 10 runtime is
-  bundled and the installer has no runtime prerequisite to check.
+- The app is published as **NativeAOT** (`-p:PublishAot=true`), so there is no .NET runtime to
+  bundle or to check for. See "NativeAOT" in `..\docs\build-and-packaging.md`.
 - The installer requires admin (it installs a kernel driver) and is x64-only.
 - On uninstall, UsbDk is intentionally left installed; it is a shared machine-wide driver that
   other SPICE clients (virt-viewer/remote-viewer) may rely on.

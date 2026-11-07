@@ -116,6 +116,11 @@ namespace VirtDeck.Unattend
         {
             internal Tables()
             {
+                // The generator loads its tables through Newtonsoft.Json, which builds every
+                // immutable collection by reflection. NativeAOT shares one compiled body across
+                // reference types, but a value type needs its own, and nothing else in the program
+                // would make it compile this one. See "NativeAOT" in docs/build-and-packaging.md.
+                _ = ImmutableSortedSet.CreateRange(Array.Empty<Pass>());
                 Generator = new UnattendGenerator();
 
                 ImageLanguages = Project(Generator.ImageLanguages, x => x.DisplayName);

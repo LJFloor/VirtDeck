@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -134,6 +135,8 @@ public sealed class X11KeyboardGrab : IKeyboardGrab
     /// duck-typed rather than keyed on field names so an Avalonia refactor costs us the grab
     /// (console still fully usable) instead of breaking the build.
     /// </summary>
+    [UnconditionalSuppressMessage("Trimming", "IL2075",
+        Justification = "Avalonia.X11 is a TrimmerRootAssembly in the csproj, so every field and property searched here survives trimming and NativeAOT.")]
     private static IntPtr ResolveDisplay(Window window)
     {
         object? impl = window.PlatformImpl;

@@ -4,7 +4,8 @@ rem ===========================================================================
 rem  publish.bat - build VirtDeck and produce the Windows installer.
 rem
 rem  Steps:
-rem    1) dotnet publish (self-contained x64 -> publish\win-x64)
+rem    1) dotnet publish (NativeAOT x64 -> publish\win-x64); linking needs the Visual Studio
+rem       "Desktop development with C++" workload
 rem    2) compile installer\VirtDeck.iss with Inno Setup (ISCC)
 rem       -> installer\output\VirtDeckSetup-<ver>.exe
 rem
@@ -22,11 +23,11 @@ set "ISS=installer\VirtDeck.iss"
 set "SRC_ZIP=publish\SpiceClient-src.zip"
 
 echo.
-echo === [1/3] Publishing %PROJECT% (%CONFIG%, %RID%, self-contained) ===
-dotnet publish "%PROJECT%" -c %CONFIG% -r %RID% --self-contained true -o "%PUBLISH_DIR%"
+echo === [1/3] Publishing %PROJECT% (%CONFIG%, %RID%, NativeAOT) ===
+dotnet publish "%PROJECT%" -c %CONFIG% -r %RID% -p:PublishAot=true -o "%PUBLISH_DIR%"
 if errorlevel 1 (
     echo.
-    echo ERROR: dotnet publish failed.
+    echo ERROR: dotnet publish failed. NativeAOT needs the Visual Studio C++ build tools.
     goto :fail
 )
 

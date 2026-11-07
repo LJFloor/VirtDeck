@@ -7,6 +7,8 @@
     <!-- Namespaces stay VirtDeck.* so both the WinForms and Avalonia front-ends
          reference this without touching a single using directive. -->
     <RootNamespace>VirtDeck</RootNamespace>
+    <!-- The trim and AOT analyzers on every build, so the app stays publishable as NativeAOT. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

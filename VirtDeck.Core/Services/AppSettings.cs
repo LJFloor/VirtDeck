@@ -291,12 +291,6 @@ namespace VirtDeck.Services
 
         // ---- Storage ------------------------------------------------------
 
-        private static readonly JsonSerializerOptions Json = new()
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        };
-
         private static AppSettings? _current;
         private static readonly Lock Gate = new();
 
@@ -327,7 +321,7 @@ namespace VirtDeck.Services
             {
                 if (File.Exists(FilePath))
                 {
-                    var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json);
+                    var loaded = JsonSerializer.Deserialize(File.ReadAllText(FilePath), AppSettingsJson.Default.AppSettings);
                     if (loaded != null)
                     {
                         loaded.Migrate();
@@ -375,10 +369,22 @@ namespace VirtDeck.Services
                 Directory.CreateDirectory(DirectoryPath);
                 // Write-then-replace so a crash mid-write can't truncate the existing file.
                 var tmp = FilePath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(this, Json));
+                File.WriteAllText(tmp, JsonSerializer.Serialize(this, AppSettingsJson.Default.AppSettings));
                 File.Move(tmp, FilePath, overwrite: true);
             }
             catch { /* best-effort */ }
         }
     }
+
+    /// <summary>
+    /// The settings file's serialiser, generated at compile time. A NativeAOT build turns
+    /// reflection-based serialisation off, and <c>AppSettings.Load</c> would then answer
+    /// every launch with empty settings. The options are the ones the file has always been written
+    /// with, and the output is byte-identical to the reflection serialiser's (measured on a real
+    /// settings file). Enums stay numeric, which is why there is no string enum option here.
+    /// </summary>
+    [JsonSourceGenerationOptions(WriteIndented = true,
+                                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonSerializable(typeof(AppSettings))]
+    internal sealed partial class AppSettingsJson : JsonSerializerContext;
 }

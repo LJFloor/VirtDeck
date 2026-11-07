@@ -7,13 +7,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>VirtDeck.Avalonia</RootNamespace>
     <AssemblyName>virtdeck</AssemblyName>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- NativeAOT has no built-in COM, and nothing here uses it (Avalonia 11+ brings its own), so
+         only the JIT build keeps the flag it was always published with. -->
+    <BuiltInComInteropSupport Condition="'$(PublishAot)' != 'true'">true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Shell icon baked into virtdeck.exe. Ignored when the apphost is not a Windows PE, so it
          costs nothing on the Linux publish. See packaging/icons/make-icons.py. -->
     <ApplicationIcon>Assets\virtdeck.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <RuntimeIdentifiers>linux-x64;win-x64</RuntimeIdentifiers>
+    <!-- The trim and AOT analyzers on every build, so a normal build reports what would break the
+         NativeAOT publish. See "NativeAOT" in docs/build-and-packaging.md. -->
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,6 +44,22 @@
          The answer-file window's script and markup boxes are the same editor, five of them on the
          definitions AvaloniaEdit already ships. -->
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
+  </ItemGroup>
+
+  <!-- NativeAOT. None of this changes a JIT build. See "NativeAOT" in docs/build-and-packaging.md. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <!-- ILC links with clang by default; gcc links this app just as well where clang is missing. -->
+    <CppCompilerAndLinker Condition="!$([MSBuild]::IsOSPlatform('Windows')) And !Exists('/usr/bin/clang') And Exists('/usr/bin/gcc')">gcc</CppCompilerAndLinker>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Kept whole, because they are reached by reflection the trimmer cannot follow: the vendored
+         unattend-generator loads its tables through Newtonsoft.Json, which finds constructors and
+         builds immutable collections by name; Input/X11KeyboardGrab reads Avalonia.X11's private
+         fields to reach its X display. -->
+    <TrimmerRootAssembly Include="UnattendGenerator" />
+    <TrimmerRootAssembly Include="Newtonsoft.Json" />
+    <TrimmerRootAssembly Include="System.Collections.Immutable" />
+    <TrimmerRootAssembly Include="Avalonia.X11" />
   </ItemGroup>
 
   <ItemGroup>

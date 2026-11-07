@@ -18,7 +18,7 @@ No tests yet. `dotnet run --project VirtDeck.Avalonia` is the fastest smoke test
 
 ## Packaging
 
-Self-contained release artifacts (the .NET runtime is bundled; libusb/usbredir/libpulse deliberately are not, see `packaging/README.md`):
+NativeAOT release artifacts (one native executable, so there is no .NET runtime to bundle; libusb/usbredir/libpulse deliberately are not bundled either, see `packaging/README.md`):
 
 ```bash
 packaging/build-appimage.sh 1.2.3   # Linux   -> publish/VirtDeck-1.2.3-x86_64.AppImage
@@ -31,6 +31,46 @@ publish.bat                         # Windows -> installer\output\VirtDeckSetup-
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
 ```
+
+## NativeAOT
+
+Every release artifact above is published with `-p:PublishAot=true`; `dotnet build` and
+`dotnet run` are unaffected and stay JIT. Measured on Linux at the host
+manager with software rendering: **86 MB private and about 75 ms to the first window**, against
+110 MB and about 600 ms for the JIT build (187 MB with GLX, see "VirtDeck.Avalonia (cross-platform UI)").
+
+- **The analyzers run on every build** (`IsAotCompatible` on the two libraries, the trim and AOT
+  analyzers on the app), so whatever would break the AOT publish is a warning in the ordinary
+  build. The publish itself still warns about the vendored unattend-generator's ten
+  `JsonConvert.DeserializeObject` calls and about Newtonsoft.Json and Svg.Model as assemblies:
+  the first two are handled below, and Svg.Model was measured instead (forty theme icons render
+  pixel-identical to the JIT build).
+- **Both JSON files are source-generated** (`AppSettingsJson`, `UnattendPresetJson`), because AOT
+  turns reflection-based System.Text.Json off and the settings would load empty on every launch.
+  The output is byte-identical to the reflection serialiser's, measured on a real settings file
+  and on a preset with all 175 of its values changed.
+- **The unattend-generator is reached by reflection the trimmer cannot follow.** It loads its
+  tables through Newtonsoft.Json, which finds constructors and builds immutable collections by
+  name, so the csproj keeps `UnattendGenerator`, `Newtonsoft.Json` and
+  `System.Collections.Immutable` whole. That is not enough for a collection of a **value type**,
+  which AOT cannot share code for: `UnattendCatalog` compiles `ImmutableSortedSet<Pass>` itself,
+  the one such instantiation the tables need. A new one in an upstream update fails only in the AOT
+  build and only at run time, as "is missing native code" naming the method, and the fix is one more
+  line beside that one. The answer file is byte-identical to the JIT build's.
+- `Avalonia.X11` is kept whole for `Input/X11KeyboardGrab`, which finds Avalonia's X display by
+  walking private fields. `BuiltInComInteropSupport` stays on for the JIT build only: AOT has no
+  built-in COM, and nothing here uses it.
+- **The linker binds glibc symbols to the build machine's own versions.** Linked on Ubuntu 26.04
+  the binary needs glibc 2.38 (for `fmod`), where the JIT build needs 2.27, and anything linked
+  after the libpthread merge needs 2.34 for `dlopen` and the pthread calls. A Linux AOT release
+  therefore has to be linked on, or against a sysroot of, the oldest glibc it supports, and **CI
+  links it on Ubuntu 22.04** (glibc 2.35), the oldest distro `packaging/README.md` lists as tested.
+  That gives up Ubuntu 20.04 and RHEL 9, which the JIT build ran on. When GitHub retires that runner
+  image, the way to keep the floor is a build against an old sysroot, such as the cross-build
+  containers Microsoft builds .NET itself in. ILC links
+  with clang; where there is none, the csproj falls back to gcc, which links this app as well.
+- Windows needs the Visual Studio C++ build tools to link, and neither OS can link for the other.
+- **Not yet verified:** any of it on Windows, and the keyboard grab in a console window.
 
 ## The Remote Control host agent
 
