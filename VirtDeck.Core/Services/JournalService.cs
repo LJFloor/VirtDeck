@@ -18,9 +18,9 @@ namespace VirtDeck.Services
     /// look exactly like a host on which nothing ever happens. <see cref="SystemdService.StartEventListener"/>
     /// says the same thing from the other end, and the rule came from there.
     ///
-    /// <para>Nothing here holds the shared command lock for a page: a page is well over a hundred
-    /// kilobytes, and <c>RunSudoCommand</c> holds <c>_ioLock</c> for its whole call, so it would
-    /// stall every other module for as long as it ran. The listing goes through the streaming runner
+    /// <para>Nothing here reads a page through the shared connection: a page is well over a hundred
+    /// kilobytes, and through <c>RunSudoCommand</c> it would hold a command slot and put its bytes
+    /// in front of every other module's for as long as it ran. The listing goes through the streaming runner
     /// like every other long call in the app. The one exception is <see cref="ListBootsAsync"/>,
     /// which is a few hundred bytes and about 37 ms.</para>
     /// </summary>
@@ -211,7 +211,7 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// The boots the journal still holds, newest first. The one read here that may go through
-        /// the shared lock: measured at 37 ms and a few hundred bytes, and it runs once per
+        /// the shared connection: measured at 37 ms and a few hundred bytes, and it runs once per
         /// activation rather than per filter change.
         /// </summary>
         public async Task<IReadOnlyList<JournalBoot>> ListBootsAsync(CancellationToken ct = default)
@@ -405,8 +405,8 @@ namespace VirtDeck.Services
         private CancellationTokenSource? _tail;
 
         /// <summary>
-        /// Starts the follow stream for one query, on a connection of its own so it never holds the
-        /// shared command lock. One tail at a time: a changed query is a different stream, so
+        /// Starts the follow stream for one query, on a connection of its own so it never holds a
+        /// shared command slot. One tail at a time: a changed query is a different stream, so
         /// starting one ends whatever was running.
         ///
         /// <para><paramref name="newestCursor"/> is read again on every reconnect rather than

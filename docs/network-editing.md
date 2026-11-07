@@ -41,8 +41,8 @@ back at once if nmcli refuses anything; then VirtDeck keeps the change only once
 connection has reached the host and destroyed the checkpoint. If none gets through, NetworkManager
 puts the old settings back by itself when the checkpoint runs out, which is exactly what it is for.
 
-- **The change never goes through `RunSudoCommand`.** That holds the shared lock for its whole call,
-  and a change that cuts the link would stall every other module until TCP gave up. It streams on a
+- **The change never goes through `RunSudoCommand`.** That runs on the shared connection, and a change
+  that cuts the link would hold a command slot there until TCP gave up. It streams on a
   connection of its own, and `trap '' HUP PIPE` keeps the script going if that channel dies under it,
   which is the one thing a change to VirtDeck's own link is likely to do: the rollback on failure
   still runs, and NetworkManager carries an activation through whatever happens to nmcli.

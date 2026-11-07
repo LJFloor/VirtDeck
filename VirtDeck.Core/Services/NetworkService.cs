@@ -634,8 +634,8 @@ namespace VirtDeck.Services
         private CancellationTokenSource? _trafficCts;
 
         // A loop on the host rather than a command per tick, for the reason HostMetricsService is
-        // one: a round trip every two seconds through the shared connection would hold the lock
-        // every other module reads through. awk exits each tick, so each pass flushes on the way
+        // one: a round trip every two seconds through the shared connection would keep one of its
+        // few command slots busy for the life of the session. awk exits each tick, so each pass flushes on the way
         // out and nothing needs stdbuf.
         //
         // This is not the Overview's sampler, which sums the NICs and never sees a bridge. Every
@@ -848,8 +848,8 @@ namespace VirtDeck.Services
         public const int RollbackSeconds = 60;
 
         // The change runs elevated on a connection of its own, never through RunSudoCommand: that
-        // one holds the shared lock for its whole call, and a change that cuts the link would stall
-        // every other module until TCP gave up.
+        // one runs on the shared connection, and a change that cuts the link would hold a command slot
+        // there until TCP gave up.
         //
         // `trap '' HUP PIPE` keeps the script going if this channel dies under it, which is the
         // one thing a change to the link VirtDeck is on is likely to do: the rollback on failure

@@ -29,9 +29,9 @@ different landing page per host.
 
 ## Summary
 
-- **It is a tail, not a poll, and everything else follows from that.** `RunCommand` holds `_ioLock`
-  for its whole call, so a sample every two seconds through it would serialise against the VM list,
-  the container list and every file-browser read for the life of the session. `RunCommandStreaming`
+- **It is a tail, not a poll, and everything else follows from that.** A sample every two seconds
+  through `RunCommand` would be a round trip per sample and keep one of the shared connection's few
+  command slots busy for the life of the session. `RunCommandStreaming`
   opens a client of its own, so one long-lived remote loop costs one connection and **no round trip
   per sample**. That is what makes the next point proportionate rather than a standing tax.
 - **`Deactivate` deliberately does not stop the sampling.** It stops the reads and nothing else,
@@ -176,8 +176,8 @@ different landing page per host.
   Status box already makes for its own rows. The Host box still names the card either way, which is
   what keeps an Intel or a vfio-bound card stated rather than silently missing.
 - **The update tile is read once per host, not once per page, and the Software updates module's
-  Refresh is how somebody asks again.** `PackageService.ListAsync` is seconds of work holding the
-  shared lock, and this is the page the shell lands on at connect, so it runs in the background
+  Refresh is how somebody asks again.** `PackageService.ListAsync` is seconds of work on the
+  host, and this is the page the shell lands on at connect, so it runs in the background
   after the first paint and the answer is the one the Software updates module draws too. See "One
   listing, two pages". It draws
   **five** answers and never collapses them into a zero: no package manager (the row is not drawn at

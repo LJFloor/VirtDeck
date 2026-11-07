@@ -25,7 +25,7 @@ on most of them.
   and an un-elevated firewalld read would be the app's default rule if it does. The cron module's
   shape.
 - **A Refresh button, no poll.** Nothing announces a ufw change, and both tools are Python: every
-  call is a few hundred milliseconds of the shared connection's lock. The tabs read on their first
+  call is a few hundred milliseconds of a shared command slot. The tabs read on their first
   visit, on re-entry, on Refresh and after every command. The version is asked once per tool.
 - **Which tool it is decides the page, and the other tool's word is disabled with a reason.** The
   Zones tab is firewalld's and greys out on ufw, the Stacks tab's idiom. The add dialog's Action and

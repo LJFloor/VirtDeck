@@ -45,7 +45,9 @@ public partial class VirtualMachinesModule : UserControl, IModule
     private readonly DispatcherTimer _eventDebounce;
 
     private int _previewGen;       // bumped on selection change; drops stale background results
-    private bool _refreshing;
+    // One listing at a time, and an ask that arrives while one is out (an action finishing, a
+    // lifecycle event) runs once more after it instead of being dropped. See "Refresh policy".
+    private bool _refreshing, _refreshAgain;
     private bool _active;          // false while another module is on screen: no polling, no events
     private bool _capsProbed;      // host capabilities are a one-off while KVM is there
     private bool _kvmReady = true; // the KVM probes' default: available until the host says otherwise
@@ -276,21 +278,27 @@ public partial class VirtualMachinesModule : UserControl, IModule
 
     private async Task RefreshAsync()
     {
-        if (_virshOrNull is null || _refreshing) return;
+        if (_virshOrNull is null) return;
+        if (_refreshing) { _refreshAgain = true; return; }
         _refreshing = true;
         try
         {
-            await Task.WhenAll(Virsh.RefreshAsync(), RefreshNetworksAsync());
-            Populate();
-
-            // State may have changed; re-capture the preview for the still-selected VM. This is
-            // what gives the screenshot thumbnail its periodic refresh.
-            if (Selected is { } sel)
+            do
             {
-                Details.SetVm(sel.Info);
-                _previewTimer.Stop();
-                _previewTimer.Start();
+                _refreshAgain = false;
+                await Task.WhenAll(Virsh.RefreshAsync(), RefreshNetworksAsync());
+                Populate();
+
+                // State may have changed; re-capture the preview for the still-selected VM. This is
+                // what gives the screenshot thumbnail its periodic refresh.
+                if (Selected is { } sel)
+                {
+                    Details.SetVm(sel.Info);
+                    _previewTimer.Stop();
+                    _previewTimer.Start();
+                }
             }
+            while (_refreshAgain && _active);
         }
         catch (Exception ex)
         {

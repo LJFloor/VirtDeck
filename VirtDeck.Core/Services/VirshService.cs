@@ -325,7 +325,7 @@ namespace VirtDeck.Services
         /// <see cref="DomainEventReceived"/> for each one, so the UI reflects power-state changes
         /// (started/stopped, including guest- and host-initiated) within ~a second instead of waiting
         /// for the periodic poll. Idempotent. The loop self-heals if libvirtd restarts or the stream
-        /// drops. Runs on its own connection so it never holds the shared command lock.
+        /// drops. Runs on its own connection so it never holds a shared command slot.
         /// </summary>
         public void StartEventListener()
         {
@@ -868,7 +868,7 @@ namespace VirtDeck.Services
         }
 
         // One round trip for every disk of a domain, in the tagged-record idiom. The obvious
-        // alternative, GetFileSize above, is one RunSudoCommand per path holding _ioLock for each,
+        // alternative, GetFileSize above, is one RunSudoCommand round trip per path,
         // which is the per-VM round-trip problem the VM listing was already fixed for.
         //
         // Three probes per path, first answer wins. `qemu-img info` is the one worth having: a

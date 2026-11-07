@@ -329,7 +329,7 @@ public partial class ServicesModule : UserControl, IModule
     /// The cheap pass: <c>list-units</c> and nothing else, merged onto the file states the catalog
     /// already holds, at about 13 ms. This is what the poll and the journal tail both run, and being
     /// this cheap is what lets the poll run twice as often as the old one while costing a sixtieth
-    /// as much of the shared lock.
+    /// as much time on the host.
     ///
     /// It reports a unit it cannot describe rather than guessing at one, and that is the only thing
     /// that sends it back for a catalog.

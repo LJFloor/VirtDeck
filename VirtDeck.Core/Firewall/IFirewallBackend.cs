@@ -39,8 +39,8 @@ namespace VirtDeck.Firewall
 
         /// <summary>
         /// The listing. The version is asked for only when <paramref name="withVersion"/> is set,
-        /// because both tools are Python and each call is a few hundred milliseconds of the shared
-        /// connection's lock; the service asks once and keeps the answer.
+        /// because both tools are Python and each call is a few hundred milliseconds of a shared
+        /// command slot; the service asks once and keeps the answer.
         /// </summary>
         HostScript ListScript(bool withVersion);
 

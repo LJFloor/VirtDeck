@@ -15,8 +15,17 @@ namespace VirtDeck.Services
         // held here and disposed after the client, never scoped to Connect.
         private IDisposable? _authMethod;
         private PrivateKeyFile? _keyFile;
-        // One command at a time on the shared SshClient (RefreshAsync, edits, file browsing all race otherwise).
-        private readonly Lock _ioLock = new();
+
+        /// <summary>
+        /// How many <see cref="RunCommand"/>/<see cref="RunSudoCommand"/> calls share the client at
+        /// once. SSH multiplexes channels over one connection, so a slow listing in one module no
+        /// longer holds up every other module's commands behind it (measured against a local sshd:
+        /// twelve one-second commands took 12.1 s one at a time and 3 s four at a time). Kept under
+        /// OpenSSH's default <c>MaxSessions</c> of 10 so a stock host never refuses a channel; a host
+        /// configured lower is found by its refusal, see <see cref="ChannelGate"/>.
+        /// </summary>
+        private const int CommandSlots = 4;
+        private readonly ChannelGate _gate = new(CommandSlots);
 
         public bool IsConnected => _client?.IsConnected ?? false;
         public string Host { get; private set; } = string.Empty;
@@ -137,25 +146,19 @@ namespace VirtDeck.Services
         {
             try
             {
-                lock (_ioLock)
-                {
-                    if (_client is not { IsConnected: true })
-                        return "SSH is not connected.";
+                if (_client is not { IsConnected: true })
+                    return "SSH is not connected.";
 
-                    using var cmd = _client.CreateCommand("sudo -S -p '' true");
-                    var ar = cmd.BeginExecute();
-                    FeedSudoPassword(cmd);
-                    cmd.EndExecute(ar);
-                    if (cmd.ExitStatus == 0) return null;
+                var (exit, err) = Run("sudo -S -p '' true", FeedSudoPassword,
+                                      cmd => (cmd.ExitStatus, cmd.Error.Trim()));
+                if (exit == 0) return null;
 
-                    var err = cmd.Error.Trim();
-                    if (err.Contains("not in the sudoers", StringComparison.OrdinalIgnoreCase))
-                        return $"{_client.ConnectionInfo.Username} is not allowed to run sudo on this host.";
+                if (err.Contains("not in the sudoers", StringComparison.OrdinalIgnoreCase))
+                    return $"{Username} is not allowed to run sudo on this host.";
 
-                    return _sudoPassword.Length == 0
-                        ? "This host asks for a sudo password. Fill in the sudo password field."
-                        : "The sudo password was not accepted.";
-                }
+                return _sudoPassword.Length == 0
+                    ? "This host asks for a sudo password. Fill in the sudo password field."
+                    : "The sudo password was not accepted.";
             }
             catch (Exception ex)
             {
@@ -163,41 +166,28 @@ namespace VirtDeck.Services
             }
         }
 
-        public string RunCommand(string command)
-        {
-            lock (_ioLock)
+        public string RunCommand(string command) =>
+            Run(command, afterStart: null, cmd =>
             {
-                if (_client is not { IsConnected: true })
-                    throw new InvalidOperationException("SSH is not connected.");
-
-                using var cmd = _client.RunCommand(command);
                 Interlocked.Add(ref _bytesReceived, cmd.Result.Length);
                 return cmd.ExitStatus != 0 ? throw new Exception($"Command failed (exit {cmd.ExitStatus}): {cmd.Error}") : cmd.Result;
-            }
-        }
+            });
 
         public string RunSudoCommand(string command)
         {
-            lock (_ioLock)
+            var escapedCommand = command.Replace("'", "'\\''");
+            // -S reads the password from stdin (fed below), -p '' silences the prompt. The
+            // password is delivered out-of-band, so it never appears on the command line (ps/proc).
+            //
+            // The PATH export sits beside the locale one and for the same reason: this bash is
+            // non-login, so it has sshd's bare PATH. It lands INSIDE the sudo'd bash rather than
+            // in front of sudo, which is what makes it independent of whether the host's sudoers
+            // sets a secure_path at all. See ShellScript.PathExport.
+            var sudoCommand = $"sudo -S -p '' bash -c 'export LANG=C; {ShellScript.PathExport}; " +
+                              $"echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
+
+            return Run(sudoCommand, FeedSudoPassword, cmd =>
             {
-                if (_client is not { IsConnected: true })
-                    throw new InvalidOperationException("SSH is not connected.");
-
-                var escapedCommand = command.Replace("'", "'\\''");
-                // -S reads the password from stdin (fed below), -p '' silences the prompt. The
-                // password is delivered out-of-band, so it never appears on the command line (ps/proc).
-                //
-                // The PATH export sits beside the locale one and for the same reason: this bash is
-                // non-login, so it has sshd's bare PATH. It lands INSIDE the sudo'd bash rather than
-                // in front of sudo, which is what makes it independent of whether the host's sudoers
-                // sets a secure_path at all. See ShellScript.PathExport.
-                var sudoCommand = $"sudo -S -p '' bash -c 'export LANG=C; {ShellScript.PathExport}; " +
-                                  $"echo \"{SudoMarker}\"; {escapedCommand}' 2>&1";
-
-                using var cmd = _client.CreateCommand(sudoCommand);
-                var ar = cmd.BeginExecute();
-                FeedSudoPassword(cmd);
-                cmd.EndExecute(ar);
                 var output = cmd.Result;
                 Interlocked.Add(ref _bytesReceived, output.Length);
 
@@ -207,6 +197,99 @@ namespace VirtDeck.Services
                     output = output[(markerIndex + SudoMarker.Length)..].TrimStart('\n', '\r');
 
                 return cmd.ExitStatus != 0 ? throw new Exception($"Command failed (exit {cmd.ExitStatus}): {output}") : output;
+            });
+        }
+
+        /// <summary>
+        /// Runs one command on the shared client in a slot of <see cref="_gate"/>:
+        /// <paramref name="afterStart"/> gets the started command (to feed its stdin), and
+        /// <paramref name="finish"/> reads it once it has exited.
+        ///
+        /// <para>A channel the host refuses to open is the host allowing fewer sessions than the gate
+        /// does. SSH.NET throws that from <c>BeginExecute</c>, before anything has run on the host, so
+        /// the gate shrinks and the command waits for a slot and goes again. A dropped connection and
+        /// a timeout are not refusals and go straight to the caller.</para>
+        /// </summary>
+        private T Run<T>(string commandText, Action<SshCommand>? afterStart, Func<SshCommand, T> finish)
+        {
+            while (true)
+            {
+                _gate.Enter();
+                try
+                {
+                    var client = _client;
+                    if (client is not { IsConnected: true })
+                        throw new InvalidOperationException("SSH is not connected.");
+
+                    using var cmd = client.CreateCommand(commandText);
+                    IAsyncResult ar;
+                    try
+                    {
+                        ar = cmd.BeginExecute();
+                    }
+                    catch (SshException ex) when (ex is not SshConnectionException and not SshOperationTimeoutException)
+                    {
+                        if (!_gate.Shrink()) throw;
+                        continue;
+                    }
+
+                    afterStart?.Invoke(cmd);
+                    cmd.EndExecute(ar);
+                    return finish(cmd);
+                }
+                finally
+                {
+                    _gate.Exit();
+                }
+            }
+        }
+
+        /// <summary>
+        /// A counting gate that can only shrink. It opens at <see cref="CommandSlots"/> and learns
+        /// the host's real limit when the host refuses a channel: OpenSSH allows 10 sessions per
+        /// connection unless <c>MaxSessions</c> says otherwise, and a hardened host may allow two,
+        /// or one. SSH.NET retries a refused open ten times back to back and then throws, so without
+        /// this the third command on a host allowing two would fail rather than wait. A semaphore
+        /// cannot shrink, hence the monitor. The size lasts as long as this connection does, which is
+        /// as long as the host's sshd configuration can be relied on not to change.
+        /// </summary>
+        private sealed class ChannelGate(int size)
+        {
+            private readonly object _sync = new();
+            private int _size = size;
+            private int _inFlight;
+
+            public void Enter()
+            {
+                lock (_sync)
+                {
+                    while (_inFlight >= _size) Monitor.Wait(_sync);
+                    _inFlight++;
+                }
+            }
+
+            public void Exit()
+            {
+                lock (_sync)
+                {
+                    _inFlight--;
+                    Monitor.PulseAll(_sync);
+                }
+            }
+
+            /// <summary>
+            /// For a command whose channel was refused while it held a slot: lowers the gate to the
+            /// commands that did get theirs. False when there were none, because a refusal with
+            /// nothing else open is not about how many are open.
+            /// </summary>
+            public bool Shrink()
+            {
+                lock (_sync)
+                {
+                    if (_inFlight <= 1) return false;
+                    _size = Math.Min(_size, _inFlight - 1);
+                    return true;
+                }
             }
         }
 
@@ -232,7 +315,8 @@ namespace VirtDeck.Services
         /// Runs a command on a dedicated connection and copies its stdout into
         /// <paramref name="destination"/>. The connection is its own, like
         /// <see cref="RunSudoCommandStreaming"/> and the PTY factories, so a transfer that runs for
-        /// minutes never holds <c>_ioLock</c> and every other module keeps working behind it.
+        /// minutes holds none of the shared client's command slots, and its bytes never queue in front
+        /// of every other module's on the shared TCP stream.
         ///
         /// <para>Unlike <see cref="RunSudoCommand"/> this neither escapes <paramref name="command"/>
         /// nor wraps it in a shell; callers spell out their own wrapper, the same rule
@@ -502,7 +586,7 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Streams a remote file to <paramref name="destination"/> using a dedicated SSH connection
-        /// (does not hold <c>_ioLock</c>) via <c>sudo dd</c>. Reports (bytesDownloaded, totalBytes)
+        /// (it holds no command slot on the shared one) via <c>sudo dd</c>. Reports (bytesDownloaded, totalBytes)
         /// where totalBytes is -1 when the size could not be determined.
         /// Pass <paramref name="knownSize"/> to skip the remote stat call when size is already known.
         /// </summary>
@@ -634,9 +718,10 @@ namespace VirtDeck.Services
         /// on non-zero exit status.
         ///
         /// <para>The un-elevated sibling of <see cref="RunSudoCommandStreaming"/>, and it exists for
-        /// the same reason: <see cref="RunCommand"/> holds <c>_ioLock</c> for its whole call, so one
-        /// long copy through it would freeze the VM list, the container list and every other module
-        /// until it finished. Like its sibling it neither escapes its argument nor wraps it in
+        /// the same reason: <see cref="RunCommand"/> holds one of the shared client's
+        /// <see cref="CommandSlots"/> for its whole call, so a few long copies through it would leave
+        /// the VM list, the container list and every other module waiting for a slot until they
+        /// finished. Like its sibling it neither escapes its argument nor wraps it in
         /// <c>bash -c</c>, so the caller spells out its own wrapper.</para>
         /// </summary>
         public void RunCommandStreaming(string command, Action<string> onLine, CancellationToken ct)
@@ -677,7 +762,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Runs <paramref name="argv"/> under sudo behind a pseudo terminal and hands back the live
         /// session. On its own connection, like <see cref="DownloadFileAsync"/> and
-        /// <see cref="RunSudoCommandStreaming"/>, so it never holds <c>_ioLock</c>: a console stays
+        /// <see cref="RunSudoCommandStreaming"/>, so it never holds a command slot: a console stays
         /// open for as long as somebody is typing into it, and everything else on the host has to
         /// keep working meanwhile.
         ///

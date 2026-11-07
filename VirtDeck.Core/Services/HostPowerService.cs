@@ -151,7 +151,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Starts reporting what the host has been told to do, within about a second of it being
         /// told, whoever told it. Idempotent, self-healing across an SSH blip, and on its own
-        /// connection so it never holds the shared command lock: the twin of
+        /// connection so it never holds a shared command slot: the twin of
         /// <see cref="DockerService.StartEventListener"/>, and un-elevated, which that one is not.
         /// </summary>
         public void StartWatching()

@@ -564,8 +564,8 @@ namespace VirtDeck.Services
             "MESSAGE_ID=7b05ebc668384222baa8881179cfda54";
 
         /// <summary>
-        /// Starts the journal tail for one scope, on a connection of its own so it never holds the
-        /// shared command lock. Idempotent, and self-healing: if the tail dies it is restarted after
+        /// Starts the journal tail for one scope, on a connection of its own so it never holds a
+        /// shared command slot. Idempotent, and self-healing: if the tail dies it is restarted after
         /// three seconds, because events are an optimisation and the poll is still the guarantee.
         ///
         /// <b>The system scope is elevated and the user scope must never be.</b> Not because reading

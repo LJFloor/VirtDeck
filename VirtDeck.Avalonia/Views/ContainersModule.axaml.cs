@@ -132,11 +132,15 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
     private readonly DispatcherTimer _netDebounce;
     private readonly DispatcherTimer _stackDebounce;
 
-    private bool _refreshing;
-    private bool _refreshingImages;
-    private bool _refreshingVols;
-    private bool _refreshingNets;
-    private bool _refreshingStacks;
+    // One read per table at a time, and an ask that arrives while one is out (an action finishing,
+    // a docker event) runs once more after it instead of being dropped: commands overlap on the
+    // shared connection, so the read in flight may predate the change and must not have the last
+    // word. See "Refresh policy".
+    private bool _refreshing, _refreshAgain;
+    private bool _refreshingImages, _refreshImagesAgain;
+    private bool _refreshingVols, _refreshVolsAgain;
+    private bool _refreshingNets, _refreshNetsAgain;
+    private bool _refreshingStacks, _refreshStacksAgain;
     private bool _active;          // false while another module is on screen: no polling, no events
     private bool _listening;       // the docker events tail is a one-off, not per activation
 
@@ -656,13 +660,19 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 
     private async Task RefreshAsync()
     {
-        if (_docker is null || !Docker.DockerAvailable || _refreshing) return;
+        if (_docker is null || !Docker.DockerAvailable) return;
+        if (_refreshing) { _refreshAgain = true; return; }
         _refreshing = true;
         try
         {
-            await Docker.RefreshAsync();
-            _containersFailure = "";
-            PopulateContainers();
+            do
+            {
+                _refreshAgain = false;
+                await Docker.RefreshAsync();
+                _containersFailure = "";
+                PopulateContainers();
+            }
+            while (_refreshAgain && _active);
         }
         catch (Exception ex)
         {
@@ -679,13 +689,19 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 
     private async Task RefreshImagesAsync()
     {
-        if (_docker is null || !Docker.DockerAvailable || _refreshingImages) return;
+        if (_docker is null || !Docker.DockerAvailable) return;
+        if (_refreshingImages) { _refreshImagesAgain = true; return; }
         _refreshingImages = true;
         try
         {
-            await Docker.RefreshImagesAsync();
-            _imagesFailure = "";
-            PopulateImages();
+            do
+            {
+                _refreshImagesAgain = false;
+                await Docker.RefreshImagesAsync();
+                _imagesFailure = "";
+                PopulateImages();
+            }
+            while (_refreshImagesAgain && _active);
         }
         catch (Exception ex)
         {
@@ -703,13 +719,19 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 
     private async Task RefreshVolumesAsync()
     {
-        if (_docker is null || !Docker.DockerAvailable || _refreshingVols) return;
+        if (_docker is null || !Docker.DockerAvailable) return;
+        if (_refreshingVols) { _refreshVolsAgain = true; return; }
         _refreshingVols = true;
         try
         {
-            await Docker.RefreshVolumesAsync();
-            _volumesFailure = "";
-            PopulateVolumes();
+            do
+            {
+                _refreshVolsAgain = false;
+                await Docker.RefreshVolumesAsync();
+                _volumesFailure = "";
+                PopulateVolumes();
+            }
+            while (_refreshVolsAgain && _active);
         }
         catch (Exception ex)
         {
@@ -727,13 +749,19 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 
     private async Task RefreshNetworksAsync()
     {
-        if (_docker is null || !Docker.DockerAvailable || _refreshingNets) return;
+        if (_docker is null || !Docker.DockerAvailable) return;
+        if (_refreshingNets) { _refreshNetsAgain = true; return; }
         _refreshingNets = true;
         try
         {
-            await Docker.RefreshNetworksAsync();
-            _networksFailure = "";
-            PopulateNetworks();
+            do
+            {
+                _refreshNetsAgain = false;
+                await Docker.RefreshNetworksAsync();
+                _networksFailure = "";
+                PopulateNetworks();
+            }
+            while (_refreshNetsAgain && _active);
         }
         catch (Exception ex)
         {
@@ -751,22 +779,28 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
 
     private async Task RefreshStacksAsync()
     {
-        if (_docker is null || !Docker.DockerAvailable || _refreshingStacks) return;
+        if (_docker is null || !Docker.DockerAvailable) return;
+        if (_refreshingStacks) { _refreshStacksAgain = true; return; }
         _refreshingStacks = true;
         try
         {
-            await Docker.RefreshStacksAsync();
-            _stacksFailure = "";
-            PopulateStacks();
+            do
+            {
+                _refreshStacksAgain = false;
+                await Docker.RefreshStacksAsync();
+                _stacksFailure = "";
+                PopulateStacks();
 
-            // The compose version rides the same listing rather than a probe of its own, so it is
-            // known by the time there is a table to draw, and it is re-read on every pass:
-            // installing the plugin mid-session must not be a dead end.
-            SyncCaps();
+                // The compose version rides the same listing rather than a probe of its own, so it is
+                // known by the time there is a table to draw, and it is re-read on every pass:
+                // installing the plugin mid-session must not be a dead end.
+                SyncCaps();
 
-            // The listing carries its own version tag, so an install or a removal that happened
-            // while this page was open is picked up without waiting for the next activation.
-            SyncStacksTab();
+                // The listing carries its own version tag, so an install or a removal that happened
+                // while this page was open is picked up without waiting for the next activation.
+                SyncStacksTab();
+            }
+            while (_refreshStacksAgain && _active);
         }
         catch (Exception ex)
         {

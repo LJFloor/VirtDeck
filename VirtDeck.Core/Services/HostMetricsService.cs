@@ -10,11 +10,10 @@ namespace VirtDeck.Services
     /// a container is.
     ///
     /// <para><b>It is a tail, not a poll, and that is the decision the whole module hangs off.</b>
-    /// <see cref="SshConnectionManager.RunCommand"/> holds the shared <c>_ioLock</c> for its whole
-    /// call, so a sample every two seconds through it would serialise against the VM list, the
-    /// container list and every file-browser read for the life of the session. The streaming
-    /// runners open a client of their own and never take that lock, so one long-lived remote loop
-    /// costs one connection and no round trip per sample. That is also what makes sampling while
+    /// A sample every two seconds through <see cref="SshConnectionManager.RunCommand"/> would be a
+    /// round trip per sample and keep one of the shared connection's few command slots busy for the
+    /// life of the session. The streaming runners open a client of their own, so one long-lived
+    /// remote loop costs one connection and no round trip per sample. That is also what makes sampling while
     /// the Overview module is hidden proportionate, which is why <c>Deactivate</c> leaves this running
     /// exactly as it leaves <c>docker events</c> and <c>virsh event --loop</c> running.</para>
     ///

@@ -206,7 +206,7 @@ namespace VirtDeck.Services
         /// <see cref="ContainerEventReceived"/> for each one, so the list reflects a container
         /// starting or dying (including outside VirtDeck) within ~a second instead of waiting for
         /// the periodic poll. Idempotent. The loop self-heals if dockerd restarts or the stream
-        /// drops. Runs on its own connection so it never holds the shared command lock.
+        /// drops. Runs on its own connection so it never holds a shared command slot.
         ///
         /// The twin of <see cref="VirshService.StartEventListener"/>, with one deliberate
         /// difference: no `stdbuf -oL`. That is there to stop virsh block-buffering its output, and
@@ -282,11 +282,11 @@ namespace VirtDeck.Services
         private Task? _statsTask;
 
         // A remote loop rather than a command per tick, for the reason HostMetricsService is one:
-        // RunSudoCommand holds the shared _ioLock for its whole call and this command costs a flat
-        // two seconds (measured on docker 29.1.3, whatever the container count: the daemon needs
-        // two CPU readings a second apart before it can state a percentage). Through the shared
-        // connection that would stall every other module for two seconds a tick; the streaming
-        // runner opens a client of its own and takes no lock, so the whole cost is one connection.
+        // this command costs a flat two seconds (measured on docker 29.1.3, whatever the container
+        // count: the daemon needs two CPU readings a second apart before it can state a percentage),
+        // so through RunSudoCommand it would hold one of the shared connection's command slots for
+        // two seconds of every tick. The streaming runner opens a client of its own, so the whole
+        // cost is one connection.
         //
         // `--no-stream` in a loop rather than the live stream `docker stats` is by default, because
         // the live one paints a terminal: over a pipe it still writes cursor-home and clear-line
@@ -2066,7 +2066,7 @@ namespace VirtDeck.Services
         /// <summary>
         /// Streams <c>docker save</c> of <paramref name="references"/> into
         /// <paramref name="destination"/>, which is a file on this PC. Its own SSH connection, so a
-        /// multi-gigabyte image never holds the shared command lock.
+        /// multi-gigabyte image never holds a shared command slot.
         /// </summary>
         public Task SaveImagesAsync(IReadOnlyList<string> references, bool gzip, Stream destination,
                                     Action<int>? onChunk, CancellationToken ct)
@@ -2141,8 +2141,8 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Loads an archive that is already on the host. Streamed rather than run through
-        /// <c>RunSudoCommand</c>, which holds <c>_ioLock</c> for its whole call and would freeze
-        /// every other module for the length of a multi-gigabyte load; and here there really is
+        /// <c>RunSudoCommand</c>, which would hold a command slot on the shared connection for the
+        /// length of a multi-gigabyte load; and here there really is
         /// something to stream, because <c>docker load -i</c> names each image it restored on
         /// stdout.
         /// </summary>
@@ -2720,8 +2720,8 @@ namespace VirtDeck.Services
         ///
         /// <para>Streamed on a connection of its own and never through <c>RunSudoCommand</c>: a
         /// measurement walks every file in the volume, and on a media or database volume that can take
-        /// minutes, which through the shared lock would be minutes of every other module standing
-        /// still. A volume that cannot be measured is skipped rather than failing the rest, and its
+        /// minutes, which through the shared connection would be minutes of a command slot held for
+        /// one table cell. A volume that cannot be measured is skipped rather than failing the rest, and its
         /// cell stays blank.</para>
         /// </summary>
         public Task MeasureVolumesAsync(IReadOnlyList<string> names, Action<string, long> onSize, CancellationToken ct)
@@ -2878,8 +2878,8 @@ namespace VirtDeck.Services
         /// Streams a container's log to <paramref name="onLine"/>, oldest first, and with
         /// <paramref name="follow"/> keeps streaming new output until cancelled. Blocks its own
         /// thread inside <c>RunSudoCommandStreaming</c>, which opens a dedicated SSH connection, so
-        /// the container list keeps refreshing behind an open log window and the shared command
-        /// lock is never held.
+        /// the container list keeps refreshing beside an open log window and no shared command
+        /// slot is held.
         ///
         /// The wrapper is written out longhand for the same reason <see cref="Pull"/> writes one:
         /// <c>RunSudoCommandStreaming</c> neither escapes its argument nor wraps it in

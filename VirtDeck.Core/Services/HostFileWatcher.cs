@@ -96,7 +96,7 @@ namespace VirtDeck.Services
 
         /// <summary>
         /// Idempotent, self-healing across an SSH blip, and on its own connection so it never holds
-        /// the shared command lock: the twin of <c>DockerService.StartEventListener</c>.
+        /// a shared command slot: the twin of <c>DockerService.StartEventListener</c>.
         /// </summary>
         private void Start()
         {

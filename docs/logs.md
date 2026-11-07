@@ -24,10 +24,10 @@ lives by the same rule from the other end, and this took it from there. See "Ser
 - **A cursor and `--since` cannot both be given.** journalctl refuses the pair outright, so a page past the first drops the window and **the module holds the lower bound itself**, measured off the host's own clock (`date +%s`, one more header record) rather than this machine's, so the bound it enforces is the one journalctl applied to the first page even when the two disagree about the time. A boot range has no such problem and keeps its `-b` on every page, which is why a range is never rewritten into a pair of timestamps: `-b` is exact about where a boot ended and a timestamp is a guess at it.
 - **The tail is `journalctl --follow` resumed from the newest cursor in hand**, so the gap between the page landing and the stream starting carries no entries and repeats none. It never carries `--since`, which would collide with the cursor and is about a lower bound nothing arriving from the future can be below anyway. `stdbuf -oL` is needed for the reason the services tail needs it: journalctl is C and block-buffers into a pipe.
 
-**The reads are streamed, not one round trip.** A page is well over a hundred kilobytes and
-`RunSudoCommand` holds `_ioLock` for its whole call, so both the page and the tail go through
-`RunSudoCommandStreaming` on connections of their own. `--list-boots` is the exception and goes
-through the shared lock: a few hundred bytes, about 37 ms, once per session. `2>&1` sits on
+**The reads are streamed, not one round trip.** A page is well over a hundred kilobytes, which
+through `RunSudoCommand` would hold a shared command slot and queue in front of every other
+module's output, so both the page and the tail go through `RunSudoCommandStreaming` on connections
+of their own. `--list-boots` is the exception and goes through the shared connection: a few hundred bytes, about 37 ms, once per session. `2>&1` sits on
 journalctl inside that bash and not on the sudo command, because the streaming runners read stdout
 only and journalctl's reason for printing nothing would otherwise be thrown away.
 

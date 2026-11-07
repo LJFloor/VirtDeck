@@ -187,7 +187,7 @@ namespace VirtDeck.Services
         /// its argument or wraps it in a shell, so a caller spells its own out.
         ///
         /// Each of these runs on a connection of its own, so a twenty minute dist-upgrade never holds
-        /// <c>_ioLock</c> and every other module keeps working behind it.
+        /// one of the shared connection's command slots and every other module keeps working beside it.
         /// </summary>
         private void Stream(HostScript script, Action<string> onLine, CancellationToken ct)
         {

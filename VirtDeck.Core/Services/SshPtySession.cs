@@ -18,7 +18,7 @@ namespace VirtDeck.Services
     ///
     /// Like <c>DownloadFileAsync</c> and <c>RunSudoCommandStreaming</c> it runs on a connection of its
     /// own, built from the shared client's <see cref="ConnectionInfo"/>, so an open console never
-    /// holds the command lock and the container list keeps refreshing behind it.
+    /// holds a shared command slot and the container list keeps refreshing beside it.
     /// </summary>
     public sealed class SshPtySession : IDisposable
     {
