@@ -29,6 +29,7 @@
 - `Terminal/`: `TerminalScreen` + `TerminalParser` + `TerminalMouse`, toolkit-agnostic exactly as `SpiceFramebuffer` is.
 
 ## VirtDeck.Avalonia (cross-platform UI)
+- **Linux renders in software** (`Program.BuildAvaloniaApp`). Avalonia's GLX path holds an OpenGL context that cost about **77 MB** on an NVIDIA driver, for nothing this app draws (measured at the host manager: 187 MB private with GLX, 110 MB in software, and software felt no slower). `VIRTDECK_GPU=1` puts GLX first again, which is how to compare where the CPU does the most work: a full-screen console, or the Remote Control module's scaled desktop. Windows keeps Avalonia's default and has not been measured.
 - `Controls/FramebufferView`: the base both remote screens draw through. A 16 ms pump copies only the **dirty rows** from `SpiceFramebuffer` into a `WriteableBitmap` under `SyncRoot`, then `InvalidateVisual`; one `ImageRect` places the picture (`Unscaled`, `Fit` or `Actual`) for the paint and the pointer alike; it owns the exactly-one-cursor state machine. The pump follows the visual tree and the bitmap survives a detach, because the shell detaches a module's content on every tab switch.
 - `Controls/SpiceDisplay`: the VM console's `FramebufferView`, `Unscaled` (a 1:1 `DrawImage` with interpolation `None`, exactly as before the base existed), mouse to the SPICE inputs channel, and the full teardown on detach its closing window wants.
 - `Controls/RemoteDisplay`: the Remote Control module's `FramebufferView`, scaled, mouse as an RFB button mask.

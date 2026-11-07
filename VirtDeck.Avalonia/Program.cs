@@ -38,8 +38,16 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new X11PlatformOptions { RenderingMode = X11Rendering() })
             .WithInterFont()
             .LogToTrace();
+
+    // Software on X11 unless VIRTDECK_GPU=1. The GLX context cost about 77 MB on an NVIDIA driver
+    // for no visible gain here. See "VirtDeck.Avalonia (cross-platform UI)" in docs/architecture.md.
+    private static X11RenderingMode[] X11Rendering() =>
+        Environment.GetEnvironmentVariable("VIRTDECK_GPU") == "1"
+            ? [X11RenderingMode.Glx, X11RenderingMode.Software]
+            : [X11RenderingMode.Software];
 
     private static void LogCrash(string where, Exception? ex)
     {
