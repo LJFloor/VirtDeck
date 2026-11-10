@@ -44,6 +44,7 @@ public abstract class FramebufferView : Control
     private IFramebufferSource? _source;
     private SpiceFramebuffer? _fb;
     private WriteableBitmap? _bitmap;
+    private int[] _row = [];
     private readonly DispatcherTimer _pump;
     private volatile bool _frameDirty;
     private FramebufferStretch _stretch = FramebufferStretch.Unscaled;
@@ -146,12 +147,13 @@ public abstract class FramebufferView : Control
                     int w = right - x, h = bottom - y;
                     if (w <= 0 || h <= 0) continue;
 
-                    int rowBytes = w * 4;
+                    if (_row.Length < w) _row = new int[fb.Width];
                     for (int row = 0; row < h; row++)
                     {
                         int srcOff = (y + row) * fb.Stride + x * 4;
                         IntPtr dst = locked.Address + (y + row) * locked.RowBytes + x * 4;
-                        Marshal.Copy(fb.Pixels, srcOff, dst, rowBytes);
+                        CopyOpaque(MemoryMarshal.Cast<byte, int>(fb.Pixels.AsSpan(srcOff, w * 4)), _row);
+                        Marshal.Copy(_row, 0, dst, w);
                     }
                     painted = true;
                 }
@@ -164,6 +166,25 @@ public abstract class FramebufferView : Control
         }
 
         if (painted) InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Copies pixels with the alpha byte forced to 0xFF. The framebuffer's alpha is undefined (the
+    /// guest leaves it 0 for black), and the software renderer blits an opaque bitmap's bytes as
+    /// they are, so a zero alpha would show the desktop through the window.
+    /// </summary>
+    private static void CopyOpaque(ReadOnlySpan<int> src, Span<int> dst)
+    {
+        const int alpha = unchecked((int)0xFF000000);
+        int i = 0;
+        if (System.Numerics.Vector.IsHardwareAccelerated)
+        {
+            int n = System.Numerics.Vector<int>.Count;
+            var a = new System.Numerics.Vector<int>(alpha);
+            for (; i <= src.Length - n; i += n)
+                (new System.Numerics.Vector<int>(src[i..]) | a).CopyTo(dst[i..]);
+        }
+        for (; i < src.Length; i++) dst[i] = src[i] | alpha;
     }
 
     private void OnResolutionChanged(int w, int h) => Dispatcher.UIThread.Post(() =>
