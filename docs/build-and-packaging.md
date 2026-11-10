@@ -64,8 +64,9 @@ manager with software rendering: **86 MB private and about 75 ms to the first wi
   the binary needs glibc 2.38 (for `fmod`), where the JIT build needs 2.27, and anything linked
   after the libpthread merge needs 2.34 for `dlopen` and the pthread calls. A Linux AOT release
   therefore has to be linked on, or against a sysroot of, the oldest glibc it supports, and **CI
-  links it on Ubuntu 22.04** (glibc 2.35), the oldest distro `packaging/README.md` lists as tested.
-  That gives up Ubuntu 20.04 and RHEL 9, which the JIT build ran on. When GitHub retires that runner
+  links it on Ubuntu 22.04**, the oldest distro `packaging/README.md` lists as tested. The binary it
+  produces needs glibc 2.34 (measured on v0.4.0: `dlopen` and the pthread calls), so RHEL 9 still
+  runs it and Ubuntu 20.04, which the JIT build ran on, does not. When GitHub retires that runner
   image, the way to keep the floor is a build against an old sysroot, such as the cross-build
   containers Microsoft builds .NET itself in. ILC links
   with clang; where there is none, the csproj falls back to gcc, which links this app as well.
