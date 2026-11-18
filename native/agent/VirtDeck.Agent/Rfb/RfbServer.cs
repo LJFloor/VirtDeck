@@ -194,9 +194,9 @@ namespace VirtDeck.Agent.Rfb
 
                         case RfbProtocol.PointerEvent:
                             input.ReadExactly(message[..5]);
-                            keyboard.Pointer(BinaryPrimitives.ReadUInt16BigEndian(message[1..]),
-                                             BinaryPrimitives.ReadUInt16BigEndian(message[3..]),
-                                             message[0]);
+                            var (px, py) = capture.ToRoot(BinaryPrimitives.ReadUInt16BigEndian(message[1..]),
+                                                          BinaryPrimitives.ReadUInt16BigEndian(message[3..]));
+                            keyboard.Pointer(px, py, message[0]);
                             break;
 
                         case RfbProtocol.ClientCutText:
@@ -301,7 +301,7 @@ namespace VirtDeck.Agent.Rfb
 
                 if (randr.TakeChanged() && Follow()) continue;
 
-                var shape = cursor.TakeChanged() ? cursor.Read() : null;
+                var shape = cursor.TakeChanged() ? cursor.Read(capture.Shrink) : null;
                 bool full = Interlocked.Exchange(ref _full, 0) != 0;
 
                 var rects = new List<XCapture.Rect>();
@@ -342,17 +342,18 @@ namespace VirtDeck.Agent.Rfb
         }
 
         /// <summary>
-        /// Measures the screen and, if it is not the size the capture is set up for, follows it:
-        /// new buffers, and a DesktopSize rectangle for the viewer, which answers the update it was
-        /// waiting for. False when nothing had changed after all.
+        /// Measures the screen and how much its monitors shrink it and, if that is not what the
+        /// capture is set up for, follows it: new buffers, the cursor again at the new scale, and a
+        /// DesktopSize rectangle for the viewer, which answers the update it was waiting for. False
+        /// when nothing had changed after all.
         /// </summary>
         private bool Follow()
         {
             var (width, height) = randr.Measure();
-            if (width == capture.Width && height == capture.Height) return false;
+            if (!capture.Resize(width, height, randr.MonitorScale())) return false;
 
-            capture.Resize(width, height);
-            SendResize(width, height);
+            cursor.Again();
+            SendResize(capture.Width, capture.Height);
             Interlocked.Decrement(ref _pending);
             return true;
         }

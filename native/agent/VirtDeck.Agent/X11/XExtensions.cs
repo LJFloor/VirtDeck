@@ -17,6 +17,9 @@ namespace VirtDeck.Agent.X11
         public required Extension Test { get; init; }
         public required Extension Randr { get; init; }
 
+        /// <summary>The RANDR minor version the server agreed to: 3 or more has GetScreenResourcesCurrent.</summary>
+        public int RandrMinor { get; init; }
+
         public static XExtensions Query(XConnection x)
         {
             var damage = Find(x, "DAMAGE");
@@ -28,10 +31,12 @@ namespace VirtDeck.Agent.X11
             // minor. RANDR is like DAMAGE. Each is asked for the lowest version that has what we use.
             if (damage.Present) QueryVersion32(x, damage, 1, 1);
             if (fixes.Present) QueryVersion32(x, fixes, 1, 0);   // 1.0 has SelectCursorInput and GetCursorImage
-            if (randr.Present) QueryVersion32(x, randr, 1, 2);
+            // RANDR 1.3 for GetScreenResourcesCurrent, which reads the monitors' configuration without
+            // probing them. The answer is the lower of that and what the server has.
+            int randrMinor = randr.Present ? (int)QueryVersion32(x, randr, 1, 3).U32(12) : 0;
             if (test.Present) TestGetVersion(x, test);
 
-            return new XExtensions { Damage = damage, Fixes = fixes, Test = test, Randr = randr };
+            return new XExtensions { Damage = damage, Fixes = fixes, Test = test, Randr = randr, RandrMinor = randrMinor };
         }
 
         private static Extension Find(XConnection x, string name)
@@ -47,7 +52,7 @@ namespace VirtDeck.Agent.X11
             return new Extension(name, reply.U8(8) != 0, reply.U8(9), reply.U8(10));
         }
 
-        private static void QueryVersion32(XConnection x, Extension extension, uint major, uint minor)
+        private static XReply QueryVersion32(XConnection x, Extension extension, uint major, uint minor)
         {
             Span<byte> request = stackalloc byte[12];
             request[0] = extension.Major;
@@ -55,7 +60,7 @@ namespace VirtDeck.Agent.X11
             BinaryPrimitives.WriteUInt16LittleEndian(request[2..], 3);
             BinaryPrimitives.WriteUInt32LittleEndian(request[4..], major);
             BinaryPrimitives.WriteUInt32LittleEndian(request[8..], minor);
-            x.Request(request);
+            return x.Request(request);
         }
 
         private static void TestGetVersion(XConnection x, Extension extension)

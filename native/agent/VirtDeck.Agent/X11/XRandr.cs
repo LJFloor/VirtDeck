@@ -8,6 +8,11 @@ namespace VirtDeck.Agent.X11
     /// <para><b>Listening</b> is what every display gets: when somebody there changes the mode, the
     /// root is measured again and the viewer is told the new size with a DesktopSize rectangle.</para>
     ///
+    /// <para><b>Scaled monitors.</b> Fractional scaling on X11 (Cinnamon, GNOME on Xorg) draws the
+    /// screen at twice the logical size and gives each monitor a transform that shrinks it, so a
+    /// 1920x1080 monitor at 125% shows a 3072x1728 root. <see cref="MonitorScale"/> says by how much,
+    /// and the capture shrinks the picture the same way before it is compared and sent.</para>
+    ///
     /// <para><b>Resizing</b> happens only with <c>--resizable</c>, which the module passes for a
     /// virtual desktop VirtDeck itself started and for nothing else. Somebody's real monitor is not
     /// ours to resize, and a flag the caller has to pass keeps that true in the agent rather than
@@ -36,7 +41,10 @@ namespace VirtDeck.Agent.X11
     internal sealed class XRandr
     {
         private const ushort ScreenChangeNotifyMask = 1;
+        private const ushort CrtcChangeNotifyMask = 2;
         private const ushort Rotate0 = 1;
+        private const ushort Rotate90 = 2;
+        private const ushort Rotate270 = 8;
 
         /// <summary>The server's own time, which is what a client asks the server to stamp a change with.</summary>
         private const uint CurrentTime = 0;
@@ -50,11 +58,13 @@ namespace VirtDeck.Agent.X11
         private const byte GetScreenSizeRange = 6;
         private const byte SetScreenSize = 7;
         private const byte GetScreenResources = 8;
+        private const byte GetCrtcInfo = 20;
         private const byte CreateMode = 16;
         private const byte DestroyMode = 17;
         private const byte AddOutputMode = 18;
         private const byte DeleteOutputMode = 19;
         private const byte SetCrtcConfig = 21;
+        private const byte GetScreenResourcesCurrent = 25;
 
         /// <summary>A screen this small is a mistake somewhere, not a window somebody made.</summary>
         private const int MinimumSide = 64;
@@ -80,7 +90,9 @@ namespace VirtDeck.Agent.X11
             request[1] = SelectInput;
             BinaryPrimitives.WriteUInt16LittleEndian(request[2..], 3);
             BinaryPrimitives.WriteUInt32LittleEndian(request[4..], x.Setup.Root);
-            BinaryPrimitives.WriteUInt16LittleEndian(request[8..], ScreenChangeNotifyMask);
+            // A CRTC change as well as a screen change, because a monitor's scale can change without
+            // the screen's size doing so.
+            BinaryPrimitives.WriteUInt16LittleEndian(request[8..], ScreenChangeNotifyMask | CrtcChangeNotifyMask);
             x.Send(request);
         }
 
@@ -90,8 +102,10 @@ namespace VirtDeck.Agent.X11
         /// <summary>Called from the connection's reader thread.</summary>
         public void OnEvent(byte[] packet)
         {
-            const byte ScreenChangeNotify = 0;
-            if (_extensions.Randr.Present && (packet[0] & 0x7F) == _extensions.Randr.FirstEvent + ScreenChangeNotify)
+            // ScreenChangeNotify is the extension's first event and RRNotify, which is all a CRTC
+            // change arrives as with only that selected, its second.
+            int code = (packet[0] & 0x7F) - _extensions.Randr.FirstEvent;
+            if (_extensions.Randr.Present && code is 0 or 1)
                 Interlocked.Exchange(ref _changed, 1);
         }
 
@@ -196,6 +210,44 @@ namespace VirtDeck.Agent.X11
             return null;
         }
 
+        /// <summary>
+        /// How many times larger the screen is than what the monitors show of it, across and down:
+        /// (1, 1) when no monitor is scaled down, or when the server cannot say without probing.
+        ///
+        /// <para><b>The smallest factor of any monitor</b>, so that no monitor is shown with fewer
+        /// pixels than it has. It is the CRTC's size on the screen over its mode's size, which is
+        /// what the server itself makes of the transform; a CRTC that fills the screen therefore
+        /// comes out at exactly its mode. Below 1% is rounding in the transform, not a scale.</para>
+        ///
+        /// <para>GetScreenResourcesCurrent, never GetScreenResources: the latter makes Xorg probe
+        /// every output, which is slow and can flicker the monitors, and this runs on every CRTC
+        /// change.</para>
+        /// </summary>
+        public (double X, double Y) MonitorScale()
+        {
+            if (!_extensions.Randr.Present || _extensions.RandrMinor < 3) return (1, 1);
+            try
+            {
+                var screen = Read(GetScreenResourcesCurrent);
+                double across = double.MaxValue, down = double.MaxValue;
+                foreach (var crtc in screen.Crtcs)
+                {
+                    var (width, height, id, rotation) = CrtcInfo(crtc, screen.ConfigTimestamp);
+                    var mode = screen.Modes.Find(m => m.Id == id);
+                    if (id == 0 || mode.Width == 0 || mode.Height == 0 || width == 0 || height == 0) continue;
+                    bool sideways = (rotation & (Rotate90 | Rotate270)) != 0;
+                    across = Math.Min(across, (double)width / (sideways ? mode.Height : mode.Width));
+                    down = Math.Min(down, (double)height / (sideways ? mode.Width : mode.Height));
+                }
+                return (across >= 1.01 && across != double.MaxValue ? across : 1,
+                        down >= 1.01 && down != double.MaxValue ? down : 1);
+            }
+            catch (XProtocolException)
+            {
+                return (1, 1);
+            }
+        }
+
         // ---- The requests -----------------------------------------------------------------------
 
         /// <summary>The screen sizes this server will take, which --selftest prints.</summary>
@@ -211,22 +263,25 @@ namespace VirtDeck.Agent.X11
         }
 
         /// <summary>
-        /// The screen's CRTC, output, modes and timestamps. <b>The first CRTC and output are the
-        /// ones</b>: a display with more than one head is a real monitor, which is never resizable,
-        /// so an Xvfb's single CRTC and single output are the whole case this has to answer.
+        /// The screen's CRTCs, output, modes and timestamps. <b>For a resize, the first CRTC and
+        /// output are the ones</b>: a display with more than one head is a real monitor, which is
+        /// never resizable, so an Xvfb's single CRTC and single output are the whole case that has to
+        /// answer. The two requests' replies are laid out alike.
         /// </summary>
-        private Screen Read()
+        private Screen Read(byte minor = GetScreenResources)
         {
             Span<byte> request = stackalloc byte[8];
             request[0] = _extensions.Randr.Major;
-            request[1] = GetScreenResources;
+            request[1] = minor;
             BinaryPrimitives.WriteUInt16LittleEndian(request[2..], 2);
             BinaryPrimitives.WriteUInt32LittleEndian(request[4..], _x.Setup.Root);
             var reply = _x.Request(request);
 
             int crtcs = reply.U16(16), outputs = reply.U16(18), count = reply.U16(20);
             var extra = reply.Extra.AsSpan(0, reply.ExtraLength);
-            uint crtc = crtcs > 0 && extra.Length >= 4 ? BinaryPrimitives.ReadUInt32LittleEndian(extra) : 0;
+            var all = new uint[Math.Min(crtcs, extra.Length / 4)];
+            for (int i = 0; i < all.Length; i++) all[i] = BinaryPrimitives.ReadUInt32LittleEndian(extra[(i * 4)..]);
+            uint crtc = all.Length > 0 ? all[0] : 0;
             uint output = outputs > 0 && extra.Length >= crtcs * 4 + 4
                 ? BinaryPrimitives.ReadUInt32LittleEndian(extra[(crtcs * 4)..])
                 : 0;
@@ -240,7 +295,20 @@ namespace VirtDeck.Agent.X11
                            BinaryPrimitives.ReadUInt16LittleEndian(extra[(at + 4)..]),
                            BinaryPrimitives.ReadUInt16LittleEndian(extra[(at + 6)..])));
 
-            return new Screen(reply.U32(12), crtc, output, modes);
+            return new Screen(reply.U32(12), crtc, output, modes, all);
+        }
+
+        /// <summary>A CRTC's size on the screen (after its transform), its mode, and its rotation.</summary>
+        private (int Width, int Height, uint Mode, ushort Rotation) CrtcInfo(uint crtc, uint configTimestamp)
+        {
+            Span<byte> request = stackalloc byte[12];
+            request[0] = _extensions.Randr.Major;
+            request[1] = GetCrtcInfo;
+            BinaryPrimitives.WriteUInt16LittleEndian(request[2..], 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(request[4..], crtc);
+            BinaryPrimitives.WriteUInt32LittleEndian(request[8..], configTimestamp);
+            var reply = _x.Request(request);
+            return (reply.U16(16), reply.U16(18), reply.U32(20), reply.U16(24));
         }
 
         /// <summary>
@@ -375,7 +443,7 @@ namespace VirtDeck.Agent.X11
         /// time the configuration was last set, is not kept: a change is stamped with CurrentTime.
         /// </summary>
         private readonly record struct Screen(uint ConfigTimestamp, uint Crtc, uint Output,
-                                              List<(uint Id, int Width, int Height)> Modes)
+                                              List<(uint Id, int Width, int Height)> Modes, uint[] Crtcs)
         {
             /// <summary>A mode of exactly this size that the server already has, or 0.</summary>
             public uint ModeOf(int width, int height) =>

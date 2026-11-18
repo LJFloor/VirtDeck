@@ -15,6 +15,9 @@ namespace VirtDeck.Agent.X11
     /// copied as they come and the alpha becomes RichCursor's one-bit mask. Alpha is premultiplied,
     /// so a half-transparent edge pixel arrives already darkened; against a hard mask that is a
     /// slightly dark fringe, which is what every RichCursor viewer shows.</para>
+    ///
+    /// <para>On a screen its monitors shrink, the cursor is drawn at the screen's scale too, so it is
+    /// shrunk by the same factor as the picture and comes out the size the monitor shows it.</para>
     /// </summary>
     internal sealed class XCursor
     {
@@ -50,12 +53,16 @@ namespace VirtDeck.Agent.X11
         /// <summary>Whether a new shape is waiting, clearing the flag.</summary>
         public bool TakeChanged() => Interlocked.Exchange(ref _changed, 0) != 0;
 
+        /// <summary>The next update carries the shape again, as when the picture's scale changed.</summary>
+        public void Again() => Interlocked.Exchange(ref _changed, 1);
+
         /// <summary>
         /// The current shape, or null when the extension is missing or the cursor has no pixels. The
         /// pixels are the client's own format and the mask is one bit per pixel, rows padded to a
-        /// byte, which is exactly what a RichCursor rectangle carries.
+        /// byte, which is exactly what a RichCursor rectangle carries. <paramref name="shrink"/> is
+        /// the picture's (see <see cref="XCapture.Shrink"/>).
         /// </summary>
-        public Shape? Read()
+        public Shape? Read((double X, double Y) shrink)
         {
             if (!_extensions.Fixes.Present) return null;
 
@@ -73,6 +80,19 @@ namespace VirtDeck.Agent.X11
             if (width <= 0 || height <= 0) return new Shape(0, 0, 0, 0, [], []);
             if ((long)width * height * 4 > reply.ExtraLength) return null;
 
+            var image = reply.Extra;
+            int smallWidth = Math.Max(1, (int)Math.Round(width / shrink.X));
+            int smallHeight = Math.Max(1, (int)Math.Round(height / shrink.Y));
+            if (smallWidth < width || smallHeight < height)
+            {
+                var scale = new Downscale(width, height, smallWidth, smallHeight);
+                image = new byte[smallWidth * smallHeight * 4];
+                scale.Resample(reply.Extra, image, new XCapture.Rect(0, 0, smallWidth, smallHeight));
+                hotX = Math.Min(smallWidth - 1, (int)(hotX * smallWidth / (double)width));
+                hotY = Math.Min(smallHeight - 1, (int)(hotY * smallHeight / (double)height));
+                (width, height) = (smallWidth, smallHeight);
+            }
+
             var pixels = new byte[width * height * 4];
             int maskStride = (width + 7) / 8;
             var mask = new byte[maskStride * height];
@@ -81,10 +101,10 @@ namespace VirtDeck.Agent.X11
                 for (int x = 0; x < width; x++)
                 {
                     int at = (y * width + x) * 4;
-                    pixels[at] = reply.Extra[at];
-                    pixels[at + 1] = reply.Extra[at + 1];
-                    pixels[at + 2] = reply.Extra[at + 2];
-                    if (reply.Extra[at + 3] >= 128)
+                    pixels[at] = image[at];
+                    pixels[at + 1] = image[at + 1];
+                    pixels[at + 2] = image[at + 2];
+                    if (image[at + 3] >= 128)
                         mask[y * maskStride + (x >> 3)] |= (byte)(0x80 >> (x & 7));
                 }
 

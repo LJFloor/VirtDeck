@@ -18,7 +18,7 @@ namespace VirtDeck.Agent
     /// </summary>
     internal static class Program
     {
-        public const string Version = "1.1";
+        public const string Version = "1.2";
 
         private static int Main(string[] args)
         {
@@ -73,9 +73,9 @@ namespace VirtDeck.Agent
                     Console.Error.WriteLine("virtdeck-agent: this X server has no DAMAGE extension, " +
                                             "so the screen is polled instead of being told what changed.");
 
-                var capture = new XCapture(x, extensions);
-                var cursor = new XCursor(x, extensions);
                 var randr = new XRandr(x, extensions) { Resizable = resizable };
+                var capture = new XCapture(x, extensions, randr.MonitorScale());
+                var cursor = new XCursor(x, extensions);
                 keyboard = new XInput(x, extensions);
                 clipboard = new XClipboard(x, extensions);
 
@@ -156,6 +156,10 @@ namespace VirtDeck.Agent
             Console.WriteLine($"server:     {x.Setup.Vendor}");
             Console.WriteLine($"screen:     {x.Setup.Width}x{x.Setup.Height}, depth {x.Setup.RootDepth} " +
                               $"at {x.Setup.BitsPerPixel} bits per pixel, root 0x{x.Setup.Root:x}");
+            var (shrinkX, shrinkY) = capture.Shrink;
+            Console.WriteLine(shrinkX > 1 || shrinkY > 1
+                ? $"shown:      {capture.Width}x{capture.Height}, the monitors shrink the screen {shrinkX:0.###}x{shrinkY:0.###}"
+                : $"shown:      {capture.Width}x{capture.Height}, as it is");
             Console.WriteLine($"keycodes:   {x.Setup.MinKeycode} to {x.Setup.MaxKeycode}");
             foreach (var extension in new[] { extensions.Damage, extensions.Fixes, extensions.Test, extensions.Randr })
                 Console.WriteLine($"{extension.Name,-11} {(extension.Present ? "present" : "ABSENT")}");

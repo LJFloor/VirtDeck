@@ -67,8 +67,9 @@ and everything fatal on stderr.
   writes that one descriptor, which is wrong under sshd's two one-way pipes. The agent reads fd 0
   and writes fd 1 because that is what it was written to do, so the relay, the loopback socket pair
   it needed, and the musl `getnameinfo` refusal underneath it are all gone.
-- **`--selftest`** prints what the agent can see on a display (the server, the geometry, the depth,
-  which extensions are there, the screen sizes RANDR will take, and what a capture costs) and exits. It is the first thing to run on a
+- **`--selftest`** prints what the agent can see on a display (the server, the geometry, the size it
+  is shown at, the depth, which extensions are there, the screen sizes RANDR will take, and what a
+  capture costs) and exits. It is the first thing to run on a
   host that will not show its desktop. `VIRTDECK_AGENT_TRACE=1` puts a timestamped trace of the
   update loop on stderr.
 
@@ -299,6 +300,18 @@ started at 4K.
 - **When nothing has changed, nothing is read.** The loop waits on the damage wakeup, so a connected
   but idle desktop costs neither host nor link. With no DAMAGE extension the agent says so on stderr
   and polls instead.
+- **A screen its monitors shrink is sent at their size.** Fractional scaling on X11 (Cinnamon,
+  GNOME on Xorg) draws the screen at a whole multiple and gives each monitor a RANDR transform that
+  shrinks it: a 1920x1080 monitor at 125% shows a 3072x1728 root. Sending the root would be 2.56
+  times the pixels, and 1:1 would show the desktop at 200% rather than the monitor's 125%. So
+  `XRandr.MonitorScale` takes each CRTC's size on the screen over its mode's (what the server itself
+  makes of the transform, so one monitor filling the screen comes out at exactly its mode), and the
+  smallest factor of any monitor wins, so no monitor is shown with fewer pixels than it has. The
+  root is still what is read and compared; only the tiles that changed are shrunk into the picture
+  that is sent, bilinear at each pixel's centre like the CRTC (`Downscale`, 8 ms for a whole
+  3072x1728 frame), and the pointer and the cursor go through the same factor. It is read with
+  GetScreenResourcesCurrent, which needs RANDR 1.3, because GetScreenResources makes Xorg probe
+  every output, and it is looked at again on every CRTC change as well as every screen change.
 - **The cursor is never in the picture.** A hardware cursor is composited by the display engine, not
   by the X server, so it is not in a GetImage of the root; XFIXES hands over its image and it goes as
   a RichCursor rectangle. That is what makes the one-cursor rule work: the picture has none and the
