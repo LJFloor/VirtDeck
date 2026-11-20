@@ -187,6 +187,7 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
         PullImageButton.Click += async (_, _) => await PullAsync();
         ImportImageButton.Click += async (_, _) => await ImportAsync();
         PruneImagesButton.Click += async (_, _) => await PruneAsync();
+        MenuPullLatestImage.Click += async (_, _) => await PullLatestAsync();
         MenuExportImage.Click += async (_, _) => await ExportAsync();
         MenuTagImage.Click += async (_, _) => await TagAsync();
         MenuRemoveImage.Click += async (_, _) => await RemoveImagesAsync();
@@ -1217,6 +1218,7 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
         // writes one archive. Tag and New container replace or seed exactly one thing, so they do
         // not. A dangling layer can still be exported and removed by id, and can still seed a
         // container, but nothing about it can be tagged from a name it does not have.
+        MenuPullLatestImage.IsEnabled = free && images.Any(r => r.CanPull);
         MenuExportImage.IsEnabled = free && images.Count > 0;
         MenuTagImage.IsEnabled = free && images.Count == 1;
         MenuRemoveImage.IsEnabled = free && images.Count > 0;
@@ -1603,6 +1605,63 @@ public partial class ContainersModule : UserControl, IModule, IModuleNavigator
         await RefreshImagesAsync();
         // After the refresh, or the row count would put itself back over this.
         if (pulled) SetStatus($"Pulled {reference}.");
+    }
+
+    /// <summary>
+    /// Pulls each selected row's own <c>repository:tag</c> again, so a tag the registry has moved
+    /// comes down and the copy it replaces is left dangling. Never <c>:latest</c> in place of the
+    /// row's tag: <c>nginx:1.27</c> gets the newest 1.27, not a different line.
+    ///
+    /// <para>Runs on the rows that have a tag and skips the rest, the bulk rule. One refusal does not
+    /// stop the others, because the references are unrelated: a locally built image in the selection
+    /// has no registry to answer, and that says nothing about the rest. The refusals are reported
+    /// together at the end.</para>
+    /// </summary>
+    private async Task PullLatestAsync()
+    {
+        if (_docker is null || !Docker.DockerAvailable || _busy) return;
+        var references = SelectedImages.Where(r => r.CanPull).Select(r => r.Reference)
+                                       .Distinct(StringComparer.Ordinal).ToList();
+        if (references.Count == 0) return;
+
+        int updated = 0, current = 0;
+        var errors = new List<string>();
+
+        var ok = await RunOpAsync("Pull latest", "Pulling", -1, async ct =>
+        {
+            var n = 0;
+            foreach (var reference in references)
+            {
+                n++;
+                var label = references.Count == 1 ? "Pulling" : $"Pulling ({n}/{references.Count})";
+                // docker's own last line says which it was, and it is the only thing that does:
+                // the exit status is 0 either way.
+                var newer = false;
+                try
+                {
+                    await Docker.PullAsync(reference, line =>
+                    {
+                        if (line.StartsWith("Status: Downloaded newer image", StringComparison.Ordinal)) newer = true;
+                        ReportLine(label, line);
+                    }, ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    errors.Add($"{reference}: {ex.Message}");
+                    continue;
+                }
+                if (newer) updated++; else current++;
+            }
+            if (errors.Count > 0) throw new InvalidOperationException(string.Join("\n", errors));
+        });
+
+        await RefreshImagesAsync();
+        // After the refresh, or the row count would put itself back over this. Only on a clean run:
+        // a cancel or a refusal has already said what happened.
+        if (!ok) return;
+        SetStatus(references.Count == 1
+            ? (updated == 1 ? $"Pulled a newer {references[0]}." : $"{references[0]} is up to date.")
+            : $"{updated} updated, {current} already up to date.");
     }
 
     /// <summary>

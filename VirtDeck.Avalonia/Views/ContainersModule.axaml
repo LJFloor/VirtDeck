@@ -250,6 +250,7 @@
                 <ContextMenu Name="ImageMenu">
                   <MenuItem Name="MenuNewFromImage" Header="New container" />
                   <Separator />
+                  <MenuItem Name="MenuPullLatestImage" Header="Pull latest" />
                   <MenuItem Name="MenuExportImage" Header="Export" />
                   <MenuItem Name="MenuTagImage" Header="Tag" />
                   <Separator />

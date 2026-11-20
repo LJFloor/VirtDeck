@@ -103,6 +103,13 @@ public sealed class ImageRow : INotifyPropertyChanged
     public double RowOpacity => IsDangling ? 0.6 : 1.0;
 
     /// <summary>
+    /// Whether there is a tag to fetch again. A dangling layer has no name to pull, and a row pulled
+    /// by digest lists its tag as <c>&lt;none&gt;</c>: a digest names fixed bytes, so pulling it
+    /// again could never bring anything newer.
+    /// </summary>
+    public bool CanPull => !IsDangling && Tag != None;
+
+    /// <summary>
     /// What a command addresses this row by: <c>repository:tag</c> where it has one, else the id.
     /// Removing a reference that is one of several an image carries only removes that tag, which is
     /// docker's own behaviour and what the confirmation says out loud.
